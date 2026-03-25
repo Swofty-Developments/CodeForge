@@ -1,4 +1,6 @@
-use codeforge_session::Provider;
+use std::collections::HashMap;
+
+use codeforge_session::{Provider, SessionId};
 use uuid::Uuid;
 
 pub type ThreadId = Uuid;
@@ -50,6 +52,23 @@ impl std::fmt::Display for ApprovalMode {
     }
 }
 
+/// A pending approval request from an agent
+#[derive(Debug, Clone)]
+pub struct PendingApproval {
+    pub session_id: SessionId,
+    pub request_id: String,
+    pub description: String,
+}
+
+/// Status of a session associated with a thread
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionState {
+    Starting,
+    Ready,
+    Generating,
+    Error,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub projects: Vec<Project>,
@@ -60,6 +79,17 @@ pub struct AppState {
     pub composer_text: String,
     pub selected_provider: Provider,
     pub approval_mode: ApprovalMode,
+    // Session tracking
+    pub thread_sessions: HashMap<ThreadId, SessionId>,
+    pub session_states: HashMap<SessionId, SessionState>,
+    pub pending_approvals: Vec<PendingApproval>,
+    /// Tracks whether we have a streaming assistant message being built
+    pub streaming_threads: HashMap<ThreadId, Uuid>,
+    // Settings: binary paths
+    pub claude_path: String,
+    pub codex_path: String,
+    // DB loaded flag
+    pub db_loaded: bool,
 }
 
 impl Default for AppState {
@@ -73,6 +103,13 @@ impl Default for AppState {
             composer_text: String::new(),
             selected_provider: Provider::ClaudeCode,
             approval_mode: ApprovalMode::Supervised,
+            thread_sessions: HashMap::new(),
+            session_states: HashMap::new(),
+            pending_approvals: Vec::new(),
+            streaming_threads: HashMap::new(),
+            claude_path: "claude".to_string(),
+            codex_path: "codex".to_string(),
+            db_loaded: false,
         }
     }
 }
@@ -99,5 +136,46 @@ impl AppState {
             .iter()
             .flat_map(|p| &p.threads)
             .find(|t| t.id == id)
+    }
+
+    pub fn find_thread_mut(&mut self, id: ThreadId) -> Option<&mut Thread> {
+        self.projects
+            .iter_mut()
+            .flat_map(|p| &mut p.threads)
+            .find(|t| t.id == id)
+    }
+
+    /// Check if a thread currently has a generating (streaming) session
+    pub fn is_thread_generating(&self, thread_id: ThreadId) -> bool {
+        if let Some(session_id) = self.thread_sessions.get(&thread_id) {
+            self.session_states.get(session_id) == Some(&SessionState::Generating)
+        } else {
+            false
+        }
+    }
+
+    /// Check if a thread has an active session (any state)
+    pub fn has_active_session(&self, thread_id: ThreadId) -> bool {
+        self.thread_sessions.contains_key(&thread_id)
+    }
+
+    /// Get session state for a thread
+    pub fn thread_session_state(&self, thread_id: ThreadId) -> Option<SessionState> {
+        let session_id = self.thread_sessions.get(&thread_id)?;
+        self.session_states.get(session_id).copied()
+    }
+
+    /// Get pending approvals for the active thread
+    pub fn active_thread_approvals(&self) -> Vec<&PendingApproval> {
+        let Some(thread_id) = self.active_tab else {
+            return Vec::new();
+        };
+        let Some(session_id) = self.thread_sessions.get(&thread_id) else {
+            return Vec::new();
+        };
+        self.pending_approvals
+            .iter()
+            .filter(|a| &a.session_id == session_id)
+            .collect()
     }
 }

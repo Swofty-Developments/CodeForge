@@ -1,8 +1,8 @@
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Element, Length};
 
 use crate::message::{Message, SettingsMessage};
-use crate::state::AppState;
+use crate::state::{AppState, ApprovalMode};
 use crate::theme;
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
@@ -20,11 +20,59 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     ]
     .spacing(4);
 
+    // Approval mode toggle
+    let supervised_btn = button(
+        text("Supervised")
+            .size(13)
+            .color(if state.approval_mode == ApprovalMode::Supervised {
+                theme::PRIMARY
+            } else {
+                theme::SUBTEXT
+            }),
+    )
+    .on_press(Message::Settings(SettingsMessage::ApprovalModeChanged(
+        ApprovalMode::Supervised,
+    )))
+    .padding([6, 12]);
+
+    let auto_btn = button(
+        text("Auto-approve")
+            .size(13)
+            .color(if state.approval_mode == ApprovalMode::AutoApprove {
+                theme::PRIMARY
+            } else {
+                theme::SUBTEXT
+            }),
+    )
+    .on_press(Message::Settings(SettingsMessage::ApprovalModeChanged(
+        ApprovalMode::AutoApprove,
+    )))
+    .padding([6, 12]);
+
     let approval_section = column![
         text("Approval Mode").size(14).color(theme::TEXT),
-        text(format!("{}", state.approval_mode))
+        row![supervised_btn, auto_btn].spacing(8),
+    ]
+    .spacing(4);
+
+    // Provider path configuration
+    let claude_path_section = column![
+        text("Claude Binary Path").size(14).color(theme::TEXT),
+        text_input("claude", &state.claude_path)
+            .on_input(|s| Message::Settings(SettingsMessage::ClaudePathChanged(s)))
+            .padding(8)
             .size(13)
-            .color(theme::SUBTEXT),
+            .width(Length::Fill),
+    ]
+    .spacing(4);
+
+    let codex_path_section = column![
+        text("Codex Binary Path").size(14).color(theme::TEXT),
+        text_input("codex", &state.codex_path)
+            .on_input(|s| Message::Settings(SettingsMessage::CodexPathChanged(s)))
+            .padding(8)
+            .size(13)
+            .width(Length::Fill),
     ]
     .spacing(4);
 
@@ -33,6 +81,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         close_btn,
         provider_section,
         approval_section,
+        claude_path_section,
+        codex_path_section,
     ]
     .spacing(16)
     .padding(24)

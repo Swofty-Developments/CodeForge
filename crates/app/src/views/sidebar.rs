@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, scrollable, text, Column};
+use iced::widget::{button, column, container, row, scrollable, text, Column};
 use iced::{Element, Length};
 
 use crate::message::{Message, SidebarMessage};
@@ -30,14 +30,41 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                 ];
                 for thread in &project.threads {
                     let is_active = state.active_tab == Some(thread.id);
-                    let thread_btn = button(
-                        text(&thread.title)
-                            .size(14)
-                            .color(if is_active { theme::PRIMARY } else { theme::TEXT }),
-                    )
-                    .on_press(Message::Sidebar(SidebarMessage::SelectThread(thread.id)))
-                    .padding([6, 12])
-                    .width(Length::Fill);
+                    let has_session = state.has_active_session(thread.id);
+
+                    // Build thread label with optional session indicator
+                    let label_text = if has_session {
+                        let session_state = state.thread_session_state(thread.id);
+                        let dot_color = match session_state {
+                            Some(crate::state::SessionState::Ready) => theme::GREEN,
+                            Some(crate::state::SessionState::Generating) => theme::PEACH,
+                            Some(crate::state::SessionState::Starting) => theme::PEACH,
+                            Some(crate::state::SessionState::Error) => theme::RED,
+                            None => theme::SUBTEXT,
+                        };
+                        row![
+                            text("\u{25CF} ").size(10).color(dot_color),
+                            text(&thread.title)
+                                .size(14)
+                                .color(if is_active { theme::PRIMARY } else { theme::TEXT }),
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center)
+                    } else {
+                        row![
+                            text("  ").size(10),
+                            text(&thread.title)
+                                .size(14)
+                                .color(if is_active { theme::PRIMARY } else { theme::TEXT }),
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center)
+                    };
+
+                    let thread_btn = button(label_text)
+                        .on_press(Message::Sidebar(SidebarMessage::SelectThread(thread.id)))
+                        .padding([6, 12])
+                        .width(Length::Fill);
                     elements.push(thread_btn.into());
                 }
                 elements
