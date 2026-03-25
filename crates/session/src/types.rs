@@ -1,0 +1,71 @@
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::{Provider, SessionId};
+
+/// Current status of an agent session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionStatus {
+    Connecting,
+    Ready,
+    Running,
+    Interrupted,
+    Stopped,
+}
+
+/// How command approvals are handled in a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    /// Every command execution requires explicit approval.
+    Supervised,
+    /// Commands are automatically approved.
+    AutoApprove,
+}
+
+/// Events emitted by an agent subprocess.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentEvent {
+    /// Incremental text output from the agent.
+    ContentDelta { text: String },
+    /// A new turn has started.
+    TurnStarted { turn_id: String },
+    /// A turn completed successfully.
+    TurnCompleted { turn_id: String },
+    /// A turn was aborted.
+    TurnAborted { reason: String },
+    /// The agent is requesting approval to execute a command.
+    ApprovalRequired {
+        request_id: String,
+        description: String,
+    },
+    /// The session is ready to accept input.
+    SessionReady,
+    /// An error occurred in the session.
+    SessionError { message: String },
+}
+
+/// Metadata for an active session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: SessionId,
+    pub provider: Provider,
+    pub status: SessionStatus,
+    /// PID of the child process, if available.
+    pub pid: Option<u32>,
+    pub approval_mode: ApprovalMode,
+}
+
+impl Session {
+    pub fn new(provider: Provider, approval_mode: ApprovalMode) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            provider,
+            status: SessionStatus::Connecting,
+            pid: None,
+            approval_mode,
+        }
+    }
+}
