@@ -13,15 +13,26 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
-# Ralph loop state
-.ralph/logs/
-.ralph/status.json
-.ralph/progress.json
+# Temporary files
+*.tmp
+.temp/
+
+# Logs
+*.log
+
+# Ralph generated files
 .ralph/.call_count
 .ralph/.last_reset
 .ralph/.exit_signals
-.ralph/.response_analysis
-.ralph/.circuit_breaker_state
-.ralph/.claude_session_id
+.ralph/status.json
 .ralph/.ralph_session
 .ralph/.ralph_session_history
+.ralph/.claude_session_id
+.ralph/.response_analysis
+.ralph/.circuit_breaker_state
+.ralph/.circuit_breaker_history
+.ralph/logs/*
+!.ralph/logs/.gitkeep
+.ralph/docs/generated/*
+!.ralph/docs/generated/.gitkeep
+.ralph_backup_*
