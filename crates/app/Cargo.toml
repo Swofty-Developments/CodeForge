@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-iced = { version = "0.14", features = ["tokio"] }
+iced = { version = "0.14", features = ["tokio", "tiny-skia"] }
 codeforge-session = { path = "../session" }
 codeforge-persistence = { path = "../persistence" }
 tracing = { workspace = true }
