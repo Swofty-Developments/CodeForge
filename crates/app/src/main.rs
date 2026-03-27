@@ -12,7 +12,7 @@ use iced::{Element, Length, Subscription, Theme};
 use uuid::Uuid;
 
 fn theme_fn(_: &App) -> Theme {
-    Theme::CatppuccinMocha
+    Theme::KanagawaDragon
 }
 
 use codeforge_persistence::Database;

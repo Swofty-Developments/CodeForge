@@ -1,5 +1,5 @@
-use iced::widget::{button, container, row, text, Row};
-use iced::{Element, Length};
+use iced::widget::{button, container, row, text, Row, Space};
+use iced::{Border, Element, Length};
 
 use crate::message::{Message, TabMessage};
 use crate::state::AppState;
@@ -7,7 +7,7 @@ use crate::theme;
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
     if state.open_tabs.is_empty() {
-        return container(text("")).height(0).into();
+        return Space::new().height(0).into();
     }
 
     let tabs: Vec<Element<'_, Message>> = state
@@ -18,46 +18,60 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             let is_active = state.active_tab == Some(tab_id);
 
             let label = text(&thread.title)
-                .size(13)
-                .color(if is_active { theme::TEXT } else { theme::SUBTEXT });
+                .size(12)
+                .color(if is_active {
+                    theme::TEXT
+                } else {
+                    theme::TEXT_SECONDARY
+                });
 
-            let close = button(text("x").size(11).color(theme::SUBTEXT))
+            let close = button(text("\u{00D7}").size(14).color(theme::TEXT_TERTIARY))
                 .on_press(Message::Tab(TabMessage::Close(tab_id)))
-                .padding([2, 6]);
+                .padding([0, 4])
+                .style(|_theme, _status| button::Style {
+                    background: None,
+                    text_color: theme::TEXT_TERTIARY,
+                    ..Default::default()
+                });
 
-            let tab_content = row![label, close].spacing(8).align_y(iced::Alignment::Center);
+            let tab_content = row![label, close]
+                .spacing(6)
+                .align_y(iced::Alignment::Center);
 
             let tab = button(tab_content)
                 .on_press(Message::Tab(TabMessage::Select(tab_id)))
                 .padding([6, 12])
-                .style(move |_theme, _status| {
-                    button::Style {
-                        background: Some(iced::Background::Color(if is_active {
-                            theme::BG_BASE
+                .style(move |_theme, _status| button::Style {
+                    background: if is_active {
+                        Some(iced::Background::Color(theme::BG_BASE))
+                    } else {
+                        None
+                    },
+                    text_color: theme::TEXT,
+                    border: Border {
+                        color: if is_active {
+                            theme::BORDER_STRONG
                         } else {
-                            theme::BG_SURFACE
-                        })),
-                        text_color: theme::TEXT,
-                        border: iced::Border {
-                            color: if is_active { theme::PRIMARY } else { theme::BORDER },
-                            width: if is_active { 0.0 } else { 0.0 },
-                            radius: 0.0.into(),
+                            iced::Color::TRANSPARENT
                         },
-                        ..Default::default()
-                    }
+                        width: if is_active { 1.0 } else { 0.0 },
+                        radius: theme::RADIUS_SM.into(),
+                    },
+                    ..Default::default()
                 });
 
             Some(tab.into())
         })
         .collect();
 
-    let tab_bar = Row::from_vec(tabs).spacing(1);
+    let tab_bar = Row::from_vec(tabs).spacing(1).padding([0, 8]);
 
     container(tab_bar)
         .width(Length::Fill)
+        .padding([6, 0])
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(theme::BG_SURFACE)),
-            border: iced::Border {
+            background: Some(iced::Background::Color(theme::BG_MUTED)),
+            border: Border {
                 color: theme::BORDER,
                 width: 1.0,
                 radius: 0.0.into(),

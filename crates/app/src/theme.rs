@@ -1,14 +1,52 @@
 use iced::Color;
 
-// Catppuccin Mocha-inspired dark IDE palette
-pub const BG_BASE: Color = Color::from_rgb(0.118, 0.118, 0.180); // #1e1e2e
-pub const BG_SURFACE: Color = Color::from_rgb(0.192, 0.196, 0.267); // #313244
-pub const BG_OVERLAY: Color = Color::from_rgb(0.271, 0.278, 0.353); // #45475a
-pub const TEXT: Color = Color::from_rgb(0.804, 0.839, 0.957); // #cdd6f4
-pub const SUBTEXT: Color = Color::from_rgb(0.651, 0.678, 0.784); // #a6adc8
-pub const PRIMARY: Color = Color::from_rgb(0.537, 0.706, 0.980); // #89b4fa
-pub const GREEN: Color = Color::from_rgb(0.651, 0.890, 0.631); // #a6e3a1
-pub const RED: Color = Color::from_rgb(0.953, 0.545, 0.659); // #f38ba8
-pub const PEACH: Color = Color::from_rgb(0.980, 0.702, 0.529); // #fab387
-pub const BORDER: Color = Color::from_rgb(0.271, 0.278, 0.353); // #45475a
-pub const SURFACE_HOVER: Color = Color::from_rgb(0.231, 0.235, 0.314); // #3b3d50
+// t3code-inspired dark palette
+// Near-black background with subtle warm undertone
+pub const BG_BASE: Color = Color::from_rgb(0.075, 0.075, 0.085); // ~#131316
+pub const BG_CARD: Color = Color::from_rgb(0.09, 0.09, 0.10); // ~#171719 — cards, composer
+pub const BG_SURFACE: Color = Color::from_rgb(0.105, 0.105, 0.115); // ~#1b1b1e — sidebar
+pub const BG_ACCENT: Color = Color::from_rgb(0.14, 0.14, 0.155); // ~#242428 — hover, active items
+pub const BG_MUTED: Color = Color::from_rgb(0.12, 0.12, 0.13); // ~#1e1e21 — subtle bg tint
+pub const BG_USER_BUBBLE: Color = Color::from_rgb(0.13, 0.13, 0.15); // ~#212126 — user message bg
+
+// Text hierarchy
+pub const TEXT: Color = Color::from_rgb(0.92, 0.92, 0.94); // #ebebf0 — primary text
+pub const TEXT_SECONDARY: Color = Color::from_rgb(0.55, 0.55, 0.60); // #8c8c99 — muted/secondary
+pub const TEXT_TERTIARY: Color = Color::from_rgb(0.38, 0.38, 0.42); // #61616b — faint labels
+
+// Accent colors
+pub const PRIMARY: Color = Color::from_rgb(0.40, 0.50, 0.95); // ~#6680f2 — indigo/blue primary
+pub const PRIMARY_MUTED: Color = Color::from_rgb(0.35, 0.43, 0.82); // dimmer primary for subtle use
+
+// Semantic
+pub const GREEN: Color = Color::from_rgb(0.35, 0.78, 0.55); // #59c78c — success/emerald
+pub const RED: Color = Color::from_rgb(0.90, 0.35, 0.38); // #e65961 — destructive
+pub const AMBER: Color = Color::from_rgb(0.90, 0.72, 0.30); // #e6b84d — warning/pending
+pub const SKY: Color = Color::from_rgb(0.40, 0.72, 0.88); // #66b8e0 — info/working
+
+// Borders — very subtle, like t3code's 6-8% white overlay
+pub const BORDER: Color = Color {
+    r: 1.0,
+    g: 1.0,
+    b: 1.0,
+    a: 0.07,
+};
+pub const BORDER_STRONG: Color = Color {
+    r: 1.0,
+    g: 1.0,
+    b: 1.0,
+    a: 0.12,
+};
+pub const BORDER_FOCUS: Color = Color {
+    r: 0.40,
+    g: 0.50,
+    b: 0.95,
+    a: 0.45,
+};
+
+// Radii (as f32 for iced Border)
+pub const RADIUS_SM: f32 = 6.0;
+pub const RADIUS_MD: f32 = 10.0;
+pub const RADIUS_LG: f32 = 14.0;
+pub const RADIUS_XL: f32 = 20.0;
+pub const RADIUS_PILL: f32 = 100.0;
