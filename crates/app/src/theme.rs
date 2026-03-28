@@ -44,6 +44,30 @@ pub const BORDER_FOCUS: Color = Color {
     a: 0.45,
 };
 
+// Thread color palette
+pub const THREAD_COLORS: &[(&str, Color)] = &[
+    ("#e65961", RED),
+    ("#e6b84d", AMBER),
+    ("#59c78c", GREEN),
+    ("#66b8e0", SKY),
+    ("#6680f2", PRIMARY),
+    ("#c084fc", Color::from_rgb(0.75, 0.52, 0.99)), // purple
+    ("#f472b6", Color::from_rgb(0.96, 0.45, 0.71)), // pink
+    ("#fb923c", Color::from_rgb(0.98, 0.57, 0.24)), // orange
+];
+
+/// Parse a hex color string like "#e65961" into an iced Color
+pub fn hex_to_color(hex: &str) -> Option<Color> {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(Color::from_rgb8(r, g, b))
+}
+
 // Radii (as f32 for iced Border)
 pub const RADIUS_SM: f32 = 6.0;
 pub const RADIUS_MD: f32 = 10.0;

@@ -63,11 +63,12 @@ pub fn delete_project(conn: &Connection, id: Uuid) -> anyhow::Result<()> {
 
 pub fn insert_thread(conn: &Connection, thread: &Thread) -> anyhow::Result<()> {
     conn.execute(
-        "INSERT INTO threads (id, project_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO threads (id, project_id, title, color, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             thread.id.to_string(),
             thread.project_id.to_string(),
             thread.title,
+            thread.color,
             thread.created_at.to_rfc3339(),
             thread.updated_at.to_rfc3339(),
         ],
@@ -77,15 +78,16 @@ pub fn insert_thread(conn: &Connection, thread: &Thread) -> anyhow::Result<()> {
 
 pub fn get_threads_by_project(conn: &Connection, project_id: Uuid) -> anyhow::Result<Vec<Thread>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, title, created_at, updated_at FROM threads WHERE project_id = ?1 ORDER BY updated_at DESC",
+        "SELECT id, project_id, title, color, created_at, updated_at FROM threads WHERE project_id = ?1 ORDER BY updated_at DESC",
     )?;
     let rows = stmt.query_map(params![project_id.to_string()], |row| {
         Ok(ThreadRow {
             id: row.get(0)?,
             project_id: row.get(1)?,
             title: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
+            color: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
         })
     })?;
     rows.map(|r| r.map_err(Into::into).and_then(|r| r.into_thread()))
@@ -94,15 +96,16 @@ pub fn get_threads_by_project(conn: &Connection, project_id: Uuid) -> anyhow::Re
 
 pub fn get_thread_by_id(conn: &Connection, id: Uuid) -> anyhow::Result<Option<Thread>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, title, created_at, updated_at FROM threads WHERE id = ?1",
+        "SELECT id, project_id, title, color, created_at, updated_at FROM threads WHERE id = ?1",
     )?;
     let mut rows = stmt.query_map(params![id.to_string()], |row| {
         Ok(ThreadRow {
             id: row.get(0)?,
             project_id: row.get(1)?,
             title: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
+            color: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
         })
     })?;
     match rows.next() {
@@ -116,6 +119,19 @@ pub fn update_thread_title(conn: &Connection, id: Uuid, title: &str) -> anyhow::
     conn.execute(
         "UPDATE threads SET title = ?1, updated_at = ?2 WHERE id = ?3",
         params![title, now, id.to_string()],
+    )?;
+    Ok(())
+}
+
+pub fn update_thread_color(
+    conn: &Connection,
+    id: Uuid,
+    color: Option<&str>,
+) -> anyhow::Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE threads SET color = ?1, updated_at = ?2 WHERE id = ?3",
+        params![color, now, id.to_string()],
     )?;
     Ok(())
 }
@@ -278,6 +294,7 @@ struct ThreadRow {
     id: String,
     project_id: String,
     title: String,
+    color: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -288,6 +305,7 @@ impl ThreadRow {
             id: Uuid::parse_str(&self.id)?,
             project_id: Uuid::parse_str(&self.project_id)?,
             title: self.title,
+            color: self.color,
             created_at: DateTime::parse_from_rfc3339(&self.created_at)?.with_timezone(&Utc),
             updated_at: DateTime::parse_from_rfc3339(&self.updated_at)?.with_timezone(&Utc),
         })

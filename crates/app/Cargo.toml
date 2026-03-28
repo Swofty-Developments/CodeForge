@@ -14,3 +14,4 @@ anyhow = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 futures = "0.3"
+rfd = "0.15"

@@ -43,5 +43,17 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             value TEXT
         );
         ",
-    )
+    )?;
+
+    // Add color column to threads if missing
+    let has_color: bool = conn
+        .prepare("PRAGMA table_info(threads)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .any(|col| col.as_deref() == Ok("color"));
+
+    if !has_color {
+        conn.execute_batch("ALTER TABLE threads ADD COLUMN color TEXT;")?;
+    }
+
+    Ok(())
 }

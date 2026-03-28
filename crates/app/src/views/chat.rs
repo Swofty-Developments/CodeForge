@@ -32,7 +32,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             column![
                 text("New conversation").size(18).color(theme::TEXT_SECONDARY),
                 Space::new().height(4),
-                text(format!("Using {}", thread.provider))
+                text(format!("Using {}", state.selected_provider))
                     .size(12)
                     .color(theme::TEXT_TERTIARY),
             ]

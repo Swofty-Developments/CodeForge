@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/nicegui/templates/tauri.conf.json",
+  "productName": "CodeForge",
+  "identifier": "com.codeforge.app",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../frontend/dist",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "CodeForge",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "resizable": true,
+        "minWidth": 800,
+        "minHeight": 500
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"]
+  }
+}

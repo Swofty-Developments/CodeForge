@@ -11,6 +11,8 @@ pub struct Project {
     pub id: ProjectId,
     pub name: String,
     pub path: String,
+    pub color: Option<String>,
+    pub collapsed: bool,
     pub threads: Vec<Thread>,
 }
 
@@ -18,9 +20,22 @@ pub struct Project {
 pub struct Thread {
     pub id: ThreadId,
     pub title: String,
+    pub color: Option<String>,
     pub provider: Provider,
     pub messages: Vec<ChatMessage>,
     pub is_active: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum ContextMenu {
+    Thread(ThreadId),
+    Project(ProjectId),
+}
+
+#[derive(Debug, Clone)]
+pub enum PendingPopup {
+    ConfirmNewGroup { directory: String },
+    ConfirmDeleteGroup { project_id: ProjectId },
 }
 
 #[derive(Debug, Clone)]
@@ -69,12 +84,18 @@ pub enum SessionState {
     Error,
 }
 
+pub const SIDEBAR_MIN_WIDTH: f32 = 160.0;
+pub const SIDEBAR_MAX_WIDTH: f32 = 500.0;
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 240.0;
+
 #[derive(Debug)]
 pub struct AppState {
     pub projects: Vec<Project>,
     pub open_tabs: Vec<ThreadId>,
     pub active_tab: Option<ThreadId>,
     pub sidebar_visible: bool,
+    pub sidebar_width: f32,
+    pub sidebar_dragging: bool,
     pub settings_open: bool,
     pub composer_text: String,
     pub selected_provider: Provider,
@@ -90,6 +111,13 @@ pub struct AppState {
     pub codex_path: String,
     // DB loaded flag
     pub db_loaded: bool,
+    pub renaming_thread: Option<(ThreadId, String)>,
+    pub renaming_project: Option<(ProjectId, String)>,
+    pub context_menu: Option<ContextMenu>,
+    pub pending_popup: Option<PendingPopup>,
+    pub provider_picker_open: bool,
+    pub dragging_thread: Option<ThreadId>,
+    pub dragging_tab: Option<ThreadId>,
 }
 
 impl Default for AppState {
@@ -99,6 +127,8 @@ impl Default for AppState {
             open_tabs: Vec::new(),
             active_tab: None,
             sidebar_visible: true,
+            sidebar_width: SIDEBAR_DEFAULT_WIDTH,
+            sidebar_dragging: false,
             settings_open: false,
             composer_text: String::new(),
             selected_provider: Provider::ClaudeCode,
@@ -110,6 +140,13 @@ impl Default for AppState {
             claude_path: "claude".to_string(),
             codex_path: "codex".to_string(),
             db_loaded: false,
+            renaming_thread: None,
+            renaming_project: None,
+            context_menu: None,
+            pending_popup: None,
+            provider_picker_open: false,
+            dragging_thread: None,
+            dragging_tab: None,
         }
     }
 }
@@ -166,6 +203,18 @@ impl AppState {
     }
 
     /// Get pending approvals for the active thread
+    pub fn is_uncategorized(&self, thread_id: ThreadId) -> bool {
+        self.projects
+            .iter()
+            .find(|p| p.threads.iter().any(|t| t.id == thread_id))
+            .map(|p| p.path == ".")
+            .unwrap_or(true)
+    }
+
+    pub fn uncategorized_project_id(&self) -> Option<ProjectId> {
+        self.projects.iter().find(|p| p.path == ".").map(|p| p.id)
+    }
+
     pub fn active_thread_approvals(&self) -> Vec<&PendingApproval> {
         let Some(thread_id) = self.active_tab else {
             return Vec::new();

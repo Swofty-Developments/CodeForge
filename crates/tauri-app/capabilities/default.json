@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for CodeForge",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "shell:default",
+    "core:event:default"
+  ]
+}

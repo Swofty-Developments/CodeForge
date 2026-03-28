@@ -15,6 +15,7 @@ pub struct Thread {
     pub id: Uuid,
     pub project_id: Uuid,
     pub title: String,
+    pub color: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -1,204 +1,218 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
-use tracing::{debug, error, warn};
+use tracing::debug;
 
 use crate::types::AgentEvent;
 
-/// Adapter for the Claude Code CLI subprocess.
-///
-/// Spawns `claude` with `--output-format stream-json --verbose` and reads
-/// streaming JSON events from stdout line by line.
 pub struct ClaudeSession {
     child: Child,
-    stdin_tx: mpsc::UnboundedSender<String>,
+    session_id: Arc<Mutex<Option<String>>>,
+    cwd: std::path::PathBuf,
+    event_tx: mpsc::UnboundedSender<AgentEvent>,
 }
 
 impl ClaudeSession {
-    /// Spawn a new Claude Code subprocess.
-    ///
-    /// Returns the session handle and a receiver for agent events.
     pub async fn start(
         cwd: &Path,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
-        let mut child = Command::new("claude")
-            .arg("--output-format")
-            .arg("stream-json")
-            .arg("--verbose")
-            .current_dir(cwd)
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+
+        let _ = event_tx.send(AgentEvent::SessionReady);
+
+        Ok((
+            Self {
+                child: Command::new("true").spawn()?,
+                session_id: Arc::new(Mutex::new(None)),
+                cwd: cwd.to_path_buf(),
+                event_tx,
+            },
+            event_rx,
+        ))
+    }
+
+    pub fn send_message(&mut self, text: &str) -> Result<()> {
+        let mut args = vec![
+            "-p".to_string(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+        ];
+
+        if let Some(ref sid) = *self.session_id.lock().unwrap() {
+            args.push("--resume".to_string());
+            args.push(sid.clone());
+        }
+
+        let mut child = std::process::Command::new("claude")
+            .args(&args)
+            .current_dir(&self.cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
+            .stderr(std::process::Stdio::null())
             .spawn()
             .context("Failed to spawn claude CLI")?;
+
+        // Write prompt to stdin then close it
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(text.as_bytes());
+            let _ = stdin.write_all(b"\n");
+            // stdin drops here, closing the pipe
+        }
 
         let stdout = child
             .stdout
             .take()
             .context("Failed to capture claude stdout")?;
 
-        let stderr = child
-            .stderr
-            .take()
-            .context("Failed to capture claude stderr")?;
+        let tx = self.event_tx.clone();
+        let sid_ref = self.session_id.clone();
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-
-        // Stdout reader task — parses streaming JSON events.
-        let tx = event_tx.clone();
-        tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+        // Read stdout in a background thread (sync child process)
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stdout);
+            for line in reader.lines() {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(_) => break,
+                };
                 if line.trim().is_empty() {
                     continue;
                 }
                 match serde_json::from_str::<Value>(&line) {
                     Ok(obj) => {
-                        if let Some(event) = parse_claude_event(&obj) {
+                        // Capture session_id from system init or result
+                        if let Some(sid) = obj.get("session_id").and_then(|s| s.as_str()) {
+                            let mut lock = sid_ref.lock().unwrap();
+                            if lock.is_none() {
+                                *lock = Some(sid.to_string());
+                            }
+                        }
+                        for event in parse_claude_event(&obj) {
                             if tx.send(event).is_err() {
-                                break;
+                                return;
                             }
                         }
                     }
                     Err(e) => {
-                        debug!("Non-JSON line from claude stdout: {e}");
+                        debug!("Non-JSON line from claude: {e}");
                     }
                 }
             }
-            debug!("Claude stdout reader task finished");
+            let _ = child.wait();
         });
 
-        // Stderr reader task — log warnings.
-        tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if !line.trim().is_empty() {
-                    warn!("claude stderr: {line}");
-                }
-            }
-        });
-
-        // Stdin writer task — receives strings and writes them to the child's
-        // stdin so callers don't need to hold a mutable reference.
-        let stdin = child
-            .stdin
-            .take()
-            .context("Failed to capture claude stdin")?;
-        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
-        tokio::spawn(async move {
-            let mut stdin = stdin;
-            while let Some(msg) = stdin_rx.recv().await {
-                if let Err(e) = stdin.write_all(msg.as_bytes()).await {
-                    error!("Failed to write to claude stdin: {e}");
-                    break;
-                }
-                if let Err(e) = stdin.flush().await {
-                    error!("Failed to flush claude stdin: {e}");
-                    break;
-                }
-            }
-        });
-
-        // Emit a ready event.
-        let _ = event_tx.send(AgentEvent::SessionReady);
-
-        Ok((Self { child, stdin_tx }, event_rx))
-    }
-
-    /// Send a message (prompt) to the Claude subprocess via stdin.
-    pub fn send_message(&self, text: &str) -> Result<()> {
-        self.stdin_tx
-            .send(format!("{text}\n"))
-            .map_err(|_| anyhow::anyhow!("Claude stdin channel closed"))?;
         Ok(())
     }
 
-    /// Send SIGINT to interrupt the current operation.
     pub fn interrupt(&self) -> Result<()> {
         if let Some(pid) = self.child.id() {
             #[cfg(unix)]
-            {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGINT);
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = pid;
-                anyhow::bail!("Interrupt is only supported on Unix");
+            unsafe {
+                libc::kill(pid as i32, libc::SIGINT);
             }
         }
         Ok(())
     }
 
-    /// Kill the child process.
     pub async fn stop(&mut self) -> Result<()> {
-        self.child.kill().await.context("Failed to kill claude process")?;
+        let _ = self.child.kill().await;
         Ok(())
     }
 
-    /// Return the child PID if still running.
     pub fn pid(&self) -> Option<u32> {
         self.child.id()
     }
 }
 
-/// Parse a Claude Code streaming JSON event into an [`AgentEvent`].
-fn parse_claude_event(obj: &Value) -> Option<AgentEvent> {
-    let event_type = obj.get("type")?.as_str()?;
+fn parse_claude_event(obj: &Value) -> Vec<AgentEvent> {
+    let mut events = Vec::new();
+    let Some(event_type) = obj.get("type").and_then(|t| t.as_str()) else {
+        return events;
+    };
 
     match event_type {
-        "assistant" | "content_block_delta" => {
-            // Try to extract text delta
-            if let Some(delta) = obj.get("delta") {
-                if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                    return Some(AgentEvent::ContentDelta {
-                        text: text.to_string(),
-                    });
+        "system" => {
+            // Extract session_id for resume support
+            // (handled by caller via the session_id field in result)
+        }
+        "assistant" => {
+            // Extract text from message.content array
+            if let Some(content) = obj
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                events.push(AgentEvent::TurnStarted {
+                    turn_id: obj
+                        .get("message")
+                        .and_then(|m| m.get("id"))
+                        .and_then(|id| id.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                });
+                for block in content {
+                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                        events.push(AgentEvent::ContentDelta {
+                            text: text.to_string(),
+                        });
+                    }
                 }
             }
-            // For assistant message blocks with direct content
-            if let Some(content) = obj.get("content").and_then(|c| c.as_str()) {
-                return Some(AgentEvent::ContentDelta {
-                    text: content.to_string(),
+        }
+        "content_block_delta" => {
+            if let Some(text) = obj
+                .get("delta")
+                .and_then(|d| d.get("text"))
+                .and_then(|t| t.as_str())
+            {
+                events.push(AgentEvent::ContentDelta {
+                    text: text.to_string(),
                 });
             }
-            None
         }
-        "message_start" => Some(AgentEvent::TurnStarted {
-            turn_id: obj
-                .get("message")
-                .and_then(|m| m.get("id"))
-                .and_then(|id| id.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
-        }),
-        "message_stop" => Some(AgentEvent::TurnCompleted {
-            turn_id: obj
-                .get("message")
-                .and_then(|m| m.get("id"))
-                .and_then(|id| id.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
-        }),
-        "error" => Some(AgentEvent::SessionError {
-            message: obj
+        "result" => {
+            let is_error = obj
+                .get("is_error")
+                .and_then(|e| e.as_bool())
+                .unwrap_or(false);
+            if is_error {
+                let msg = obj
+                    .get("result")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("Unknown error")
+                    .to_string();
+                events.push(AgentEvent::SessionError { message: msg });
+            } else {
+                // Extract session_id from result for future --resume
+                events.push(AgentEvent::TurnCompleted {
+                    turn_id: obj
+                        .get("session_id")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                });
+            }
+        }
+        "error" => {
+            let msg = obj
                 .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown error")
-                .to_string(),
-        }),
+                .to_string();
+            events.push(AgentEvent::SessionError { message: msg });
+        }
         _ => {
             debug!("Unhandled claude event type: {event_type}");
-            None
         }
     }
+
+    events
 }
