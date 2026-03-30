@@ -164,6 +164,42 @@ export function Composer() {
               onKeyDown={handleKeyDown}
               rows={1}
             />
+            <input
+              type="file"
+              multiple
+              id="attach-file-input"
+              style="display:none;"
+              onChange={(e) => {
+                const files = e.currentTarget.files;
+                if (!files) return;
+                for (const file of Array.from(files)) {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const content = reader.result as string;
+                    const ext = file.name.split(".").pop() || "";
+                    const lang = { ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", py: "python", rs: "rust", go: "go", css: "css", html: "html", json: "json", md: "markdown" }[ext] || "";
+                    setStore("attachments", (prev) => [...prev, {
+                      id: crypto.randomUUID(),
+                      type: "file" as const,
+                      name: file.name,
+                      content,
+                      language: lang,
+                    }]);
+                  };
+                  reader.readAsText(file);
+                }
+                e.currentTarget.value = "";
+              }}
+            />
+            <button
+              class="attach-btn"
+              onClick={() => document.getElementById("attach-file-input")?.click()}
+              title="Attach files"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </button>
             <button
               class="send-btn"
               classList={{ stop: isGenerating() }}
@@ -297,6 +333,18 @@ if (!document.getElementById("composer-styles")) {
       max-height: 120px;
       font-family: var(--font-body);
     }
+    .attach-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+      transition: color 0.12s, background 0.12s;
+    }
+    .attach-btn:hover { color: var(--text-secondary); background: var(--bg-accent); }
     .send-btn {
       width: 32px;
       height: 32px;
