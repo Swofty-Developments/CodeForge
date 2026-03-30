@@ -1,110 +1,144 @@
-import { createSignal, onMount, onCleanup, Show } from "solid-js";
+import { createSignal, onMount, onCleanup } from "solid-js";
 import { appStore } from "../../stores/app-store";
-import * as ipc from "../../ipc";
+import { Window } from "@tauri-apps/api/window";
+import { Webview } from "@tauri-apps/api/webview";
 
 interface Props {
   threadId: string;
 }
 
+// Track webview instances across component lifecycle
+const webviewInstances: Record<string, Webview> = {};
+
 export function BrowserPanel(props: Props) {
   const { store, setStore } = appStore;
+  const [urlInput, setUrlInput] = createSignal(
+    store.threadBrowserUrls[props.threadId] || "https://google.com"
+  );
+  const [ready, setReady] = createSignal(false);
+  let containerRef: HTMLDivElement | undefined;
 
-  const [urlInput, setUrlInput] = createSignal(store.threadBrowserUrls[props.threadId] || "https://google.com");
-  const [screenshot, setScreenshot] = createSignal<string | null>(null);
-  const [loading, setLoading] = createSignal(false);
-  let imgRef: HTMLImageElement | undefined;
-  let viewportRef: HTMLDivElement | undefined;
+  const label = () => `browser-${props.threadId.replace(/[^a-zA-Z0-9-]/g, "")}`;
 
-  // Viewport dimensions for coordinate mapping
-  const VIEWPORT_W = 1200;
-  const VIEWPORT_H = 800;
+  function getContainerBounds() {
+    if (!containerRef) return null;
+    const rect = containerRef.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return null;
+    return { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) };
+  }
 
-  onMount(async () => {
-    const unlisten = await ipc.listenBrowserEvent((payload) => {
-      if (payload.thread_id !== props.threadId) return;
-      const t = payload.type;
-      if (t === "screenshot" && payload.data) {
-        setScreenshot(`data:image/png;base64,${payload.data}`);
-        setLoading(false);
-      } else if (t === "navigated" && payload.url) {
-        setUrlInput(payload.url);
-        setStore("threadBrowserUrls", props.threadId, payload.url);
-      } else if (t === "ready") {
-        navigate();
-      }
-    });
-    onCleanup(() => unlisten());
+  async function updateBounds() {
+    const wv = webviewInstances[props.threadId];
+    if (!wv) return;
+    const b = getContainerBounds();
+    if (!b) return;
+    try {
+      await wv.setPosition(new (await import("@tauri-apps/api/dpi")).LogicalPosition(b.x, b.y));
+      await wv.setSize(new (await import("@tauri-apps/api/dpi")).LogicalSize(b.w, b.h));
+    } catch {}
+  }
 
-    // Auto-resize the Playwright viewport to match the pane width
-    if (viewportRef) {
-      const ro = new ResizeObserver((entries) => {
-        for (const e of entries) {
-          const w = Math.round(e.contentRect.width * 2); // 2x for retina
-          const h = Math.round(e.contentRect.height * 2);
-          if (w > 100 && h > 100) {
-            ipc.browserResize(props.threadId, w, h).catch(() => {});
-          }
-        }
-      });
-      ro.observe(viewportRef);
-      onCleanup(() => ro.disconnect());
+  async function createWebview() {
+    const existing = webviewInstances[props.threadId];
+    if (existing) {
+      // Already exists — just reposition and show
+      setReady(true);
+      await updateBounds();
+      return;
     }
 
-    navigate();
-  });
+    const b = getContainerBounds();
+    if (!b) return;
 
-  function navigate() {
+    try {
+      const appWindow = await Window.getByLabel("main");
+      if (!appWindow) return;
+
+      const url = urlInput().trim() || "https://google.com";
+      const wv = new Webview(appWindow, label(), {
+        url,
+        x: b.x,
+        y: b.y,
+        width: b.w,
+        height: b.h,
+      });
+
+      // Wait for it to be created
+      await wv.once("tauri://created", () => {});
+      webviewInstances[props.threadId] = wv;
+      setReady(true);
+    } catch (e) {
+      console.error("Failed to create webview:", e);
+    }
+  }
+
+  async function navigate() {
     let url = urlInput().trim();
     if (!url) return;
     if (!url.match(/^https?:\/\//)) url = "https://" + url;
     setUrlInput(url);
     setStore("threadBrowserUrls", props.threadId, url);
-    setLoading(true);
-    ipc.browserNavigate(props.threadId, url).catch(() => setLoading(false));
-  }
 
-  function handleClick(e: MouseEvent) {
-    if (!imgRef) return;
-    const rect = imgRef.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * VIEWPORT_W;
-    const y = ((e.clientY - rect.top) / rect.height) * VIEWPORT_H;
-    setLoading(true);
-    ipc.browserClick(props.threadId, x, y).catch(() => setLoading(false));
-  }
-
-  function handleScroll(e: WheelEvent) {
-    e.preventDefault();
-    ipc.browserScroll(props.threadId, e.deltaY * 2).catch(() => {});
-  }
-
-  function handleKeyDown(e: KeyboardEvent) {
-    // Only forward when the viewport area is focused
-    if (e.target !== viewportRef && e.target !== imgRef) return;
-    e.preventDefault();
-    if (e.key.length === 1) {
-      ipc.browserTypeText(props.threadId, e.key).catch(() => {});
-    } else {
-      ipc.browserKeypress(props.threadId, e.key).catch(() => {});
+    const wv = webviewInstances[props.threadId];
+    if (wv) {
+      try {
+        // Navigate by evaluating JS in the webview
+        await wv.eval(`window.location.href = ${JSON.stringify(url)}`);
+      } catch {
+        // If eval fails, destroy and recreate
+        await destroyWebview();
+        await createWebview();
+      }
     }
+  }
+
+  async function destroyWebview() {
+    const wv = webviewInstances[props.threadId];
+    if (wv) {
+      try { await wv.close(); } catch {}
+      delete webviewInstances[props.threadId];
+    }
+    setReady(false);
   }
 
   function close() {
     setStore("threadBrowserOpen", props.threadId, false);
-    ipc.browserClose(props.threadId).catch(() => {});
+    // Move offscreen instead of destroying (so it persists when switching tabs)
+    const wv = webviewInstances[props.threadId];
+    if (wv) {
+      import("@tauri-apps/api/dpi").then(({ LogicalPosition }) => {
+        wv.setPosition(new LogicalPosition(-9999, -9999)).catch(() => {});
+      });
+    }
   }
+
+  onMount(() => {
+    // Wait for layout to settle then create the webview
+    setTimeout(() => createWebview(), 150);
+
+    // Track bounds changes
+    const ro = new ResizeObserver(() => updateBounds());
+    if (containerRef) ro.observe(containerRef);
+    window.addEventListener("resize", updateBounds);
+    const interval = setInterval(updateBounds, 300);
+
+    onCleanup(() => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateBounds);
+      clearInterval(interval);
+      // Move offscreen when unmounting (tab switch)
+      const wv = webviewInstances[props.threadId];
+      if (wv) {
+        import("@tauri-apps/api/dpi").then(({ LogicalPosition }) => {
+          wv.setPosition(new LogicalPosition(-9999, -9999)).catch(() => {});
+        });
+      }
+    });
+  });
 
   return (
     <div class="bp">
       <div class="bp-bar">
-        <button class="bp-btn" onClick={() => ipc.browserBack(props.threadId)} title="Back">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <button class="bp-btn" onClick={() => ipc.browserForward(props.threadId)} title="Forward">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <button class="bp-btn" onClick={() => { setLoading(true); ipc.browserReload(props.threadId); }} title="Reload">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-        </button>
         <input
           class="bp-url"
           value={urlInput()}
@@ -117,29 +151,7 @@ export function BrowserPanel(props: Props) {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <div
-        ref={viewportRef}
-        class="bp-viewport"
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
-      >
-        <Show when={screenshot()}>
-          <img
-            ref={imgRef}
-            class="bp-img"
-            src={screenshot()!}
-            onClick={handleClick}
-            onWheel={handleScroll}
-            draggable={false}
-          />
-        </Show>
-        <Show when={loading() && !screenshot()}>
-          <div class="bp-status">Loading...</div>
-        </Show>
-        <Show when={!loading() && !screenshot()}>
-          <div class="bp-status">Enter a URL and press Go</div>
-        </Show>
-      </div>
+      <div ref={containerRef} class="bp-container" />
     </div>
   );
 }
@@ -152,7 +164,6 @@ if (!document.getElementById("bp-styles")) {
       flex: 1;
       display: flex;
       flex-direction: column;
-      background: var(--bg-card);
       min-height: 0;
       overflow: hidden;
     }
@@ -164,6 +175,7 @@ if (!document.getElementById("bp-styles")) {
       border-bottom: 1px solid var(--border);
       background: var(--bg-surface);
       flex-shrink: 0;
+      z-index: 10;
     }
     .bp-btn {
       width: 24px; height: 24px;
@@ -192,29 +204,9 @@ if (!document.getElementById("bp-styles")) {
       flex-shrink: 0;
     }
     .bp-go:hover { filter: brightness(1.15); }
-    .bp-viewport {
-      flex: 1; min-height: 0;
-      overflow: hidden;
-      background: #0a0a0a;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-      outline: none;
-    }
-    .bp-img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      object-position: top left;
-      cursor: pointer;
-      image-rendering: auto;
-    }
-    .bp-status {
-      color: var(--text-tertiary);
-      font-size: 13px;
-      padding: 32px;
-      text-align: center;
-      align-self: center;
+    .bp-container {
+      flex: 1;
+      min-height: 0;
     }
   `;
   document.head.appendChild(s);
