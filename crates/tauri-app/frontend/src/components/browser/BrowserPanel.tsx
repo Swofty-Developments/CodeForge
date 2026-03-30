@@ -1,77 +1,72 @@
-import { createSignal, onMount, onCleanup } from "solid-js";
+import { createSignal, onMount, onCleanup, Show } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 
-const created = new Set<string>();
+interface Props { threadId: string; }
 
-interface Props {
-  threadId: string;
-}
+// Viewport dimensions for coordinate mapping
+const VP_W = 1280;
+const VP_H = 800;
 
 export function BrowserPanel(props: Props) {
   const { store, setStore } = appStore;
-  const [urlInput, setUrlInput] = createSignal(
-    store.threadBrowserUrls[props.threadId] || "https://google.com"
-  );
-  let viewportRef: HTMLDivElement | undefined;
-  let barRef: HTMLDivElement | undefined;
-  let lastKey = "";
+  const [urlInput, setUrlInput] = createSignal(store.threadBrowserUrls[props.threadId] || "https://google.com");
+  const [currentUrl, setCurrentUrl] = createSignal(urlInput());
+  const [inspecting, setInspecting] = createSignal(false);
+  const [loading, setLoading] = createSignal(false);
+  let canvasRef: HTMLCanvasElement | undefined;
+  let containerRef: HTMLDivElement | undefined;
+  let img = new Image();
 
-  // The native webview is positioned relative to the OS window content area.
-  // getBoundingClientRect() gives coords relative to the main webview viewport.
-  // There's a small offset (~5px) between these two coordinate systems.
-  // We also need to add the address bar height since the webview must sit below it.
-  const Y_OFFSET = 25;
-
-  function getBounds() {
-    if (!viewportRef) return null;
-    const r = viewportRef.getBoundingClientRect();
-    if (r.width < 10 || r.height < 10) return null;
-    const barH = barRef ? barRef.getBoundingClientRect().height : 0;
+  // Map canvas coords to viewport coords
+  function toVP(e: MouseEvent) {
+    if (!canvasRef) return { x: 0, y: 0 };
+    const r = canvasRef.getBoundingClientRect();
     return {
-      x: Math.round(r.left),
-      y: Math.round(r.top + Y_OFFSET + barH),
-      w: Math.round(r.width),
-      h: Math.round(r.height - barH),
+      x: (e.clientX - r.left) / r.width * VP_W,
+      y: (e.clientY - r.top) / r.height * VP_H,
     };
   }
 
-  function sync() {
-    const b = getBounds();
-    if (!b || b.h < 10) return;
-    const key = `${b.x},${b.y},${b.w},${b.h}`;
-    if (key === lastKey) return;
-    lastKey = key;
-    ipc.browserSetBounds(props.threadId, b.x, b.y, b.w, b.h).catch(() => {});
-  }
-
-  onMount(() => {
-    const t = setTimeout(() => {
-      const b = getBounds();
-      if (!b || b.h < 10) return;
-      const url = urlInput();
-
-      if (created.has(props.threadId)) {
-        ipc.browserSetBounds(props.threadId, b.x, b.y, b.w, b.h).catch(() => {});
-      } else {
-        ipc.browserOpen(props.threadId, url, b.x, b.y, b.w, b.h)
-          .then(() => created.add(props.threadId))
-          .catch((e) => console.error("browser_open:", e));
+  onMount(async () => {
+    const unlisten = await ipc.listenBrowserEvent((p) => {
+      if (p.thread_id !== props.threadId) return;
+      switch (p.type) {
+        case "frame":
+          if (p.data && canvasRef) {
+            img.onload = () => {
+              const ctx = canvasRef!.getContext("2d");
+              if (ctx) {
+                canvasRef!.width = img.width;
+                canvasRef!.height = img.height;
+                ctx.drawImage(img, 0, 0);
+              }
+            };
+            img.src = `data:image/jpeg;base64,${p.data}`;
+          }
+          break;
+        case "navigated":
+          if (p.url) {
+            setCurrentUrl(p.url);
+            setUrlInput(p.url);
+            setStore("threadBrowserUrls", props.threadId, p.url);
+          }
+          setLoading(false);
+          break;
+        case "extraction":
+          if (p.html) {
+            const ctx = `**Extracted from ${currentUrl()}**${p.selector ? ` \`${p.selector}\`` : ""}\n\n\`\`\`html\n${p.html}\n\`\`\`\n\n\`\`\`css\n${p.css || "{}"}\n\`\`\``;
+            setStore("composerText", (prev: string) => prev ? prev + "\n\n" + ctx : ctx);
+          }
+          setInspecting(false);
+          break;
+        case "ready":
+          navigate();
+          break;
       }
-    }, 300);
-
-    const ro = new ResizeObserver(() => sync());
-    if (viewportRef) ro.observe(viewportRef);
-    window.addEventListener("resize", sync);
-    const poll = setInterval(sync, 150);
-
-    onCleanup(() => {
-      clearTimeout(t);
-      ro.disconnect();
-      window.removeEventListener("resize", sync);
-      clearInterval(poll);
-      ipc.browserHide(props.threadId).catch(() => {});
     });
+    onCleanup(() => unlisten());
+    navigate();
   });
 
   function navigate() {
@@ -80,34 +75,108 @@ export function BrowserPanel(props: Props) {
     if (!u.match(/^https?:\/\//)) u = "https://" + u;
     setUrlInput(u);
     setStore("threadBrowserUrls", props.threadId, u);
-    ipc.browserNavigate(props.threadId, u).catch(console.error);
+    setLoading(true);
+    ipc.browserNavigate(props.threadId, u).catch(() => setLoading(false));
   }
 
   function close() {
     setStore("threadBrowserOpen", props.threadId, false);
-    ipc.browserHide(props.threadId).catch(() => {});
+    ipc.browserClose(props.threadId).catch(() => {});
+  }
+
+  function toggleInspect() {
+    const next = !inspecting();
+    setInspecting(next);
+    if (next) ipc.browserStartInspect(props.threadId);
+    else ipc.browserStopInspect(props.threadId);
+  }
+
+  function handleClick(e: MouseEvent) {
+    const { x, y } = toVP(e);
+    if (inspecting()) {
+      // Click selects element, then extract
+      ipc.browserClick(props.threadId, x, y).then(() => {
+        setTimeout(() => ipc.browserExtract(props.threadId), 100);
+      });
+    } else {
+      ipc.browserClick(props.threadId, x, y);
+    }
+  }
+
+  function handleMouseMove(e: MouseEvent) {
+    if (!inspecting()) return;
+    const { x, y } = toVP(e);
+    ipc.browserMouseMove(props.threadId, x, y);
+  }
+
+  function handleScroll(e: WheelEvent) {
+    e.preventDefault();
+    const { x, y } = toVP(e);
+    ipc.browserScroll(props.threadId, x, y, e.deltaX, e.deltaY);
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    e.preventDefault();
+    if (e.key.length === 1) {
+      ipc.browserTypeText(props.threadId, e.key);
+    } else {
+      ipc.browserKeyDown(props.threadId, e.key, "");
+    }
+  }
+
+  function handleKeyUp(e: KeyboardEvent) {
+    if (e.key.length > 1) ipc.browserKeyUp(props.threadId, e.key);
   }
 
   return (
-    <div ref={viewportRef} class="bp">
-      {/* Address bar — in the DOM, above the native webview */}
-      <div ref={barRef} class="bp-bar">
+    <div class="bp">
+      <div class="bp-bar">
+        <button class="bp-nav" onClick={() => ipc.browserBack(props.threadId)} title="Back">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="bp-nav" onClick={() => ipc.browserForward(props.threadId)} title="Forward">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button class="bp-nav" onClick={() => { setLoading(true); ipc.browserReload(props.threadId); }} title="Reload">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+        </button>
         <input
           class="bp-url"
           value={urlInput()}
           onInput={(e) => setUrlInput(e.currentTarget.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); navigate(); } }}
           onBlur={navigate}
-          placeholder="URL..."
         />
-        <button class="bp-btn" onClick={() => ipc.browserDevtools(props.threadId)} title="DevTools">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        <button
+          class="bp-nav"
+          classList={{ active: inspecting() }}
+          onClick={toggleInspect}
+          title="Inspect element"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/>
+          </svg>
         </button>
-        <button class="bp-btn" onClick={close} title="Close">
+        <button class="bp-nav" onClick={close} title="Close">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      {/* The native webview covers the remaining space below the bar */}
+      <Show when={inspecting()}>
+        <div class="bp-inspect-bar">Click an element to extract its HTML &amp; CSS</div>
+      </Show>
+      <div ref={containerRef} class="bp-viewport" tabIndex={0} onKeyDown={handleKeyDown} onKeyUp={handleKeyUp}>
+        <canvas
+          ref={canvasRef}
+          class="bp-canvas"
+          classList={{ inspecting: inspecting() }}
+          onClick={handleClick}
+          onMouseMove={handleMouseMove}
+          onWheel={handleScroll}
+        />
+        <Show when={loading()}>
+          <div class="bp-loading">Loading...</div>
+        </Show>
+      </div>
     </div>
   );
 }
@@ -118,16 +187,16 @@ if (!document.getElementById("bp-styles")) {
   s.textContent = `
     .bp { flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
     .bp-bar {
-      display:flex; align-items:center; gap:3px; padding:5px 6px;
+      display:flex; align-items:center; gap:2px; padding:4px 6px;
       border-bottom:1px solid var(--border); background:var(--bg-surface); flex-shrink:0;
-      position:relative; z-index:10;
     }
-    .bp-btn {
+    .bp-nav {
       width:24px;height:24px;border-radius:var(--radius-sm);
       display:flex;align-items:center;justify-content:center;
       color:var(--text-tertiary);transition:background .1s,color .1s;flex-shrink:0;
     }
-    .bp-btn:hover { background:var(--bg-accent);color:var(--text-secondary); }
+    .bp-nav:hover { background:var(--bg-accent);color:var(--text-secondary); }
+    .bp-nav.active { color:var(--primary);background:rgba(107,124,255,0.15); }
     .bp-url {
       flex:1;min-width:0;height:24px;padding:0 8px;font-size:12px;
       font-family:var(--font-mono);background:var(--bg-muted);
@@ -135,6 +204,24 @@ if (!document.getElementById("bp-styles")) {
       color:var(--text);outline:none;
     }
     .bp-url:focus { border-color:var(--primary); }
+    .bp-inspect-bar {
+      padding:3px 10px;font-size:10px;font-weight:500;color:var(--primary);
+      background:rgba(107,124,255,0.06);border-bottom:1px solid var(--border);
+      text-align:center;flex-shrink:0;
+    }
+    .bp-viewport {
+      flex:1;min-height:0;position:relative;overflow:hidden;
+      background:#0a0a0a;outline:none;
+    }
+    .bp-canvas {
+      width:100%;height:100%;object-fit:contain;cursor:default;
+      display:block;
+    }
+    .bp-canvas.inspecting { cursor:crosshair; }
+    .bp-loading {
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      color:var(--text-tertiary);font-size:12px;
+    }
   `;
   document.head.appendChild(s);
 }

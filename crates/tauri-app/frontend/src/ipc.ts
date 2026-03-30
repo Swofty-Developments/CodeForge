@@ -192,21 +192,51 @@ export const getFileDiff = (cwd: string, filePath: string) =>
 export const getFileContent = (cwd: string, filePath: string, version: string) =>
   invoke<string>("get_file_content", { cwd, filePath, version });
 
-// Browser (native child webview)
-export const browserOpen = (threadId: string, url: string, x: number, y: number, width: number, height: number) =>
-  invoke("browser_open", { threadId, url, x, y, width, height });
+// Browser (CDP screencast via Playwright sidecar)
 export const browserNavigate = (threadId: string, url: string) =>
   invoke("browser_navigate", { threadId, url });
-export const browserSetBounds = (threadId: string, x: number, y: number, w: number, h: number) =>
-  invoke("browser_set_bounds", { threadId, x, y, w, h });
-export const browserEval = (threadId: string, js: string) =>
-  invoke("browser_eval", { threadId, js });
-export const browserHide = (threadId: string) =>
-  invoke("browser_hide", { threadId });
+export const browserClick = (threadId: string, x: number, y: number) =>
+  invoke("browser_click", { threadId, x, y });
+export const browserScroll = (threadId: string, x: number, y: number, deltaX: number, deltaY: number) =>
+  invoke("browser_scroll", { threadId, x, y, deltaX, deltaY });
+export const browserMouseMove = (threadId: string, x: number, y: number) =>
+  invoke("browser_mouse_move", { threadId, x, y });
+export const browserKeyDown = (threadId: string, key: string, text: string) =>
+  invoke("browser_key_down", { threadId, key, text });
+export const browserKeyUp = (threadId: string, key: string) =>
+  invoke("browser_key_up", { threadId, key });
+export const browserTypeText = (threadId: string, text: string) =>
+  invoke("browser_type_text", { threadId, text });
+export const browserBack = (threadId: string) =>
+  invoke("browser_back", { threadId });
+export const browserForward = (threadId: string) =>
+  invoke("browser_forward", { threadId });
+export const browserReload = (threadId: string) =>
+  invoke("browser_reload", { threadId });
+export const browserResize = (threadId: string, width: number, height: number) =>
+  invoke("browser_resize", { threadId, width, height });
+export const browserStartInspect = (threadId: string) =>
+  invoke("browser_start_inspect", { threadId });
+export const browserStopInspect = (threadId: string) =>
+  invoke("browser_stop_inspect", { threadId });
+export const browserExtract = (threadId: string) =>
+  invoke("browser_extract", { threadId });
 export const browserClose = (threadId: string) =>
   invoke("browser_close", { threadId });
-export const browserDevtools = (threadId: string) =>
-  invoke("browser_devtools", { threadId });
+
+export interface BrowserEventPayload {
+  thread_id: string;
+  type: string;
+  data?: string;
+  url?: string;
+  html?: string;
+  css?: string;
+  selector?: string;
+  message?: string;
+}
+
+export const listenBrowserEvent = (cb: (p: BrowserEventPayload) => void) =>
+  listen<BrowserEventPayload>("browser-event", (e) => cb(e.payload));
 
 // Naming
 export const autoNameThread = (threadId: string, messagesSummary: string, provider: string) =>

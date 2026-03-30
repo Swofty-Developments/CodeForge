@@ -3,7 +3,7 @@ import { DragDropProvider } from "@dnd-kit/solid";
 import { useSortable } from "@dnd-kit/solid/sortable";
 import { move } from "@dnd-kit/helpers";
 import { appStore } from "../../stores/app-store";
-import { browserHide } from "../../ipc";
+import { browserClose } from "../../ipc";
 
 function SortableTab(props: { tabId: string; index: number }) {
   const { store, setStore, closeTab } = appStore;
@@ -61,7 +61,7 @@ export function TabBar() {
     if (!tab) return;
     const opening = !store.threadBrowserOpen[tab];
     setStore("threadBrowserOpen", tab, opening);
-    if (!opening) browserHide(tab).catch(() => {});
+    if (!opening) browserClose(tab).catch(() => {});
   }
 
   function toggleDiff() {
