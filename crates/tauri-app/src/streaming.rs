@@ -25,6 +25,14 @@ pub struct AgentEventPayload {
     pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 pub fn spawn_event_forwarder(
@@ -143,7 +151,10 @@ pub fn spawn_event_forwarder(
                         session_id: session_id.to_string(),
                         thread_id: thread_id.to_string(),
                         event_type: "usage_report".into(),
-                        text: Some(format!("{cost_usd:.6}")),
+                        input_tokens: Some(*input_tokens),
+                        output_tokens: Some(*output_tokens),
+                        cost_usd: Some(*cost_usd),
+                        model: Some(model.clone()),
                         ..default_payload()
                     }
                 }
@@ -179,5 +190,9 @@ fn default_payload() -> AgentEventPayload {
         message: None,
         request_id: None,
         description: None,
+        input_tokens: None,
+        output_tokens: None,
+        cost_usd: None,
+        model: None,
     }
 }

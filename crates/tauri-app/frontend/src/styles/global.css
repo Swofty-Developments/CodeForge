@@ -11,9 +11,9 @@
   --bg-hover: rgba(255, 255, 255, 0.04);
 
   /* Text with warm undertones */
-  --text: #e8e6f0;
-  --text-secondary: #a8a6b8;
-  --text-tertiary: #5c5a6a;
+  --text: #f0eef8;
+  --text-secondary: #b8b6c8;
+  --text-tertiary: #807e92;
 
   /* Accent palette — molten metals */
   --primary: #6b7cff;
@@ -64,8 +64,6 @@ body {
   user-select: none;
   -webkit-user-select: none;
   font-feature-settings: "ss01", "ss02", "cv01";
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 #app {

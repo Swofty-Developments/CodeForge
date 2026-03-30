@@ -39,7 +39,7 @@ export function ProjectGroup(props: { project: Project }) {
     setStore("contextMenu", { type: "project", id: props.project.id, x: e.clientX, y: e.clientY });
   }
 
-  const color = () => props.project.color || "var(--text-tertiary)";
+  const color = () => props.project.color || "var(--text)";
 
   return (
     <div
@@ -85,10 +85,10 @@ if (!document.getElementById("project-group-styles")) {
       transition: background 0.15s; text-align: left;
     }
     .project-toggle:hover { background: var(--bg-muted); }
-    .collapse-icon { font-size: 8px; color: var(--text-tertiary); }
+    .collapse-icon { font-size: 8px; color: var(--text-secondary); }
     .project-name { font-size: 10px; letter-spacing: 0.05em; }
     .project-add {
-      font-size: 13px; color: var(--text-tertiary); padding: 4px 8px;
+      font-size: 13px; color: var(--text-secondary); padding: 4px 8px;
       border-radius: var(--radius-sm); transition: background 0.15s;
     }
     .project-add:hover { background: var(--bg-accent); }

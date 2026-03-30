@@ -193,14 +193,25 @@ export function ChatArea() {
   );
 }
 
-function MessageBubble(props: { msg: { id: string; role: string; content: string }; isGenerating: boolean; isLast: boolean }) {
+function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean }) {
   const [copied, setCopied] = createSignal(false);
   const isAssistant = () => props.msg.role === "assistant";
+  const meta = () => props.msg.meta;
 
   async function copyContent() {
     await navigator.clipboard.writeText(props.msg.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  function formatDuration(ms: number) {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+
+  function formatTokens(n: number) {
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
   }
 
   return (
@@ -211,11 +222,26 @@ function MessageBubble(props: { msg: { id: string; role: string; content: string
             <Markdown content={props.msg.content} />
           </Show>
         </div>
-        <Show when={isAssistant() && props.msg.content}>
-          <button class="copy-btn" onClick={copyContent}>
-            {copied() ? "Copied" : "Copy"}
-          </button>
-        </Show>
+        <div class="message-footer">
+          <Show when={isAssistant() && meta()}>
+            <div class="message-meta">
+              <Show when={meta()!.model}>
+                <span class="meta-tag">{meta()!.model}</span>
+              </Show>
+              <Show when={meta()!.inputTokens != null || meta()!.outputTokens != null}>
+                <span class="meta-tag">{formatTokens(meta()!.inputTokens || 0)} in / {formatTokens(meta()!.outputTokens || 0)} out</span>
+              </Show>
+              <Show when={meta()!.durationMs}>
+                <span class="meta-tag">{formatDuration(meta()!.durationMs!)}</span>
+              </Show>
+            </div>
+          </Show>
+          <Show when={isAssistant() && props.msg.content}>
+            <button class="copy-btn" onClick={copyContent}>
+              {copied() ? "Copied" : "Copy"}
+            </button>
+          </Show>
+        </div>
       </div>
     </div>
   );
@@ -380,6 +406,28 @@ if (!document.getElementById("chat-styles")) {
       padding: 4px 12px;
     }
 
+    .message-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 18px;
+    }
+    .message-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .meta-tag {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      background: var(--bg-muted);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      white-space: nowrap;
+    }
     .copy-btn {
       font-size: 11px;
       font-weight: 500;
@@ -387,9 +435,8 @@ if (!document.getElementById("chat-styles")) {
       padding: 2px 8px;
       border-radius: var(--radius-sm);
       transition: all 0.12s;
-      opacity: 0;
+      margin-left: auto;
     }
-    .message:hover .copy-btn { opacity: 1; }
     .copy-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
 
     .typing-indicator {

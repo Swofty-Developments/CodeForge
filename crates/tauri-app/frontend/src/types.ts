@@ -14,11 +14,20 @@ export interface Thread {
   color: string | null;
 }
 
+export interface MessageMeta {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  durationMs?: number;
+  costUsd?: number;
+}
+
 export interface ChatMessage {
   id: string;
   thread_id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  meta?: MessageMeta;
 }
 
 export interface AgentEventPayload {
@@ -31,6 +40,10 @@ export interface AgentEventPayload {
   message?: string;
   request_id?: string;
   description?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
+  model?: string;
 }
 
 export type SessionStatus = "idle" | "starting" | "ready" | "generating" | "error";

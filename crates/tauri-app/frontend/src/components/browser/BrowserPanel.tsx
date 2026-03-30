@@ -8,7 +8,7 @@ interface BrowserPanelProps {
 
 export function BrowserPanel(props: BrowserPanelProps) {
   const { store, setStore } = appStore;
-  const currentUrl = () => store.threadBrowserUrls[props.threadId] || "https://example.com";
+  const currentUrl = () => store.threadBrowserUrls[props.threadId] || "https://google.com";
   const [urlInput, setUrlInput] = createSignal(currentUrl());
   const [started, setStarted] = createSignal(false);
   let viewportRef: HTMLDivElement | undefined;
@@ -51,9 +51,9 @@ export function BrowserPanel(props: BrowserPanelProps) {
     });
   });
 
-  // Open the native webview on first mount
+  // Open the native webview on first mount — delay to let layout settle
   onMount(() => {
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       if (!viewportRef) return;
       const rect = viewportRef.getBoundingClientRect();
       const url = currentUrl();
@@ -69,7 +69,7 @@ export function BrowserPanel(props: BrowserPanelProps) {
       }).catch((e) => {
         console.error("Failed to open browser:", e);
       });
-    });
+    }, 100);
   });
 
   // When started, keep bounds in sync

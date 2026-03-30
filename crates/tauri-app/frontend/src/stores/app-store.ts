@@ -217,9 +217,10 @@ function createAppStore() {
     }
   }
 
+  const turnStartTimes: Record<string, number> = {};
+
   function handleAgentEvent(payload: AgentEventPayload) {
     const { thread_id, event_type } = payload;
-    console.log(`[agent-event] ${event_type}`, event_type === "content_delta" ? payload.text?.slice(0, 40) : "");
 
     switch (event_type) {
       case "content_delta": {
@@ -234,6 +235,7 @@ function createAppStore() {
         break;
       }
       case "turn_started":
+        turnStartTimes[thread_id] = Date.now();
         setStore("sessionStatuses", thread_id, "generating");
         break;
       case "turn_completed":
@@ -256,6 +258,27 @@ function createAppStore() {
           { id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Aborted: ${payload.reason}` },
         ]);
         break;
+      case "usage_report": {
+        const durationMs = turnStartTimes[thread_id] ? Date.now() - turnStartTimes[thread_id] : undefined;
+        setStore("threadMessages", thread_id, (msgs) => {
+          if (!msgs) return msgs;
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === "assistant") {
+            return [...msgs.slice(0, -1), {
+              ...last,
+              meta: {
+                model: payload.model,
+                inputTokens: payload.input_tokens,
+                outputTokens: payload.output_tokens,
+                costUsd: payload.cost_usd,
+                durationMs,
+              },
+            }];
+          }
+          return msgs;
+        });
+        break;
+      }
       case "session_ready":
         setStore("sessionStatuses", thread_id, "ready");
         break;
