@@ -2,7 +2,13 @@ import { Show } from "solid-js";
 import type { Thread } from "../../types";
 import { appStore } from "../../stores/app-store";
 
-export function ThreadItem(props: { thread: Thread; isUncategorized: boolean }) {
+export function ThreadItem(props: {
+  thread: Thread;
+  isUncategorized: boolean;
+  groupColor: string | null;
+  sortableRef?: (el: HTMLElement) => void;
+  isDragging?: boolean;
+}) {
   const { store, setStore, selectThread } = appStore;
 
   const isActive = () => store.activeTab === props.thread.id;
@@ -11,16 +17,7 @@ export function ThreadItem(props: { thread: Thread; isUncategorized: boolean }) 
   function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    setStore("contextMenu", {
-      type: "thread",
-      id: props.thread.id,
-      x: e.clientX,
-      y: e.clientY,
-    });
-  }
-
-  function handleDblClick() {
-    setStore("renamingThread", { id: props.thread.id, text: props.thread.title });
+    setStore("contextMenu", { type: "thread", id: props.thread.id, x: e.clientX, y: e.clientY });
   }
 
   function handleRenameSubmit(e: Event) {
@@ -29,37 +26,21 @@ export function ThreadItem(props: { thread: Thread; isUncategorized: boolean }) 
     if (text) {
       import("../../ipc").then(({ renameThread }) => {
         renameThread(props.thread.id, text);
-        setStore(
-          "projects",
-          (p) => p.threads.some((t) => t.id === props.thread.id),
-          "threads",
-          (t) => t.id === props.thread.id,
-          "title",
-          text
+        setStore("projects", (projects) =>
+          projects.map((p) => ({
+            ...p,
+            threads: p.threads.map((t) => t.id === props.thread.id ? { ...t, title: text } : t),
+          }))
         );
       });
     }
     setStore("renamingThread", null);
   }
 
-  function handleDragStart(e: DragEvent) {
-    if (!props.isUncategorized) {
-      e.preventDefault();
-      return;
-    }
-    e.dataTransfer!.setData("text/thread-id", props.thread.id);
-    e.dataTransfer!.effectAllowed = "move";
-    setStore("draggingSidebarThread", props.thread.id);
-  }
-
-  function handleDragEnd() {
-    setStore("draggingSidebarThread", null);
-  }
-
-  const dotColor = () => {
-    if (props.thread.color) return props.thread.color;
+  const statusColor = () => {
     const status = store.sessionStatuses[props.thread.id];
-    if (status === "ready") return "var(--green)";
+    if (!status || status === "idle") return null;
+    if (status === "ready") return props.groupColor || "var(--green)";
     if (status === "generating" || status === "starting") return "var(--sky)";
     if (status === "error") return "var(--red)";
     return null;
@@ -72,91 +53,141 @@ export function ThreadItem(props: { thread: Thread; isUncategorized: boolean }) 
         <form class="thread-rename" onSubmit={handleRenameSubmit}>
           <input
             value={store.renamingThread?.text || ""}
-            onInput={(e) =>
-              setStore("renamingThread", "text", e.currentTarget.value)
-            }
-            onBlur={() => setStore("renamingThread", null)}
+            onInput={(e) => setStore("renamingThread", "text", e.currentTarget.value)}
+            onBlur={handleRenameSubmit}
             autofocus
           />
         </form>
       }
     >
       <div
+        ref={props.sortableRef}
         class="thread-item"
-        classList={{ active: isActive(), draggable: props.isUncategorized }}
+        classList={{
+          active: isActive(),
+          dragging: props.isDragging,
+          "can-drag": props.isUncategorized,
+        }}
         onClick={() => selectThread(props.thread.id)}
         onContextMenu={handleContextMenu}
-        onDblClick={handleDblClick}
-        draggable={props.isUncategorized}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
+        onDblClick={() => setStore("renamingThread", { id: props.thread.id, text: props.thread.title })}
       >
-        <Show when={dotColor()}>
-          <span class="status-dot" style={{ color: dotColor()! }}>
-            &#x25CF;
-          </span>
-        </Show>
         <span
           class="thread-title"
-          classList={{ "text-active": isActive() }}
-          style={props.thread.color ? { "border-left": `2px solid ${props.thread.color}`, "padding-left": "6px" } : {}}
+          style={props.groupColor ? { "border-left": `2px solid ${props.groupColor}`, "padding-left": "6px" } : {}}
         >
           {props.thread.title}
         </span>
-        <Show when={props.isUncategorized}>
-          <span class="drag-handle">&#x2261;</span>
-        </Show>
+        <div class="thread-right">
+          <Show when={statusColor()}>
+            <span class="status-dot" style={{ background: statusColor()! }} />
+          </Show>
+          <div class="thread-actions">
+            <button
+              class="thread-action-btn"
+              onClick={(e) => { e.stopPropagation(); setStore("renamingThread", { id: props.thread.id, text: props.thread.title }); }}
+              title="Rename"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+              </svg>
+            </button>
+            <button
+              class="thread-action-btn delete"
+              onClick={(e) => {
+                e.stopPropagation();
+                import("../../ipc").then(({ deleteThread }) => {
+                  deleteThread(props.thread.id);
+                  setStore("projects", (projects) =>
+                    projects.map((p) => ({ ...p, threads: p.threads.filter((t) => t.id !== props.thread.id) }))
+                  );
+                  setStore("openTabs", (tabs) => tabs.filter((t) => t !== props.thread.id));
+                  if (store.activeTab === props.thread.id) {
+                    setStore("activeTab", store.openTabs.filter((t) => t !== props.thread.id).pop() || null);
+                  }
+                });
+              }}
+              title="Delete"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+            <Show when={props.isUncategorized}>
+              <svg class="drag-hint" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="8" y1="6" x2="16" y2="6" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="8" y1="18" x2="16" y2="18" />
+              </svg>
+            </Show>
+          </div>
+        </div>
       </div>
     </Show>
   );
 }
 
 if (!document.getElementById("thread-item-styles")) {
-  const style = document.createElement("style");
-  style.id = "thread-item-styles";
-  style.textContent = `
+  const s = document.createElement("style");
+  s.id = "thread-item-styles";
+  s.textContent = `
     .thread-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 5px 14px;
-      margin: 0 4px;
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      transition: background 0.12s;
-      font-size: 13px;
-      color: var(--text-secondary);
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 12px; margin: 1px 0;
+      border-radius: var(--radius-sm); cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      font-size: 13px; color: var(--text-secondary);
+      touch-action: none;
+      position: relative;
     }
-    .thread-item:hover { background: var(--bg-muted); }
+    .thread-item:hover { background: var(--bg-hover); color: var(--text); }
     .thread-item.active {
       background: var(--bg-accent);
       color: var(--text);
     }
-    .thread-item.draggable { cursor: grab; }
-    .thread-item.draggable:active { cursor: grabbing; }
-    .status-dot { font-size: 7px; flex-shrink: 0; }
-    .thread-title {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    .thread-item.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 4px;
+      bottom: 4px;
+      width: 2px;
+      border-radius: 1px;
+      background: var(--primary);
     }
-    .thread-title.text-active { color: var(--text); }
-    .drag-handle {
-      font-size: 12px;
+    .thread-item.dragging { opacity: 0.3; }
+    .thread-item.can-drag { cursor: grab; }
+    .thread-item.can-drag:active { cursor: grabbing; }
+    .thread-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .thread-right {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .thread-actions {
+      display: flex; align-items: center; gap: 2px;
+      opacity: 0; transition: opacity 0.12s;
+    }
+    .thread-item:hover .thread-actions,
+    .thread-item.active .thread-actions { opacity: 1; }
+    .thread-action-btn {
       color: var(--text-tertiary);
-      opacity: 0;
-      transition: opacity 0.15s;
+      padding: 3px;
+      border-radius: 4px;
+      transition: background 0.1s, color 0.1s;
+      display: flex;
+      align-items: center;
     }
-    .thread-item:hover .drag-handle { opacity: 1; }
-    .thread-rename {
-      padding: 2px 14px;
-      margin: 0 4px;
-    }
-    .thread-rename input {
-      width: 100%;
-      font-size: 13px;
-    }
+    .thread-action-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
+    .thread-action-btn.delete:hover { color: var(--red); }
+    .drag-hint { color: var(--text-tertiary); }
+    .thread-rename { padding: 2px 12px; margin: 1px 0; }
+    .thread-rename input { width: 100%; font-size: 13px; }
   `;
-  document.head.appendChild(style);
+  document.head.appendChild(s);
 }

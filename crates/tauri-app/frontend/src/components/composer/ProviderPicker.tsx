@@ -107,6 +107,7 @@ export function ProviderPicker() {
           max-width: 480px;
           max-height: 80vh;
           overflow-y: auto;
+          animation: overlay-panel-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
         }
         .pp-header {
           display: flex;
@@ -212,7 +213,7 @@ export function ProviderPicker() {
           color: var(--text-secondary);
         }
         .pp-value.mono {
-          font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+          font-family: var(--font-mono);
           font-size: 11px;
           color: var(--text-tertiary);
         }
@@ -233,7 +234,7 @@ export function ProviderPicker() {
           border: 1px solid var(--border);
           border-radius: var(--radius-sm);
           padding: 8px 12px;
-          font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+          font-family: var(--font-mono);
           font-size: 12px;
           color: var(--text);
           user-select: text;

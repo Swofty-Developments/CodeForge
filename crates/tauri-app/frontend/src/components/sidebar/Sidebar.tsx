@@ -1,6 +1,8 @@
 import { For, Show } from "solid-js";
+import { DragDropProvider } from "@dnd-kit/solid";
 import { appStore } from "../../stores/app-store";
 import { ProjectGroup } from "./ProjectGroup";
+import * as ipc from "../../ipc";
 
 export function Sidebar() {
   const { store, setStore, newThread } = appStore;
@@ -27,7 +29,6 @@ export function Sidebar() {
     window.addEventListener("mouseup", onUp);
   }
 
-  // Sort: categorized first, uncategorized last
   const sortedProjects = () => {
     return [...store.projects].sort((a, b) => {
       if (a.path === "." && b.path !== ".") return 1;
@@ -50,30 +51,87 @@ export function Sidebar() {
             onClick={() => setStore("settingsOpen", true)}
             title="Settings"
           >
-            &#x2699;
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+            </svg>
           </button>
         </div>
 
         <div class="sidebar-content">
-          <Show
-            when={store.projects.length > 0}
-            fallback={
-              <div class="empty-state">
-                <p>No threads yet</p>
-                <p class="hint">Click + below to start</p>
-              </div>
-            }
+          <DragDropProvider
+            onDragEnd={(event) => {
+              const dragId = event.operation?.source?.id;
+              const targetEl = document.elementFromPoint(
+                event.operation?.position?.current?.x ?? 0,
+                event.operation?.position?.current?.y ?? 0
+              );
+              let el = targetEl;
+              while (el && !el.getAttribute?.("data-project-id")) {
+                el = el.parentElement;
+              }
+              const targetProjectId = el?.getAttribute?.("data-project-id");
+              if (dragId && targetProjectId) {
+                const threadId = String(dragId);
+                const srcProject = store.projects.find((p) =>
+                  p.threads.some((t) => t.id === threadId)
+                );
+                if (srcProject && srcProject.path === "." && targetProjectId !== srcProject.id) {
+                  ipc.moveThreadToProject(threadId, targetProjectId);
+                  setStore("projects", (projects) => {
+                    const thread = projects
+                      .flatMap((p) => p.threads)
+                      .find((t) => t.id === threadId);
+                    if (!thread) return projects;
+                    return projects.map((p) => ({
+                      ...p,
+                      threads:
+                        p.id === targetProjectId
+                          ? [...p.threads.filter((t) => t.id !== threadId), thread]
+                          : p.threads.filter((t) => t.id !== threadId),
+                    }));
+                  });
+                }
+              }
+            }}
           >
-            <For each={sortedProjects()}>
-              {(project) => <ProjectGroup project={project} />}
-            </For>
-          </Show>
+            <Show
+              when={store.projects.length > 0}
+              fallback={
+                <div class="empty-state">
+                  <p>No threads yet</p>
+                  <p class="hint">Click + below to start</p>
+                </div>
+              }
+            >
+              <For each={sortedProjects()}>
+                {(project) => <ProjectGroup project={project} />}
+              </For>
+            </Show>
+          </DragDropProvider>
         </div>
 
         <div class="sidebar-footer">
           <button class="new-thread-btn" onClick={() => newThread()}>
-            <span class="plus">+</span> New Thread
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New Thread
           </button>
+          <div class="sidebar-actions">
+            <button class="sidebar-action" onClick={() => setStore("searchOpen", true)} title="Search (Cmd+Shift+F)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              Search
+            </button>
+            <button class="sidebar-action" onClick={() => setStore("usageDashboardOpen", true)} title="Usage (Cmd+Shift+U)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+              Usage
+            </button>
+          </div>
         </div>
       </div>
 
@@ -91,69 +149,105 @@ export function Sidebar() {
         .sidebar-header {
           display: flex;
           align-items: center;
-          padding: 14px 16px;
+          padding: 16px 16px 12px;
           justify-content: space-between;
         }
         .sidebar-title {
-          font-size: 15px;
-          font-weight: 600;
+          font-size: 14px;
+          font-weight: 700;
           color: var(--text);
+          letter-spacing: -0.3px;
         }
         .icon-btn {
-          font-size: 16px;
           color: var(--text-tertiary);
-          padding: 4px 6px;
+          padding: 5px;
           border-radius: var(--radius-sm);
-          transition: background 0.15s;
+          transition: background 0.15s, color 0.15s;
+          display: flex;
+          align-items: center;
         }
         .icon-btn:hover {
           background: var(--bg-accent);
+          color: var(--text-secondary);
         }
         .sidebar-content {
           flex: 1;
           overflow-y: auto;
           overflow-x: hidden;
+          padding: 0 4px;
         }
         .empty-state {
-          padding: 32px 16px;
+          padding: 40px 16px;
           text-align: center;
           color: var(--text-tertiary);
           font-size: 13px;
         }
         .empty-state .hint {
           font-size: 12px;
-          margin-top: 4px;
+          margin-top: 6px;
+          opacity: 0.6;
         }
         .sidebar-footer {
-          padding: 8px;
+          padding: 10px 10px 12px;
           border-top: 1px solid var(--border);
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
         }
         .new-thread-btn {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
           width: 100%;
-          padding: 8px 14px;
+          padding: 8px 12px;
           font-size: 13px;
+          font-weight: 500;
           color: var(--text-secondary);
           border-radius: var(--radius-sm);
-          transition: background 0.15s;
+          transition: all 0.15s ease;
         }
+        .new-thread-btn svg { color: var(--primary); flex-shrink: 0; }
         .new-thread-btn:hover {
-          background: var(--bg-accent);
+          background: rgba(107, 124, 255, 0.08);
+          color: var(--text);
         }
-        .new-thread-btn .plus {
-          color: var(--primary);
-          font-size: 16px;
+        .sidebar-actions {
+          display: flex;
+          gap: 4px;
+        }
+        .sidebar-action {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 5px;
+          padding: 6px 8px;
+          font-size: 11px;
+          font-weight: 500;
+          color: var(--text-tertiary);
+          border-radius: var(--radius-sm);
+          transition: all 0.15s ease;
+        }
+        .sidebar-action:hover {
+          background: var(--bg-accent);
+          color: var(--text-secondary);
         }
         .resize-handle {
-          width: 4px;
+          width: 3px;
           cursor: col-resize;
-          background: var(--border);
+          background: transparent;
           flex-shrink: 0;
           transition: background 0.15s;
+          position: relative;
         }
-        .resize-handle:hover {
+        .resize-handle::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: var(--border);
+          transition: background 0.15s;
+        }
+        .resize-handle:hover::after {
           background: var(--primary);
         }
       `}</style>

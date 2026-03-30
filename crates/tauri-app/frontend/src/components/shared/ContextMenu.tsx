@@ -11,19 +11,16 @@ export function ContextMenu() {
     setStore("contextMenu", null);
   }
 
-  function handleSetColor(color: string | null) {
+  function handleSetGroupColor(color: string | null) {
     const m = menu();
-    if (!m) return;
-    if (m.type === "thread") {
-      ipc.setThreadColor(m.id, color);
-      setStore(
-        "projects",
-        (p) => p.threads.some((t) => t.id === m.id),
-        "threads",
-        (t) => t.id === m.id,
-        "color",
-        color
-      );
+    if (!m || m.type !== "project") return;
+    setStore("projects", (projects) =>
+      projects.map((p) => (p.id === m.id ? { ...p, color } : p))
+    );
+    if (color) {
+      ipc.setSetting(`project_color:${m.id}`, color);
+    } else {
+      ipc.setSetting(`project_color:${m.id}`, "");
     }
     close();
   }
@@ -46,16 +43,17 @@ export function ContextMenu() {
     if (!m) return;
     if (m.type === "thread") {
       ipc.deleteThread(m.id);
-      setStore("projects", (p) => ({
-        ...p,
-        threads: p.threads.filter((t) => t.id !== m.id),
-      }));
+      setStore("projects", (projects) =>
+        projects.map((p) => ({
+          ...p,
+          threads: p.threads.filter((t) => t.id !== m.id),
+        }))
+      );
       setStore("openTabs", (tabs) => tabs.filter((t) => t !== m.id));
       if (store.activeTab === m.id) {
         setStore("activeTab", store.openTabs[store.openTabs.length - 1] || null);
       }
     } else {
-      // For project deletion, just delete the project and keep threads uncategorized
       ipc.deleteProject(m.id, false);
       const threads = store.projects.find((p) => p.id === m.id)?.threads || [];
       setStore("projects", (projects) => {
@@ -73,6 +71,8 @@ export function ContextMenu() {
     close();
   }
 
+  const isProject = () => menu()?.type === "project";
+
   return (
     <Show when={menu()}>
       <div class="context-backdrop" onClick={close}>
@@ -82,31 +82,41 @@ export function ContextMenu() {
           onClick={(e) => e.stopPropagation()}
         >
           <button class="ctx-item" onClick={handleRename}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+            </svg>
             Rename
           </button>
           <button class="ctx-item danger" onClick={handleDelete}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+            </svg>
             Delete
           </button>
-          <div class="ctx-divider" />
-          <div class="ctx-colors">
-            {THREAD_COLORS.map((c) => (
+
+          <Show when={isProject()}>
+            <div class="ctx-divider" />
+            <div class="ctx-color-label">Group Color</div>
+            <div class="ctx-colors">
+              {THREAD_COLORS.map((c) => (
+                <button
+                  class="color-dot"
+                  style={{ background: c.hex }}
+                  onClick={() => handleSetGroupColor(c.hex)}
+                  title={c.label}
+                />
+              ))}
               <button
-                class="color-dot"
-                style={{ color: c.hex }}
-                onClick={() => handleSetColor(c.hex)}
-                title={c.label}
+                class="color-dot clear"
+                onClick={() => handleSetGroupColor(null)}
+                title="Clear color"
               >
-                &#x25CF;
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
-            ))}
-            <button
-              class="color-dot clear"
-              onClick={() => handleSetColor(null)}
-              title="Clear color"
-            >
-              &times;
-            </button>
-          </div>
+            </div>
+          </Show>
         </div>
       </div>
 
@@ -116,48 +126,79 @@ export function ContextMenu() {
           inset: 0;
           z-index: 200;
         }
+        @keyframes ctx-menu-in {
+          from { opacity: 0; transform: scale(0.94) translateY(-2px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
         .context-menu {
           position: fixed;
           background: var(--bg-card);
           border: 1px solid var(--border-strong);
           border-radius: var(--radius-md);
           padding: 4px;
-          min-width: 160px;
+          min-width: 170px;
           z-index: 201;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          animation: ctx-menu-in 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+          transform-origin: top left;
         }
         .ctx-item {
-          display: block;
+          display: flex;
+          align-items: center;
+          gap: 8px;
           width: 100%;
-          padding: 6px 12px;
+          padding: 7px 12px;
           font-size: 12px;
+          font-weight: 500;
           text-align: left;
           border-radius: var(--radius-sm);
           transition: background 0.1s;
-          color: var(--text);
+          color: var(--text-secondary);
         }
-        .ctx-item:hover { background: var(--bg-accent); }
+        .ctx-item svg { color: var(--text-tertiary); flex-shrink: 0; }
+        .ctx-item:hover { background: var(--bg-accent); color: var(--text); }
+        .ctx-item:hover svg { color: var(--text-secondary); }
         .ctx-item.danger { color: var(--red); }
+        .ctx-item.danger svg { color: var(--red); opacity: 0.7; }
+        .ctx-item.danger:hover { background: rgba(242, 95, 103, 0.08); }
         .ctx-divider {
           height: 1px;
           background: var(--border);
           margin: 4px 0;
         }
+        .ctx-color-label {
+          font-size: 10px;
+          font-weight: 600;
+          color: var(--text-tertiary);
+          padding: 4px 10px 2px;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
         .ctx-colors {
           display: flex;
-          gap: 2px;
-          padding: 4px 8px;
+          gap: 3px;
+          padding: 4px 8px 6px;
           flex-wrap: wrap;
         }
         .color-dot {
-          font-size: 16px;
-          padding: 2px;
-          border-radius: var(--radius-sm);
-          transition: background 0.1s;
-          line-height: 1;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          border: 2px solid transparent;
+          transition: transform 0.1s, border-color 0.1s;
+          cursor: pointer;
         }
-        .color-dot:hover { background: var(--bg-accent); }
-        .color-dot.clear { color: var(--text-tertiary); font-size: 14px; }
+        .color-dot:hover { transform: scale(1.15); border-color: rgba(255,255,255,0.2); }
+        .color-dot.clear {
+          background: var(--bg-accent);
+          border: 1px solid var(--border);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .color-dot.clear svg { color: var(--text-tertiary); }
       `}</style>
     </Show>
   );

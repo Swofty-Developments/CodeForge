@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as ipc from "../../ipc";
+import { ModelSelector } from "./ModelSelector";
 
 export function Composer() {
   const { store, setStore, sendUserMessage } = appStore;
@@ -33,7 +34,6 @@ export function Composer() {
 
     const existing = store.projects.find((p) => p.path === path);
     if (existing) {
-      // Move thread to existing group
       await ipc.moveThreadToProject(store.activeTab, existing.id);
       moveThreadLocally(store.activeTab, existing.id);
     } else {
@@ -99,16 +99,28 @@ export function Composer() {
               class="composer-input"
               placeholder="Message..."
               value={store.composerText}
-              onInput={(e) => setStore("composerText", e.currentTarget.value)}
+              onInput={(e) => {
+                setStore("composerText", e.currentTarget.value);
+                const el = e.currentTarget;
+                el.style.height = "auto";
+                el.style.height = Math.min(el.scrollHeight, 120) + "px";
+              }}
               onKeyDown={handleKeyDown}
               rows={1}
             />
             <button
-              class={`send-btn ${isGenerating() ? "stop" : ""}`}
+              class="send-btn"
+              classList={{ stop: isGenerating() }}
               onClick={sendUserMessage}
               disabled={isGenerating()}
             >
-              {isGenerating() ? "\u25A0" : "\u2191"}
+              <Show when={isGenerating()} fallback={
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
+                </svg>
+              }>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+              </Show>
             </button>
           </div>
           <div class="composer-meta">
@@ -116,18 +128,22 @@ export function Composer() {
               class="meta-pill"
               onClick={() => setStore("providerPickerOpen", true)}
             >
-              <span class="provider-dot" style={{ background: "var(--green)" }} />
               {providerLabel()}
-              <span class="chevron">&#x25BC;</span>
+              <span class="provider-dot" style={{ background: "var(--green)" }} />
+              <svg class="chevron" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9" /></svg>
             </button>
+            <ModelSelector />
             <button class="meta-pill subtle" onClick={pickFolder}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              </svg>
               {folderLabel()}
             </button>
             <div class="spacer" />
             <Show when={statusLabel()}>
               <div class="status-pill">
-                <span class="status-dot" style={{ color: statusColor()! }}>&#x25CF;</span>
-                <span style={{ color: statusColor()!, "font-size": "10px" }}>
+                <span class="status-dot" style={{ background: statusColor()! }} />
+                <span class="status-text" style={{ color: statusColor()! }}>
                   {statusLabel()}
                 </span>
               </div>
@@ -159,6 +175,11 @@ if (!document.getElementById("composer-styles")) {
       display: flex;
       flex-direction: column;
       gap: 8px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .composer-card:focus-within {
+      border-color: var(--border-glow);
+      box-shadow: 0 0 0 2px var(--primary-glow), 0 4px 16px rgba(0, 0, 0, 0.15);
     }
     .composer-input-row {
       display: flex;
@@ -177,7 +198,7 @@ if (!document.getElementById("composer-styles")) {
       line-height: 1.4;
       min-height: 22px;
       max-height: 120px;
-      font-family: inherit;
+      font-family: var(--font-body);
     }
     .send-btn {
       width: 32px;
@@ -185,16 +206,16 @@ if (!document.getElementById("composer-styles")) {
       border-radius: 50%;
       background: var(--primary);
       color: white;
-      font-size: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      transition: background 0.15s;
+      transition: background 0.15s, transform 0.1s;
     }
-    .send-btn:hover { filter: brightness(1.1); }
-    .send-btn.stop { background: var(--red); font-size: 12px; }
-    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .send-btn:hover { filter: brightness(1.1); transform: scale(1.04); }
+    .send-btn:active { transform: scale(0.96); }
+    .send-btn.stop { background: var(--red); }
+    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
     .composer-meta {
       display: flex;
       align-items: center;
@@ -202,6 +223,7 @@ if (!document.getElementById("composer-styles")) {
     }
     .meta-pill {
       font-size: 11px;
+      font-weight: 500;
       color: var(--text-secondary);
       padding: 4px 10px 4px 8px;
       border-radius: var(--radius-pill);
@@ -214,31 +236,40 @@ if (!document.getElementById("composer-styles")) {
     }
     .meta-pill:hover { background: var(--bg-accent); border-color: var(--border-strong); }
     .meta-pill .chevron {
-      font-size: 8px;
       color: var(--text-tertiary);
-      transition: transform 0.15s;
+      transition: color 0.15s;
     }
     .meta-pill:hover .chevron { color: var(--text-secondary); }
     .provider-dot {
-      width: 6px;
-      height: 6px;
+      width: 5px;
+      height: 5px;
       border-radius: 50%;
       flex-shrink: 0;
     }
     .meta-pill.subtle {
       background: none;
+      border-color: transparent;
       color: var(--text-tertiary);
+    }
+    .meta-pill.subtle:hover {
+      background: var(--bg-hover);
+      border-color: var(--border);
     }
     .spacer { flex: 1; }
     .status-pill {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 5px;
       padding: 3px 8px;
       border-radius: var(--radius-pill);
       background: var(--bg-muted);
     }
-    .status-dot { font-size: 6px; }
+    .status-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+    }
+    .status-text { font-size: 10px; font-weight: 500; }
   `;
   document.head.appendChild(style);
 }
