@@ -1,8 +1,9 @@
-import { Show } from "solid-js";
+import { Show, For, createSignal } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as ipc from "../../ipc";
 import { ModelSelector } from "./ModelSelector";
+import type { Attachment } from "../../types";
 
 export function Composer() {
   const { store, setStore, sendUserMessage } = appStore;
@@ -69,6 +70,35 @@ export function Composer() {
     }
   }
 
+  const [dragOver, setDragOver] = createSignal(false);
+
+  function removeAttachment(id: string) {
+    setStore("attachments", (a) => a.filter((x) => x.id !== id));
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const files = e.dataTransfer?.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = reader.result as string;
+        const ext = file.name.split(".").pop() || "";
+        const lang = { ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", py: "python", rs: "rust", go: "go", css: "css", html: "html", json: "json", md: "markdown", yaml: "yaml", yml: "yaml", toml: "toml", sh: "bash" }[ext] || "";
+        setStore("attachments", (prev) => [...prev, {
+          id: crypto.randomUUID(),
+          type: "file" as const,
+          name: file.name,
+          content,
+          language: lang,
+        }]);
+      };
+      reader.readAsText(file);
+    }
+  }
+
   const providerLabel = () =>
     store.selectedProvider === "claude_code" ? "Claude Code" : "Codex";
 
@@ -93,7 +123,33 @@ export function Composer() {
   return (
     <Show when={isActive()}>
       <div class="composer-wrapper">
-        <div class="composer-card">
+        <div
+          class="composer-card"
+          classList={{ "drag-over": dragOver() }}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+        >
+          <Show when={store.attachments.length > 0}>
+            <div class="attachment-chips">
+              <For each={store.attachments}>
+                {(att) => (
+                  <div class="attachment-chip" classList={{ extraction: att.type === "extraction" }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      {att.type === "extraction"
+                        ? <><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></>
+                        : <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></>
+                      }
+                    </svg>
+                    <span class="attachment-name">{att.name}</span>
+                    <button class="attachment-remove" onClick={() => removeAttachment(att.id)}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
           <div class="composer-input-row">
             <textarea
               class="composer-input"
@@ -181,6 +237,47 @@ if (!document.getElementById("composer-styles")) {
       border-color: var(--border-glow);
       box-shadow: 0 0 0 2px var(--primary-glow), 0 4px 16px rgba(0, 0, 0, 0.15);
     }
+    .composer-card.drag-over {
+      border-color: var(--primary);
+      background: rgba(107, 124, 255, 0.04);
+    }
+    .attachment-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding-bottom: 4px;
+    }
+    .attachment-chip {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 6px 3px 8px;
+      background: var(--bg-muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .attachment-chip.extraction {
+      border-color: rgba(107, 124, 255, 0.2);
+      background: rgba(107, 124, 255, 0.06);
+      color: var(--primary);
+    }
+    .attachment-chip svg { flex-shrink: 0; }
+    .attachment-name {
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .attachment-remove {
+      width: 16px; height: 16px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 3px;
+      color: var(--text-tertiary);
+      transition: background 0.1s, color 0.1s;
+    }
+    .attachment-remove:hover { background: var(--bg-accent); color: var(--text); }
     .composer-input-row {
       display: flex;
       align-items: flex-end;

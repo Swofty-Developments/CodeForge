@@ -1,6 +1,6 @@
 import { createRoot } from "solid-js";
 import { createStore } from "solid-js/store";
-import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload } from "../types";
+import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload, Attachment } from "../types";
 import * as ipc from "../ipc";
 
 export interface PendingApproval {
@@ -38,6 +38,7 @@ export interface AppStore {
   threadBrowserUrls: Record<string, string>;
   autoNamingEnabled: boolean;
   namingInProgress: Record<string, boolean>;
+  attachments: Attachment[];
 }
 
 function createAppStore() {
@@ -69,6 +70,7 @@ function createAppStore() {
     threadBrowserUrls: {},
     autoNamingEnabled: true,
     namingInProgress: {},
+    attachments: [],
   });
 
   async function loadData() {
@@ -171,14 +173,23 @@ function createAppStore() {
 
   async function sendUserMessage() {
     const text = store.composerText.trim();
-    if (!text || !store.activeTab) return;
+    const atts = [...store.attachments];
+    if ((!text && atts.length === 0) || !store.activeTab) return;
 
     const threadId = store.activeTab;
     setStore("composerText", "");
+    setStore("attachments", []);
+
+    // Build full message: user text + attachment context blocks
+    let fullText = text;
+    for (const att of atts) {
+      const lang = att.language || (att.type === "extraction" ? "html" : "");
+      fullText += `\n\n--- Attached: ${att.name} ---\n\`\`\`${lang}\n${att.content}\n\`\`\``;
+    }
 
     try {
-      const msgId = await ipc.persistUserMessage(threadId, text);
-      const userMsg: ChatMessage = { id: msgId, thread_id: threadId, role: "user", content: text };
+      const msgId = await ipc.persistUserMessage(threadId, fullText);
+      const userMsg: ChatMessage = { id: msgId, thread_id: threadId, role: "user", content: fullText };
       setStore("threadMessages", threadId, (msgs) => [...(msgs || []), userMsg]);
 
       const project = store.projects.find((p) => p.threads.some((t) => t.id === threadId));

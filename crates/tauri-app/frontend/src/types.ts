@@ -46,6 +46,14 @@ export interface AgentEventPayload {
   model?: string;
 }
 
+export interface Attachment {
+  id: string;
+  type: "file" | "extraction" | "image";
+  name: string;
+  content: string;
+  language?: string;
+}
+
 export type SessionStatus = "idle" | "starting" | "ready" | "generating" | "error";
 
 export const THREAD_COLORS = [

@@ -55,8 +55,14 @@ export function BrowserPanel(props: Props) {
           break;
         case "extraction":
           if (p.html) {
-            const ctx = `**Extracted from ${currentUrl()}**${p.selector ? ` \`${p.selector}\`` : ""}\n\n\`\`\`html\n${p.html}\n\`\`\`\n\n\`\`\`css\n${p.css || "{}"}\n\`\`\``;
-            setStore("composerText", (prev: string) => prev ? prev + "\n\n" + ctx : ctx);
+            const content = `<!-- From ${currentUrl()} ${p.selector || ""} -->\n${p.html}\n\n/* Computed styles */\n${p.css || "{}"}`;
+            setStore("attachments", (prev) => [...prev, {
+              id: crypto.randomUUID(),
+              type: "extraction" as const,
+              name: p.selector || "Element",
+              content,
+              language: "html",
+            }]);
           }
           setInspecting(false);
           break;
