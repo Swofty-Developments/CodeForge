@@ -2,6 +2,8 @@
 
 An AI code editor that wraps Claude Code and Codex into a native desktop app with multi-thread sessions, an embedded browser, and a sleek dark UI.
 
+<img width="2120" height="2066" alt="image" src="https://github.com/user-attachments/assets/a75f356e-9877-4a4c-8fb4-ca6c4363cd18" />
+
 > **Note**: This project is under active development and is not yet production-ready.
 
 ## Features
