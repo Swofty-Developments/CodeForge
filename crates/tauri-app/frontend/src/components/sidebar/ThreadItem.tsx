@@ -134,7 +134,7 @@ if (!document.getElementById("thread-item-styles")) {
       padding: 5px 12px; margin: 1px 0;
       border-radius: var(--radius-sm); cursor: pointer;
       transition: background 0.15s, color 0.15s;
-      font-size: 13px; color: var(--text-secondary);
+      font-size: 13px; color: var(--text);
       touch-action: none;
       position: relative;
     }

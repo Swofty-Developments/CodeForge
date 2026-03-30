@@ -32,17 +32,20 @@ export function BrowserPanel(props: BrowserPanelProps) {
     ).catch(() => {});
   }
 
-  // Observe viewport resizes
+  // Keep bounds in sync — ResizeObserver + polling fallback
   onMount(() => {
     const ro = new ResizeObserver(() => updateBounds());
     if (viewportRef) ro.observe(viewportRef);
 
-    // Also update on scroll/resize of the window
     window.addEventListener("resize", updateBounds);
+
+    // Poll every 200ms as fallback for layout changes (sidebar resize, pane drag, etc.)
+    const interval = setInterval(updateBounds, 200);
 
     onCleanup(() => {
       ro.disconnect();
       window.removeEventListener("resize", updateBounds);
+      clearInterval(interval);
       // Hide webview when panel unmounts (thread switch)
       ipc.browserHide(props.threadId).catch(() => {});
     });

@@ -204,7 +204,7 @@ if (!document.getElementById("tab-bar-styles")) {
       padding: 6px 12px;
       font-size: 12px;
       font-weight: 500;
-      color: var(--text-tertiary);
+      color: var(--text-secondary);
       border-radius: var(--radius-sm) var(--radius-sm) 0 0;
       cursor: grab;
       transition: background 0.12s, color 0.12s, opacity 0.15s;
