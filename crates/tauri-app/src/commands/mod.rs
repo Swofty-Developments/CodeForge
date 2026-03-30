@@ -1,5 +1,11 @@
+pub mod browser;
+pub mod diff;
+pub mod naming;
 pub mod projects;
 pub mod providers;
+pub mod search;
 pub mod sessions;
 pub mod settings;
 pub mod threads;
+pub mod usage;
+pub mod worktree;

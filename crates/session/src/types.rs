@@ -45,6 +45,15 @@ pub enum AgentEvent {
     SessionReady,
     /// An error occurred in the session.
     SessionError { message: String },
+    /// Usage/cost report for a completed turn.
+    UsageReport {
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_write_tokens: u64,
+        cost_usd: f64,
+        model: String,
+    },
 }
 
 /// Metadata for an active session.

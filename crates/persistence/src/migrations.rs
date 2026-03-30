@@ -55,5 +55,23 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch("ALTER TABLE threads ADD COLUMN color TEXT;")?;
     }
 
+    // Usage logs table
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS usage_logs (
+            id TEXT PRIMARY KEY NOT NULL,
+            thread_id TEXT NOT NULL,
+            session_id TEXT,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_usd REAL NOT NULL DEFAULT 0,
+            model TEXT,
+            created_at TEXT NOT NULL
+        );
+        ",
+    )?;
+
     Ok(())
 }

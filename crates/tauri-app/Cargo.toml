@@ -7,7 +7,7 @@ edition.workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 codeforge-session = { path = "../session" }
@@ -21,3 +21,4 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 rusqlite = "0.31"
+url = "2"

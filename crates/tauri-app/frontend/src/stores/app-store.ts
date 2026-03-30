@@ -27,6 +27,17 @@ export interface AppStore {
   draggingTab: string | null;
   draggingSidebarThread: string | null;
   providerPickerOpen: boolean;
+  commandPaletteOpen: boolean;
+  searchOpen: boolean;
+  usageDashboardOpen: boolean;
+  worktrees: Record<string, { thread_id: string; branch: string; path: string; active: boolean } | undefined>;
+  splitTab: string | null;
+  diffPanelOpen: boolean;
+  selectedModel: string | null;
+  threadBrowserOpen: Record<string, boolean>;
+  threadBrowserUrls: Record<string, string>;
+  autoNamingEnabled: boolean;
+  namingInProgress: Record<string, boolean>;
 }
 
 function createAppStore() {
@@ -47,6 +58,17 @@ function createAppStore() {
     draggingTab: null,
     draggingSidebarThread: null,
     providerPickerOpen: false,
+    commandPaletteOpen: false,
+    searchOpen: false,
+    usageDashboardOpen: false,
+    worktrees: {},
+    splitTab: null,
+    diffPanelOpen: false,
+    selectedModel: null,
+    threadBrowserOpen: {},
+    threadBrowserUrls: {},
+    autoNamingEnabled: true,
+    namingInProgress: {},
   });
 
   async function loadData() {
@@ -56,8 +78,10 @@ function createAppStore() {
 
       for (const p of rawProjects) {
         const rawThreads = await ipc.getThreadsByProject(p.id);
+        const savedColor = await ipc.getSetting(`project_color:${p.id}`);
         projects.push({
           ...p,
+          color: savedColor || null,
           collapsed: false,
           threads: rawThreads.map((t) => ({ ...t })),
         });
@@ -113,6 +137,11 @@ function createAppStore() {
     }
   }
 
+  function setSplitTab(id: string | null) {
+    setStore("splitTab", id);
+    if (id) loadThreadMessages(id);
+  }
+
   function selectThread(id: string) {
     if (!store.openTabs.includes(id)) {
       setStore("openTabs", (tabs) => [...tabs, id]);
@@ -153,10 +182,11 @@ function createAppStore() {
       setStore("threadMessages", threadId, (msgs) => [...(msgs || []), userMsg]);
 
       const project = store.projects.find((p) => p.threads.some((t) => t.id === threadId));
-      const cwd = project && project.path !== "." ? project.path : ".";
+      const wt = store.worktrees[threadId];
+      const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
 
       setStore("sessionStatuses", threadId, "generating");
-      await ipc.sendMessage(threadId, text, store.selectedProvider, cwd);
+      await ipc.sendMessage(threadId, text, store.selectedProvider, cwd, store.selectedModel ?? undefined);
     } catch (e) {
       const errMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -189,6 +219,7 @@ function createAppStore() {
 
   function handleAgentEvent(payload: AgentEventPayload) {
     const { thread_id, event_type } = payload;
+    console.log(`[agent-event] ${event_type}`, event_type === "content_delta" ? payload.text?.slice(0, 40) : "");
 
     switch (event_type) {
       case "content_delta": {
@@ -215,6 +246,8 @@ function createAppStore() {
           }
           return msgs;
         });
+        // Auto-name thread after 3+ messages if enabled and not already named
+        maybeAutoNameThread(thread_id);
         break;
       case "turn_aborted":
         setStore("sessionStatuses", thread_id, "ready");
@@ -249,6 +282,42 @@ function createAppStore() {
     }
   }
 
+  async function maybeAutoNameThread(threadId: string) {
+    if (!store.autoNamingEnabled) return;
+    if (store.namingInProgress[threadId]) return;
+
+    const msgs = store.threadMessages[threadId];
+    if (!msgs || msgs.length < 3) return;
+
+    // Check if thread still has a default name like "Thread N"
+    const thread = store.projects.flatMap((p) => p.threads).find((t) => t.id === threadId);
+    if (!thread || !thread.title.match(/^Thread \d+$/)) return;
+
+    setStore("namingInProgress", threadId, true);
+
+    try {
+      // Build a summary of the first few messages
+      const summary = msgs
+        .slice(0, 6)
+        .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
+        .join("\n");
+
+      const name = await ipc.autoNameThread(threadId, summary, store.selectedProvider);
+      if (name) {
+        setStore("projects", (projects) =>
+          projects.map((p) => ({
+            ...p,
+            threads: p.threads.map((t) => t.id === threadId ? { ...t, title: name } : t),
+          }))
+        );
+      }
+    } catch (e) {
+      console.error("Auto-naming failed:", e);
+    } finally {
+      setStore("namingInProgress", threadId, false);
+    }
+  }
+
   return {
     store,
     setStore,
@@ -261,6 +330,7 @@ function createAppStore() {
     sendUserMessage,
     approveRequest,
     denyRequest,
+    setSplitTab,
     handleAgentEvent,
   };
 }

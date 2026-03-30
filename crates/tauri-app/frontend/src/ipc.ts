@@ -50,8 +50,9 @@ export const sendMessage = (
   threadId: string,
   text: string,
   provider: string,
-  cwd: string
-) => invoke("send_message", { threadId, text, provider, cwd });
+  cwd: string,
+  model?: string
+) => invoke("send_message", { threadId, text, provider, cwd, model: model || null });
 
 export const stopSession = (threadId: string) =>
   invoke("stop_session", { threadId });
@@ -83,6 +84,133 @@ export interface ProviderInfo {
 
 export const getProviderInfo = () =>
   invoke<ProviderInfo[]>("get_provider_info");
+
+// Worktrees
+export interface WorktreeInfo {
+  thread_id: string;
+  branch: string;
+  path: string;
+  active: boolean;
+}
+
+export const createWorktree = (threadId: string, threadTitle: string, projectPath: string) =>
+  invoke<WorktreeInfo>("create_worktree", { threadId, threadTitle, projectPath });
+
+export const getWorktree = (threadId: string) =>
+  invoke<WorktreeInfo | null>("get_worktree", { threadId });
+
+export const mergeWorktree = (threadId: string, projectPath: string) =>
+  invoke<string>("merge_worktree", { threadId, projectPath });
+
+// Search
+export interface SearchResult {
+  thread_id: string;
+  thread_title: string;
+  project_name: string;
+  message_id: string;
+  role: string;
+  content_snippet: string;
+  match_index: number;
+}
+
+export const searchMessages = (query: string) =>
+  invoke<SearchResult[]>("search_messages", { query });
+
+// Usage
+export interface ThreadCost {
+  thread_id: string;
+  thread_title: string;
+  cost_usd: number;
+  total_tokens: number;
+}
+
+export interface ModelCost {
+  model: string;
+  cost_usd: number;
+  total_tokens: number;
+}
+
+export interface UsageSummary {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_cost_usd: number;
+  thread_costs: ThreadCost[];
+  model_costs: ModelCost[];
+}
+
+export interface ThreadUsage {
+  thread_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+}
+
+export const getUsageSummary = () =>
+  invoke<UsageSummary>("get_usage_summary");
+
+export const getThreadUsage = (threadId: string) =>
+  invoke<ThreadUsage>("get_thread_usage", { threadId });
+
+// Diff
+export interface ChangedFile {
+  path: string;
+  status: string;
+  insertions: number;
+  deletions: number;
+}
+
+export interface DiffLine {
+  line_type: string;
+  content: string;
+  old_line: number | null;
+  new_line: number | null;
+}
+
+export interface DiffHunk {
+  header: string;
+  lines: DiffLine[];
+}
+
+export interface FileDiff {
+  path: string;
+  hunks: DiffHunk[];
+}
+
+export const getChangedFiles = (cwd: string) =>
+  invoke<ChangedFile[]>("get_changed_files", { cwd });
+
+export const getSessionDiff = (cwd: string) =>
+  invoke<FileDiff[]>("get_session_diff", { cwd });
+
+export const getFileDiff = (cwd: string, filePath: string) =>
+  invoke<string>("get_file_diff", { cwd, filePath });
+
+export const getFileContent = (cwd: string, filePath: string, version: string) =>
+  invoke<string>("get_file_content", { cwd, filePath, version });
+
+// Browser (native Tauri webview)
+export const browserOpen = (threadId: string, url: string, x: number, y: number, width: number, height: number) =>
+  invoke("browser_open", { threadId, url, x, y, width, height });
+export const browserNavigate = (threadId: string, url: string) =>
+  invoke("browser_navigate", { threadId, url });
+export const browserSetBounds = (threadId: string, x: number, y: number, width: number, height: number) =>
+  invoke("browser_set_bounds", { threadId, x, y, width, height });
+export const browserEval = (threadId: string, js: string) =>
+  invoke("browser_eval", { threadId, js });
+export const browserHide = (threadId: string) =>
+  invoke("browser_hide", { threadId });
+export const browserShow = (threadId: string, x: number, y: number, width: number, height: number) =>
+  invoke("browser_show", { threadId, x, y, width, height });
+export const browserClose = (threadId: string) =>
+  invoke("browser_close", { threadId });
+
+// Naming
+export const autoNameThread = (threadId: string, messagesSummary: string, provider: string) =>
+  invoke<string>("auto_name_thread", { threadId, messagesSummary, provider });
 
 // Events
 export const listenAgentEvent = (callback: (payload: AgentEventPayload) => void) =>

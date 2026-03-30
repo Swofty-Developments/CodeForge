@@ -269,6 +269,90 @@ pub fn delete_setting(conn: &Connection, key: &str) -> anyhow::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Usage Logs
+// ---------------------------------------------------------------------------
+
+pub fn insert_usage_log(
+    conn: &Connection,
+    id: &str,
+    thread_id: &str,
+    session_id: Option<&str>,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    cost_usd: f64,
+    model: Option<&str>,
+    created_at: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO usage_logs (id, thread_id, session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, model, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![id, thread_id, session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, model, created_at],
+    )?;
+    Ok(())
+}
+
+pub fn get_usage_totals(conn: &Connection) -> anyhow::Result<(i64, i64, i64, i64, f64)> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost_usd),0.0) FROM usage_logs",
+    )?;
+    let result = stmt.query_row([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, f64>(4)?,
+        ))
+    })?;
+    Ok(result)
+}
+
+pub fn get_usage_by_thread(conn: &Connection) -> anyhow::Result<Vec<(String, f64, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT u.thread_id, COALESCE(SUM(u.cost_usd),0.0), COALESCE(SUM(u.input_tokens + u.output_tokens),0) FROM usage_logs u GROUP BY u.thread_id ORDER BY SUM(u.cost_usd) DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    rows.map(|r| r.map_err(Into::into)).collect()
+}
+
+pub fn get_usage_by_model(conn: &Connection) -> anyhow::Result<Vec<(String, f64, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(model,'unknown'), COALESCE(SUM(cost_usd),0.0), COALESCE(SUM(input_tokens + output_tokens),0) FROM usage_logs GROUP BY model ORDER BY SUM(cost_usd) DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    rows.map(|r| r.map_err(Into::into)).collect()
+}
+
+pub fn get_usage_for_thread(conn: &Connection, thread_id: &str) -> anyhow::Result<(i64, i64, i64, i64, f64)> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0), COALESCE(SUM(cost_usd),0.0) FROM usage_logs WHERE thread_id = ?1",
+    )?;
+    let result = stmt.query_row(params![thread_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, f64>(4)?,
+        ))
+    })?;
+    Ok(result)
+}
+
+// ---------------------------------------------------------------------------
 // Internal row types for mapping from SQLite text columns
 // ---------------------------------------------------------------------------
 
