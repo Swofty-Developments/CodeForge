@@ -25,3 +25,5 @@ Thumbs.db
 
 # App data
 .codeforge/
+playwright-report/
+test-results/

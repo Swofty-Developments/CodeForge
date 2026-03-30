@@ -6,19 +6,27 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
+    "@dnd-kit/helpers": "^0.3.2",
+    "@dnd-kit/solid": "^0.3.2",
+    "highlight.js": "^11.11.1",
+    "marked": "^17.0.5",
+    "playwright": "^1.58.2",
     "solid-js": "^1.9.12",
     "typescript": "^6.0.2",
     "vite": "^8.0.3",
     "vite-plugin-solid": "^2.11.11"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@solidjs/router": "^0.16.1",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0"
