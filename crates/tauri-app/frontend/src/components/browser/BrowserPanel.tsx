@@ -14,6 +14,7 @@ export function BrowserPanel(props: Props) {
   const [currentUrl, setCurrentUrl] = createSignal(urlInput());
   const [inspecting, setInspecting] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
+  let extractPending = false;
   let canvasRef: HTMLCanvasElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let img = new Image();
@@ -54,7 +55,8 @@ export function BrowserPanel(props: Props) {
           setLoading(false);
           break;
         case "extraction":
-          if (p.html) {
+          if (p.html && extractPending) {
+            extractPending = false;
             const content = `<!-- From ${currentUrl()} ${p.selector || ""} -->\n${p.html}\n\n/* Computed styles */\n${p.css || "{}"}`;
             setStore("attachments", (prev) => [...prev, {
               id: crypto.randomUUID(),
@@ -100,10 +102,8 @@ export function BrowserPanel(props: Props) {
   function handleClick(e: MouseEvent) {
     const { x, y } = toVP(e);
     if (inspecting()) {
-      // Click selects element, then extract
-      ipc.browserClick(props.threadId, x, y).then(() => {
-        setTimeout(() => ipc.browserExtract(props.threadId), 100);
-      });
+      extractPending = true;
+      ipc.browserExtract(props.threadId);
     } else {
       ipc.browserClick(props.threadId, x, y);
     }
