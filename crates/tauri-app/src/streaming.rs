@@ -112,6 +112,41 @@ pub fn spawn_event_forwarder(
                     description: Some(description.clone()),
                     ..default_payload()
                 },
+                AgentEvent::UsageReport {
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    cost_usd,
+                    ref model,
+                } => {
+                    // Persist usage to database
+                    if let Ok(db) = db.lock() {
+                        let id = Uuid::new_v4().to_string();
+                        let now = chrono::Utc::now().to_rfc3339();
+                        let _ = codeforge_persistence::queries::insert_usage_log(
+                            db.conn(),
+                            &id,
+                            &thread_id.to_string(),
+                            Some(&session_id.to_string()),
+                            *input_tokens as i64,
+                            *output_tokens as i64,
+                            *cache_read_tokens as i64,
+                            *cache_write_tokens as i64,
+                            *cost_usd,
+                            Some(model),
+                            &now,
+                        );
+                    }
+
+                    AgentEventPayload {
+                        session_id: session_id.to_string(),
+                        thread_id: thread_id.to_string(),
+                        event_type: "usage_report".into(),
+                        text: Some(format!("{cost_usd:.6}")),
+                        ..default_payload()
+                    }
+                }
                 AgentEvent::SessionReady => AgentEventPayload {
                     session_id: session_id.to_string(),
                     thread_id: thread_id.to_string(),
@@ -127,6 +162,7 @@ pub fn spawn_event_forwarder(
                 },
             };
 
+            tracing::debug!("Emitting agent-event: {} (text: {:?})", payload.event_type, payload.text.as_deref().map(|t| &t[..t.len().min(40)]));
             let _ = app.emit("agent-event", &payload);
         }
     });

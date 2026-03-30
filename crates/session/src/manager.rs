@@ -40,12 +40,13 @@ impl SessionManager {
         &mut self,
         provider: Provider,
         cwd: &Path,
+        model: Option<&str>,
     ) -> Result<(SessionId, mpsc::UnboundedReceiver<AgentEvent>)> {
         let id = uuid::Uuid::new_v4();
 
         let (active, event_rx) = match provider {
             Provider::ClaudeCode => {
-                let (session, rx) = ClaudeSession::start(cwd)
+                let (session, rx) = ClaudeSession::start(cwd, model)
                     .await
                     .context("Failed to start Claude Code session")?;
                 (ActiveSession::Claude(session), rx)
