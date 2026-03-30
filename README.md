@@ -1,6 +1,6 @@
 # CodeForge
 
-A Tauri-based AI code editor that wraps Claude Code and Codex into a native desktop app with multi-thread sessions, an embedded browser, and a sleek dark UI.
+An AI code editor that wraps Claude Code and Codex into a native desktop app with multi-thread sessions, an embedded browser, and a sleek dark UI.
 
 > **Note**: This project is under active development and is not yet production-ready.
 
@@ -19,17 +19,6 @@ A Tauri-based AI code editor that wraps Claude Code and Codex into a native desk
 - **Split View** - Side-by-side thread comparison
 - **Worktree Management** - Git worktree per thread for isolated changes
 - **Per-Thread Browser** - Each thread gets its own browser instance with independent state
-
-## Architecture
-
-```
-crates/
-  session/        # Claude Code & Codex subprocess management
-  persistence/    # SQLite database (threads, messages, settings, usage)
-  tauri-app/      # Tauri shell, commands, and SolidJS frontend
-    frontend/     # SolidJS + Vite
-    browser-sidecar/  # Playwright CDP screencast process
-```
 
 ## Requirements
 
@@ -78,14 +67,6 @@ cargo test -p codeforge-session --test claude_integration
 | Cmd+\ | Split view |
 | Enter | Send message |
 | Shift+Enter | New line |
-
-## Tech Stack
-
-- **Backend**: Rust, Tauri 2, SQLite
-- **Frontend**: SolidJS, Vite, TypeScript
-- **Browser**: Playwright, Chrome DevTools Protocol
-- **AI**: Claude Code CLI, Codex CLI
-- **Design**: DM Sans + JetBrains Mono, custom dark theme
 
 ## License
 
