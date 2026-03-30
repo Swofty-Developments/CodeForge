@@ -24,7 +24,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const { chromium } = await import(join(__dirname, '..', 'frontend', 'node_modules', 'playwright', 'index.mjs'));
 import { createInterface } from 'readline';
 
-const VIEWPORT = { width: 900, height: 600 };
+const VIEWPORT = { width: 1200, height: 800 };
 
 let browser, context, page;
 
@@ -44,6 +44,7 @@ async function init() {
     });
     context = await browser.newContext({
       viewport: VIEWPORT,
+      deviceScaleFactor: 2,
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     });
     page = await context.newPage();

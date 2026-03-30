@@ -192,21 +192,37 @@ export const getFileDiff = (cwd: string, filePath: string) =>
 export const getFileContent = (cwd: string, filePath: string, version: string) =>
   invoke<string>("get_file_content", { cwd, filePath, version });
 
-// Browser (native Tauri webview)
-export const browserOpen = (threadId: string, url: string, x: number, y: number, width: number, height: number) =>
-  invoke("browser_open", { threadId, url, x, y, width, height });
+// Browser (Playwright-backed, screenshot-based)
 export const browserNavigate = (threadId: string, url: string) =>
   invoke("browser_navigate", { threadId, url });
-export const browserSetBounds = (threadId: string, x: number, y: number, width: number, height: number) =>
-  invoke("browser_set_bounds", { threadId, x, y, width, height });
-export const browserEval = (threadId: string, js: string) =>
-  invoke("browser_eval", { threadId, js });
-export const browserHide = (threadId: string) =>
-  invoke("browser_hide", { threadId });
-export const browserShow = (threadId: string, x: number, y: number, width: number, height: number) =>
-  invoke("browser_show", { threadId, x, y, width, height });
+export const browserClick = (threadId: string, x: number, y: number) =>
+  invoke("browser_click", { threadId, x, y });
+export const browserScroll = (threadId: string, deltaY: number) =>
+  invoke("browser_scroll", { threadId, deltaY });
+export const browserTypeText = (threadId: string, text: string) =>
+  invoke("browser_type_text", { threadId, text });
+export const browserKeypress = (threadId: string, key: string) =>
+  invoke("browser_keypress", { threadId, key });
+export const browserBack = (threadId: string) =>
+  invoke("browser_back", { threadId });
+export const browserForward = (threadId: string) =>
+  invoke("browser_forward", { threadId });
+export const browserReload = (threadId: string) =>
+  invoke("browser_reload", { threadId });
+export const browserResize = (threadId: string, width: number, height: number) =>
+  invoke("browser_resize", { threadId, width, height });
 export const browserClose = (threadId: string) =>
   invoke("browser_close", { threadId });
+
+export interface BrowserEventPayload {
+  thread_id: string;
+  type: string;
+  data?: string;
+  url?: string;
+}
+
+export const listenBrowserEvent = (callback: (payload: BrowserEventPayload) => void) =>
+  listen<BrowserEventPayload>("browser-event", (e) => callback(e.payload));
 
 // Naming
 export const autoNameThread = (threadId: string, messagesSummary: string, provider: string) =>

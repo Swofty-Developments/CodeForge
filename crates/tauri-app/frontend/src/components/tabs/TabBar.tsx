@@ -161,7 +161,7 @@ if (!document.getElementById("tab-bar-styles")) {
       gap: 2px;
       padding: 0 2px 4px;
       flex-shrink: 0;
-      margin-left: 8px;
+      margin-left: 4px;
     }
     .tb-action {
       width: 24px;

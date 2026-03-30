@@ -1,152 +1,159 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewBuilder};
-use tokio::sync::Mutex;
+use serde::Serialize;
+use tauri::Emitter;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::{mpsc, Mutex};
 
-struct BrowserWebview {
-    label: String,
-}
-
-fn browsers() -> &'static Arc<Mutex<HashMap<String, BrowserWebview>>> {
-    static INSTANCE: std::sync::OnceLock<Arc<Mutex<HashMap<String, BrowserWebview>>>> =
+fn browsers() -> &'static Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>> {
+    static INSTANCE: std::sync::OnceLock<Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>> =
         std::sync::OnceLock::new();
     INSTANCE.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
 }
 
-fn webview_label(thread_id: &str) -> String {
-    // Labels must be alphanumeric + hyphens
-    format!("browser-{}", thread_id.replace(|c: char| !c.is_alphanumeric() && c != '-', ""))
+fn sidecar_path() -> Result<std::path::PathBuf, String> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let candidates = [
+        cwd.join("crates/tauri-app/browser-sidecar/browser.mjs"),
+        cwd.join("browser-sidecar/browser.mjs"),
+    ];
+    candidates.into_iter().find(|p| p.exists())
+        .ok_or_else(|| "Browser sidecar not found".into())
 }
 
-#[tauri::command]
-pub async fn browser_open(
-    app: tauri::AppHandle,
-    thread_id: String,
-    url: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    let label = webview_label(&thread_id);
+async fn ensure_browser(thread_id: &str, app: &tauri::AppHandle) -> Result<(), String> {
     let mut map = browsers().lock().await;
-
-    // If already exists, just navigate and reposition
-    if map.contains_key(&thread_id) {
-        if let Some(wv) = app.get_webview(&label) {
-            let parsed: url::Url = url.parse().map_err(|e: url::ParseError| e.to_string())?;
-            wv.navigate(parsed).map_err(|e| e.to_string())?;
-            wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
-            wv.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
-        }
+    if map.contains_key(thread_id) {
         return Ok(());
     }
 
-    let parsed: url::Url = url.parse().unwrap_or_else(|_| "about:blank".parse().unwrap());
+    let script = sidecar_path()?;
+    let mut child = Command::new("node")
+        .arg(&script)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn browser: {e}"))?;
 
-    // Get the underlying Window (not WebviewWindow) to call add_child
-    let windows = app.windows();
-    let window = windows.values().next().ok_or("No window found")?;
+    let stdout = child.stdout.take().ok_or("No stdout")?;
+    let stdin = child.stdin.take().ok_or("No stdin")?;
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed));
-
-    window
-        .add_child(
-            builder,
-            LogicalPosition::new(x, y),
-            LogicalSize::new(width, height),
-        )
-        .map_err(|e| format!("Failed to create browser webview: {e}"))?;
-
-    map.insert(thread_id, BrowserWebview { label });
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn browser_navigate(
-    app: tauri::AppHandle,
-    thread_id: String,
-    url: String,
-) -> Result<(), String> {
-    let map = browsers().lock().await;
-    let bw = map.get(&thread_id).ok_or("No browser for this thread")?;
-    let wv = app.get_webview(&bw.label).ok_or("Webview not found")?;
-    let parsed: url::Url = url.parse().map_err(|e: url::ParseError| e.to_string())?;
-    wv.navigate(parsed).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn browser_set_bounds(
-    app: tauri::AppHandle,
-    thread_id: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    let map = browsers().lock().await;
-    let bw = map.get(&thread_id).ok_or("No browser for this thread")?;
-    let wv = app.get_webview(&bw.label).ok_or("Webview not found")?;
-    wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
-    wv.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn browser_eval(
-    app: tauri::AppHandle,
-    thread_id: String,
-    js: String,
-) -> Result<(), String> {
-    let map = browsers().lock().await;
-    let bw = map.get(&thread_id).ok_or("No browser for this thread")?;
-    let wv = app.get_webview(&bw.label).ok_or("Webview not found")?;
-    wv.eval(&js).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn browser_hide(
-    app: tauri::AppHandle,
-    thread_id: String,
-) -> Result<(), String> {
-    let map = browsers().lock().await;
-    let bw = map.get(&thread_id).ok_or("No browser for this thread")?;
-    if let Some(wv) = app.get_webview(&bw.label) {
-        // Move off-screen to hide
-        let _ = wv.set_position(LogicalPosition::new(-9999.0, -9999.0));
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn browser_show(
-    app: tauri::AppHandle,
-    thread_id: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    let map = browsers().lock().await;
-    let bw = map.get(&thread_id).ok_or("No browser for this thread")?;
-    if let Some(wv) = app.get_webview(&bw.label) {
-        wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
-        wv.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn browser_close(
-    app: tauri::AppHandle,
-    thread_id: String,
-) -> Result<(), String> {
-    let mut map = browsers().lock().await;
-    if let Some(bw) = map.remove(&thread_id) {
-        if let Some(wv) = app.get_webview(&bw.label) {
-            let _ = wv.close();
+    // Stdin writer
+    tokio::spawn(async move {
+        let mut stdin = stdin;
+        while let Some(msg) = rx.recv().await {
+            let _ = stdin.write_all(msg.as_bytes()).await;
+            let _ = stdin.write_all(b"\n").await;
+            let _ = stdin.flush().await;
         }
+        drop(child);
+    });
+
+    // Stdout reader — forward to frontend
+    let app_handle = app.clone();
+    let tid = thread_id.to_string();
+    tokio::spawn(async move {
+        let reader = BufReader::new(stdout);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if line.trim().is_empty() { continue; }
+            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                #[derive(Serialize, Clone)]
+                struct Payload {
+                    thread_id: String,
+                    #[serde(flatten)]
+                    data: serde_json::Value,
+                }
+                let _ = app_handle.emit("browser-event", Payload {
+                    thread_id: tid.clone(),
+                    data: event,
+                });
+            }
+        }
+    });
+
+    map.insert(thread_id.to_string(), tx);
+    Ok(())
+}
+
+fn send_cmd(map: &HashMap<String, mpsc::UnboundedSender<String>>, thread_id: &str, cmd: serde_json::Value) -> Result<(), String> {
+    let tx = map.get(thread_id).ok_or("No browser for thread")?;
+    tx.send(cmd.to_string()).map_err(|_| "Browser stdin closed".into())
+}
+
+#[tauri::command]
+pub async fn browser_navigate(app: tauri::AppHandle, thread_id: String, url: String) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "navigate", "url": url}))
+}
+
+#[tauri::command]
+pub async fn browser_click(app: tauri::AppHandle, thread_id: String, x: f64, y: f64) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "click", "x": x, "y": y}))
+}
+
+#[tauri::command]
+pub async fn browser_scroll(app: tauri::AppHandle, thread_id: String, delta_y: f64) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "scroll", "deltaY": delta_y}))
+}
+
+#[tauri::command]
+pub async fn browser_type_text(app: tauri::AppHandle, thread_id: String, text: String) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "type", "text": text}))
+}
+
+#[tauri::command]
+pub async fn browser_keypress(app: tauri::AppHandle, thread_id: String, key: String) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "keypress", "key": key}))
+}
+
+#[tauri::command]
+pub async fn browser_back(app: tauri::AppHandle, thread_id: String) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "back"}))
+}
+
+#[tauri::command]
+pub async fn browser_forward(app: tauri::AppHandle, thread_id: String) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "forward"}))
+}
+
+#[tauri::command]
+pub async fn browser_reload(app: tauri::AppHandle, thread_id: String) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "reload"}))
+}
+
+#[tauri::command]
+pub async fn browser_resize(app: tauri::AppHandle, thread_id: String, width: u32, height: u32) -> Result<(), String> {
+    ensure_browser(&thread_id, &app).await?;
+    let map = browsers().lock().await;
+    send_cmd(&map, &thread_id, serde_json::json!({"cmd": "resize", "width": width, "height": height}))
+}
+
+#[tauri::command]
+pub async fn browser_close(thread_id: String) -> Result<(), String> {
+    let mut map = browsers().lock().await;
+    if let Some(tx) = map.remove(&thread_id) {
+        let _ = tx.send(r#"{"cmd":"close"}"#.into());
     }
     Ok(())
 }
