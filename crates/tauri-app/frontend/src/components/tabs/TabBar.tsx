@@ -163,6 +163,41 @@ if (!document.getElementById("tab-bar-styles")) {
       flex-shrink: 0;
       margin-left: 4px;
     }
+    .tb-url-group {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 0 4px 4px;
+      margin-left: auto;
+      min-width: 140px;
+      max-width: 280px;
+      flex-shrink: 1;
+    }
+    .tb-url {
+      flex: 1;
+      min-width: 0;
+      height: 22px;
+      padding: 0 6px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      background: var(--bg-accent);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      outline: none;
+    }
+    .tb-url:focus { border-color: var(--primary); }
+    .tb-url-go {
+      height: 22px;
+      padding: 0 8px;
+      font-size: 10px;
+      font-weight: 600;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .tb-url-go:hover { filter: brightness(1.15); }
     .tb-action {
       width: 24px;
       height: 24px;
