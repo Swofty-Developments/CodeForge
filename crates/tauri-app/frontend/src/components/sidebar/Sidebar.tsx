@@ -155,8 +155,11 @@ export function Sidebar() {
         .sidebar-title {
           font-size: 14px;
           font-weight: 700;
-          color: var(--text);
           letter-spacing: -0.3px;
+          background: linear-gradient(135deg, var(--text) 40%, var(--primary));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
         }
         .icon-btn {
           color: var(--text-tertiary);

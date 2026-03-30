@@ -237,8 +237,16 @@ function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean
             </div>
           </Show>
           <Show when={isAssistant() && props.msg.content}>
-            <button class="copy-btn" onClick={copyContent}>
-              {copied() ? "Copied" : "Copy"}
+            <button class="copy-btn" onClick={copyContent} title={copied() ? "Copied!" : "Copy"}>
+              <Show when={copied()} fallback={
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                </svg>
+              }>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </Show>
             </button>
           </Show>
         </div>
@@ -390,8 +398,9 @@ if (!document.getElementById("chat-styles")) {
       word-break: break-word;
     }
     .message-user .message-bubble {
-      background: var(--bg-user-bubble);
-      border: 1px solid var(--border);
+      background: rgba(107, 124, 255, 0.08);
+      border: 1px solid rgba(107, 124, 255, 0.12);
+      color: var(--text);
     }
     .message-assistant .message-bubble {
       color: var(--text);
@@ -422,20 +431,24 @@ if (!document.getElementById("chat-styles")) {
       font-size: 10px;
       font-weight: 500;
       color: var(--text-tertiary);
-      background: var(--bg-muted);
-      padding: 1px 6px;
-      border-radius: 3px;
+      padding: 1px 0;
       font-family: var(--font-mono);
       white-space: nowrap;
     }
-    .copy-btn {
-      font-size: 11px;
-      font-weight: 500;
+    .meta-tag + .meta-tag::before {
+      content: "·";
+      margin-right: 6px;
       color: var(--text-tertiary);
-      padding: 2px 8px;
+      opacity: 0.4;
+    }
+    .copy-btn {
+      color: var(--text-tertiary);
+      padding: 3px;
       border-radius: var(--radius-sm);
       transition: all 0.12s;
       margin-left: auto;
+      display: flex;
+      align-items: center;
     }
     .copy-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
 

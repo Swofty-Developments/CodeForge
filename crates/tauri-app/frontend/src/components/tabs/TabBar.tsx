@@ -3,7 +3,7 @@ import { DragDropProvider } from "@dnd-kit/solid";
 import { useSortable } from "@dnd-kit/solid/sortable";
 import { move } from "@dnd-kit/helpers";
 import { appStore } from "../../stores/app-store";
-import * as ipc from "../../ipc";
+import { browserHide } from "../../ipc";
 
 function SortableTab(props: { tabId: string; index: number }) {
   const { store, setStore, closeTab } = appStore;
@@ -51,8 +51,6 @@ export function TabBar() {
   const { store, setStore } = appStore;
   const [showCopied, setShowCopied] = createSignal(false);
 
-  const [urlInput, setUrlInput] = createSignal("");
-
   const browserOpen = () => {
     const tab = store.activeTab;
     return tab ? !!store.threadBrowserOpen[tab] : false;
@@ -63,53 +61,7 @@ export function TabBar() {
     if (!tab) return;
     const opening = !store.threadBrowserOpen[tab];
     setStore("threadBrowserOpen", tab, opening);
-    if (opening) setUrlInput(store.threadBrowserUrls[tab] || "https://google.com");
-    if (!opening) ipc.browserHide(tab).catch(() => {});
-  }
-
-  function navigateBrowser() {
-    const tab = store.activeTab;
-    if (!tab) return;
-    let u = urlInput().trim();
-    if (!u) return;
-    if (!u.match(/^https?:\/\//)) u = "https://" + u;
-    setUrlInput(u);
-    setStore("threadBrowserUrls", tab, u);
-    ipc.browserNavigate(tab, u).catch(console.error);
-  }
-
-  function closeBrowser() {
-    const tab = store.activeTab;
-    if (!tab) return;
-    setStore("threadBrowserOpen", tab, false);
-    ipc.browserHide(tab).catch(() => {});
-  }
-
-  function openDevtools() {
-    const tab = store.activeTab;
-    if (tab) ipc.browserDevtools(tab).catch(console.error);
-  }
-
-  function inspectElement() {
-    const tab = store.activeTab;
-    if (!tab) return;
-    ipc.browserEval(tab, `
-      (function(){
-        if(window.__cfI)return;window.__cfI=true;
-        var o=document.createElement('div');
-        o.style.cssText='position:fixed;pointer-events:none;z-index:999999;border:2px solid #6b7cff;background:rgba(107,124,255,0.08);display:none;transition:all .06s;';
-        document.body.appendChild(o);var last=null;
-        function mm(e){var el=document.elementFromPoint(e.clientX,e.clientY);if(!el||el===o)return;last=el;var r=el.getBoundingClientRect();o.style.display='block';o.style.left=r.left+'px';o.style.top=r.top+'px';o.style.width=r.width+'px';o.style.height=r.height+'px';}
-        function mc(e){e.preventDefault();e.stopPropagation();if(!last)return;
-          var html=last.outerHTML;if(html.length>4000)html=html.substring(0,4000)+'...';
-          var cs=getComputedStyle(last),s={},keep=['color','background','background-color','font-size','font-weight','font-family','padding','margin','border','border-radius','display','width','height','position','box-shadow','text-align','line-height','gap','flex-direction','align-items','justify-content'];
-          var d=document.createElement(last.tagName);document.body.appendChild(d);var ds=getComputedStyle(d);
-          for(var i=0;i<keep.length;i++){var v=cs.getPropertyValue(keep[i]);var dv=ds.getPropertyValue(keep[i]);if(v&&v!==dv&&v!=='none'&&v!=='normal'&&v!=='auto'&&v!=='0px')s[keep[i]]=v;}d.remove();
-          document.title='__CF_EXTRACT__'+JSON.stringify({html:html,css:JSON.stringify(s,null,2)});
-          document.removeEventListener('mousemove',mm,true);document.removeEventListener('click',mc,true);o.remove();window.__cfI=false;}
-        document.addEventListener('mousemove',mm,true);document.addEventListener('click',mc,true);
-      })();
-    `).catch(console.error);
+    if (!opening) browserHide(tab).catch(() => {});
   }
 
   function toggleDiff() {
@@ -176,31 +128,6 @@ export function TabBar() {
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/>
                 </svg>
-              </button>
-            </div>
-          </Show>
-          <Show when={browserOpen()}>
-            <div class="tb-browser-bar">
-              <input
-                class="tb-burl"
-                value={urlInput()}
-                onInput={(e) => setUrlInput(e.currentTarget.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") navigateBrowser(); }}
-                placeholder="URL..."
-              />
-              <button class="tb-bgo" onClick={navigateBrowser}>Go</button>
-              <button class="tb-action" onClick={inspectElement} title="Select element">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/>
-                </svg>
-              </button>
-              <button class="tb-action" onClick={openDevtools} title="DevTools">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
-                </svg>
-              </button>
-              <button class="tb-action" onClick={closeBrowser} title="Close browser">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
           </Show>
@@ -309,41 +236,6 @@ if (!document.getElementById("tab-bar-styles")) {
       white-space: nowrap;
       pointer-events: none;
     }
-    .tb-browser-bar {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-      padding: 0 4px 4px;
-      margin-left: auto;
-      min-width: 140px;
-      max-width: 320px;
-      flex-shrink: 1;
-    }
-    .tb-burl {
-      flex: 1;
-      min-width: 0;
-      height: 22px;
-      padding: 0 6px;
-      font-size: 11px;
-      font-family: var(--font-mono);
-      background: var(--bg-accent);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text);
-      outline: none;
-    }
-    .tb-burl:focus { border-color: var(--primary); }
-    .tb-bgo {
-      height: 22px;
-      padding: 0 8px;
-      font-size: 10px;
-      font-weight: 600;
-      background: var(--primary);
-      color: #fff;
-      border-radius: 4px;
-      flex-shrink: 0;
-    }
-    .tb-bgo:hover { filter: brightness(1.15); }
     .tab {
       display: flex;
       align-items: center;
