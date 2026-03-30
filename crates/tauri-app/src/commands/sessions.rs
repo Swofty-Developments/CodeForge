@@ -16,6 +16,7 @@ pub async fn send_message(
     text: String,
     provider: String,
     cwd: String,
+    model: Option<String>,
 ) -> Result<(), String> {
     let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
 
@@ -39,7 +40,7 @@ pub async fn send_message(
 
         let mut mgr = state.session_manager.lock().await;
         let (session_id, event_rx) = mgr
-            .create_session(prov, &cwd_path)
+            .create_session(prov, &cwd_path, model.as_deref())
             .await
             .map_err(|e| format!("{e:#}"))?;
 
