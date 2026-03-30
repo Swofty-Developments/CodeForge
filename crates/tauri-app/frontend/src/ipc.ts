@@ -192,6 +192,22 @@ export const getFileDiff = (cwd: string, filePath: string) =>
 export const getFileContent = (cwd: string, filePath: string, version: string) =>
   invoke<string>("get_file_content", { cwd, filePath, version });
 
+// Browser (native child webview)
+export const browserOpen = (threadId: string, url: string, x: number, y: number, width: number, height: number) =>
+  invoke("browser_open", { threadId, url, x, y, width, height });
+export const browserNavigate = (threadId: string, url: string) =>
+  invoke("browser_navigate", { threadId, url });
+export const browserSetBounds = (threadId: string, x: number, y: number, w: number, h: number) =>
+  invoke("browser_set_bounds", { threadId, x, y, w, h });
+export const browserEval = (threadId: string, js: string) =>
+  invoke("browser_eval", { threadId, js });
+export const browserHide = (threadId: string) =>
+  invoke("browser_hide", { threadId });
+export const browserClose = (threadId: string) =>
+  invoke("browser_close", { threadId });
+export const browserDevtools = (threadId: string) =>
+  invoke("browser_devtools", { threadId });
+
 // Naming
 export const autoNameThread = (threadId: string, messagesSummary: string, provider: string) =>
   invoke<string>("auto_name_thread", { threadId, messagesSummary, provider });

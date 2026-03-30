@@ -72,6 +72,13 @@ fn main() {
             commands::diff::get_file_diff,
             commands::diff::get_file_content,
             commands::naming::auto_name_thread,
+            commands::browser::browser_open,
+            commands::browser::browser_navigate,
+            commands::browser::browser_set_bounds,
+            commands::browser::browser_eval,
+            commands::browser::browser_hide,
+            commands::browser::browser_close,
+            commands::browser::browser_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
