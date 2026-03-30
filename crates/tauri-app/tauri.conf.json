@@ -4,9 +4,9 @@
   "identifier": "com.codeforge.app",
   "build": {
     "devUrl": "http://localhost:5173",
-    "frontendDist": "../frontend/dist",
+    "frontendDist": "./frontend/dist",
     "beforeDevCommand": "",
-    "beforeBuildCommand": "cd ../frontend && npm install && npm run build"
+    "beforeBuildCommand": "npm install && npm run build"
   },
   "app": {
     "withGlobalTauri": true,
