@@ -127,7 +127,7 @@ impl SessionManager {
         }
     }
 
-    /// Respond to an approval request in a Codex session.
+    /// Respond to an approval request in an agent session.
     pub fn respond_to_approval(
         &self,
         session_id: SessionId,
@@ -138,9 +138,7 @@ impl SessionManager {
 
         match session {
             ActiveSession::Codex(s) => s.respond_to_approval(request_id, approve),
-            ActiveSession::Claude(_) => {
-                anyhow::bail!("Approval responses are not supported for Claude Code sessions")
-            }
+            ActiveSession::Claude(s) => s.respond_to_approval(request_id, approve, None),
         }
     }
 }

@@ -126,13 +126,7 @@ export function Sidebar() {
         </div>
 
         <div class="sidebar-footer">
-          <button class="new-thread-btn" onClick={() => newThread()}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New Thread
-          </button>
-          <div class="sidebar-actions">
+          <div class="sidebar-actions-grid">
             <button class="sidebar-action" onClick={() => appStore.openVirtualTab("__mcp__")} title="MCP Servers">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><circle cx="6" cy="6" r="1" fill="currentColor" /><circle cx="6" cy="18" r="1" fill="currentColor" />
@@ -145,8 +139,6 @@ export function Sidebar() {
               </svg>
               Themes
             </button>
-          </div>
-          <div class="sidebar-actions">
             <button class="sidebar-action" onClick={() => setStore("searchOpen", true)} title="Search (Cmd+Shift+F)">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -160,6 +152,12 @@ export function Sidebar() {
               Usage
             </button>
           </div>
+          <button class="new-thread-btn" onClick={() => newThread()}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New Thread
+          </button>
         </div>
       </div>
 
@@ -228,6 +226,7 @@ export function Sidebar() {
         .new-thread-btn {
           display: flex;
           align-items: center;
+          justify-content: center;
           gap: 8px;
           width: 100%;
           padding: 8px 12px;
@@ -241,6 +240,11 @@ export function Sidebar() {
         .new-thread-btn:hover {
           background: rgba(107, 124, 255, 0.08);
           color: var(--text);
+        }
+        .sidebar-actions-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 4px;
         }
         .sidebar-actions {
           display: flex;

@@ -10,10 +10,13 @@ use tracing::debug;
 
 use crate::types::AgentEvent;
 
+/// Path to the agent sidecar script, relative to the workspace root.
+const SIDECAR_SCRIPT: &str = "crates/tauri-app/agent-sidecar/index.mjs";
+
 pub struct ClaudeSession {
     child: Child,
     stdin_tx: mpsc::UnboundedSender<String>,
-    /// The Claude CLI session ID captured from the `system.init` event.
+    /// The Claude Agent SDK session ID captured from the `session_ready` event.
     claude_session_id: Arc<Mutex<Option<String>>>,
 }
 
@@ -23,70 +26,109 @@ impl ClaudeSession {
         model: Option<&str>,
         permission_mode: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
-        let perm_mode = permission_mode.unwrap_or("bypassPermissions");
-        let cwd_str = cwd.to_string_lossy().to_string();
-        let mut args = vec![
-            "-p",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--input-format", "stream-json",
-            "--include-partial-messages",
-            "--permission-mode", perm_mode,
-            // Allow the working directory for file operations
-            "--add-dir", &cwd_str,
-        ];
-        if let Some(m) = model {
-            args.push("--model");
-            args.push(m);
-        }
-
-        Self::spawn_with_args(cwd, &args).await
+        Self::spawn_sidecar(cwd, model, permission_mode, None).await
     }
 
-    /// Resume a previous Claude CLI session using `--resume`.
+    /// Resume a previous session using the Agent SDK's `resume` support.
     pub async fn resume(
         cwd: &Path,
         claude_session_id: &str,
         model: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
-        let resume_id = claude_session_id.to_string();
-        let mut args = vec![
-            "-p",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--input-format", "stream-json",
-            "--include-partial-messages",
-            "--permission-mode", "bypassPermissions",
-            "--resume",
-        ];
-        // Push the resume ID; we need the String to live long enough.
-        args.push(&resume_id);
-        if let Some(m) = model {
-            args.push("--model");
-            args.push(m);
-        }
-
-        Self::spawn_with_args(cwd, &args).await
+        Self::spawn_sidecar(cwd, model, None, Some(claude_session_id)).await
     }
 
-    /// Return the captured Claude CLI session ID, if available.
+    /// Return the captured Claude session ID, if available.
     pub fn claude_session_id(&self) -> Option<String> {
         self.claude_session_id.lock().ok().and_then(|g| g.clone())
     }
 
-    async fn spawn_with_args(
+    /// Send a user message by writing a `query` command to the sidecar's stdin.
+    pub fn send_message(&self, text: &str) -> Result<()> {
+        let msg = serde_json::json!({
+            "type": "query",
+            "prompt": text,
+        });
+        self.stdin_tx
+            .send(msg.to_string())
+            .map_err(|_| anyhow::anyhow!("Sidecar stdin channel closed"))?;
+        Ok(())
+    }
+
+    /// Send an abort command to cancel the current query.
+    pub fn interrupt(&self) -> Result<()> {
+        let msg = serde_json::json!({ "type": "abort" });
+        self.stdin_tx
+            .send(msg.to_string())
+            .map_err(|_| anyhow::anyhow!("Sidecar stdin channel closed"))?;
+        Ok(())
+    }
+
+    /// Respond to an approval request from the sidecar.
+    pub fn respond_to_approval(
+        &self,
+        request_id: &str,
+        approve: bool,
+        message: Option<&str>,
+    ) -> Result<()> {
+        let decision = if approve { "allow" } else { "deny" };
+        let mut msg = serde_json::json!({
+            "type": "approval_response",
+            "requestId": request_id,
+            "decision": decision,
+        });
+        if let Some(m) = message {
+            msg.as_object_mut().unwrap().insert("message".into(), Value::String(m.to_string()));
+        }
+        self.stdin_tx
+            .send(msg.to_string())
+            .map_err(|_| anyhow::anyhow!("Sidecar stdin channel closed"))?;
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) -> Result<()> {
+        let _ = self.child.kill().await;
+        Ok(())
+    }
+
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    // ── Internal ─────────────────────────────────────────────────────────────
+
+    async fn spawn_sidecar(
         cwd: &Path,
-        args: &[&str],
+        model: Option<&str>,
+        permission_mode: Option<&str>,
+        session_id: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
-        let mut child = Command::new("claude")
-            .args(args)
+        // Resolve the sidecar script path.  Walk up from `cwd` looking for
+        // the workspace root (identified by a top-level Cargo.toml that
+        // contains `[workspace]`), then join the relative sidecar path.
+        let sidecar_path = find_workspace_root(cwd)
+            .map(|root| root.join(SIDECAR_SCRIPT))
+            .unwrap_or_else(|| {
+                // Fallback: try a few common locations.
+                let candidate = cwd.join(SIDECAR_SCRIPT);
+                if candidate.exists() {
+                    return candidate;
+                }
+                // Assume we're inside the workspace already.
+                std::path::PathBuf::from(SIDECAR_SCRIPT)
+            });
+
+        debug!("Spawning agent sidecar: node {}", sidecar_path.display());
+
+        let mut child = Command::new("node")
+            .arg(&sidecar_path)
             .current_dir(cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .context("Failed to spawn claude CLI")?;
+            .context("Failed to spawn node agent sidecar")?;
 
         let stdout = child.stdout.take().context("Failed to capture stdout")?;
         let stdin = child.stdin.take().context("Failed to capture stdin")?;
@@ -95,7 +137,7 @@ impl ClaudeSession {
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
         let claude_session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
-        // Stdin writer
+        // Stdin writer task.
         tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(msg) = stdin_rx.recv().await {
@@ -105,25 +147,37 @@ impl ClaudeSession {
             }
         });
 
-        // Stdout reader
+        // Store init params (cwd, model, permissionMode, sessionId) so they
+        // can be injected into the first query command sent via send_message().
+        let init_model = model.map(|s| s.to_string());
+        let init_perm = permission_mode.map(|s| s.to_string());
+        let init_sid = session_id.map(|s| s.to_string());
+        let cwd_str = cwd.to_string_lossy().to_string();
+
+        let init_params = Arc::new(Mutex::new(Some(SidecarInitParams {
+            cwd: cwd_str,
+            model: init_model,
+            permission_mode: init_perm,
+            session_id: init_sid,
+        })));
+
+        // Augmenting sender: injects init params into the first query command.
+        let (user_tx, mut user_rx) = mpsc::unbounded_channel::<String>();
+        let init_params_clone = init_params.clone();
+        let raw_tx = stdin_tx.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = user_rx.recv().await {
+                let augmented = augment_query_if_needed(&msg, &init_params_clone);
+                let _ = raw_tx.send(augmented);
+            }
+        });
+
+        // Stdout reader task — parse sidecar NDJSON events.
         let tx = event_tx;
         let session_id_clone = claude_session_id.clone();
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
-            let mut last_len: usize = 0;
-            let mut turn_started = false;
-            // Track whether we've received stream_event deltas for the current turn.
-            // If so, skip `assistant` text processing to avoid duplicate content.
-            let mut got_stream_deltas = false;
-            // Track active content blocks by their stream index for tool use / thinking.
-            let mut active_blocks = std::collections::HashMap::<u64, BlockInfo>::new();
-            // Map tool_id -> tool_name persisted across the turn so we can
-            // look up names when the "user" tool_result event arrives (after
-            // content_block_end has already removed the block from active_blocks).
-            let mut tool_names = std::collections::HashMap::<String, String>::new();
-            // Track model name from message_start so we can use it in result.
-            let mut current_model: Option<String> = None;
 
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.trim().is_empty() {
@@ -137,158 +191,95 @@ impl ClaudeSession {
                 let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                 let events: Vec<AgentEvent> = match event_type {
-                    "system" => {
-                        if obj.get("subtype").and_then(|s| s.as_str()) == Some("init") {
-                            // Capture the session_id from the init event
-                            let sid = obj.get("session_id").and_then(|s| s.as_str()).map(|s| s.to_string());
-                            if let Some(ref s) = sid {
-                                if let Ok(mut guard) = session_id_clone.lock() {
-                                    *guard = Some(s.clone());
-                                }
-                            }
-                            vec![AgentEvent::SessionReady { claude_session_id: sid }]
-                        } else {
-                            vec![]
-                        }
+                    "ready" => {
+                        // Sidecar is initialised. Emit SessionReady with no session ID yet.
+                        vec![AgentEvent::SessionReady { claude_session_id: None }]
                     }
-                    "stream_event" => {
-                        let evts = handle_stream_event(&obj, &mut turn_started, &mut active_blocks, &mut current_model);
-                        // Record tool_id -> tool_name for later lookup
-                        for evt in &evts {
-                            if let AgentEvent::ToolUseStart { tool_id, tool_name } = evt {
-                                tool_names.insert(tool_id.clone(), tool_name.clone());
+                    "session_ready" => {
+                        let sid = obj.get("sessionId").and_then(|s| s.as_str()).map(|s| s.to_string());
+                        if let Some(ref s) = sid {
+                            if let Ok(mut guard) = session_id_clone.lock() {
+                                *guard = Some(s.clone());
                             }
                         }
-                        // Mark that we got real streaming deltas so we skip
-                        // the `assistant` snapshot which would duplicate them.
-                        if evts.iter().any(|e| matches!(e, AgentEvent::ContentDelta { .. }
-                            | AgentEvent::ToolUseStart { .. }
-                            | AgentEvent::ThinkingDelta { .. })) {
-                            got_stream_deltas = true;
-                        }
-                        evts
+                        vec![AgentEvent::SessionReady { claude_session_id: sid }]
                     }
-                    "assistant" => {
-                        if got_stream_deltas {
-                            // Already streaming via stream_event — skip the
-                            // assistant snapshot to avoid dumping the full text
-                            // again. Just update last_len so the counter stays
-                            // in sync in case a future turn falls back to
-                            // assistant-only events.
-                            let full_text: String = obj
-                                .get("message")
-                                .and_then(|m| m.get("content"))
-                                .and_then(|c| c.as_array())
-                                .map(|blocks| {
-                                    blocks
-                                        .iter()
-                                        .filter_map(|b| {
-                                            if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                                b.get("text").and_then(|t| t.as_str())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join("")
-                                })
-                                .unwrap_or_default();
-                            last_len = full_text.len();
+                    "text_delta" => {
+                        let text = obj.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                        if text.is_empty() {
                             vec![]
                         } else {
-                            handle_assistant(&obj, &mut last_len, &mut turn_started)
+                            vec![AgentEvent::ContentDelta { text }]
                         }
                     }
-                    "result" => {
-                        last_len = 0;
-                        turn_started = false;
-                        got_stream_deltas = false;
-                        active_blocks.clear();
-                        tool_names.clear();
-                        let evts = handle_result(&obj, &current_model);
-                        current_model = None;
-                        evts
-                    }
-                    "user" => {
-                        // Tool results come back as "user" type messages
-                        // with content array containing tool_result blocks
-                        let content = obj
-                            .get("message")
-                            .and_then(|m| m.get("content"))
-                            .and_then(|c| c.as_array());
-
-                        if let Some(blocks) = content {
-                            let mut evts = Vec::new();
-
-                            // Extract stdout/stderr from top-level tool_use_result
-                            let tool_use_result = obj.get("tool_use_result");
-                            let stdout = tool_use_result
-                                .and_then(|r| r.get("stdout"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("");
-                            let stderr = tool_use_result
-                                .and_then(|r| r.get("stderr"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("");
-
-                            for block in blocks {
-                                if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                                    let tool_use_id = block
-                                        .get("tool_use_id")
-                                        .and_then(|id| id.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-
-                                    // Build the result content: prefer stdout/stderr
-                                    // from tool_use_result, fall back to block content
-                                    let result_content = if !stdout.is_empty() || !stderr.is_empty() {
-                                        let mut parts = Vec::new();
-                                        if !stdout.is_empty() {
-                                            parts.push(stdout.to_string());
-                                        }
-                                        if !stderr.is_empty() {
-                                            parts.push(format!("[stderr]\n{stderr}"));
-                                        }
-                                        parts.join("\n")
-                                    } else {
-                                        block
-                                            .get("content")
-                                            .map(|c| {
-                                                if let Some(s) = c.as_str() {
-                                                    s.to_string()
-                                                } else {
-                                                    serde_json::to_string_pretty(c).unwrap_or_default()
-                                                }
-                                            })
-                                            .unwrap_or_default()
-                                    };
-
-                                    let is_error = block
-                                        .get("is_error")
-                                        .and_then(|e| e.as_bool())
-                                        .unwrap_or(false);
-
-                                    // Look up tool name from the turn's tool_names map
-                                    let tool_name = tool_names
-                                        .get(&tool_use_id)
-                                        .cloned()
-                                        .unwrap_or_default();
-
-                                    evts.push(AgentEvent::ToolResult {
-                                        tool_id: tool_use_id,
-                                        tool_name,
-                                        content: result_content,
-                                        is_error,
-                                    });
-                                }
-                            }
-                            evts
-                        } else {
+                    "thinking_delta" => {
+                        let text = obj.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                        if text.is_empty() {
                             vec![]
+                        } else {
+                            vec![AgentEvent::ThinkingDelta { text }]
                         }
+                    }
+                    "tool_use_start" => {
+                        let tool_id = obj.get("toolId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let tool_name = obj.get("toolName").and_then(|s| s.as_str()).unwrap_or("tool").to_string();
+                        vec![AgentEvent::ToolUseStart { tool_id, tool_name }]
+                    }
+                    "tool_use_input" => {
+                        let tool_id = obj.get("toolId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let input_json = obj.get("inputJson").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        vec![AgentEvent::ToolInputDelta { tool_id, input_json }]
+                    }
+                    "tool_result" => {
+                        let tool_id = obj.get("toolId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let tool_name = obj.get("toolName").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let content = obj.get("content").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let is_error = obj.get("isError").and_then(|b| b.as_bool()).unwrap_or(false);
+                        vec![AgentEvent::ToolResult { tool_id, tool_name, content, is_error }]
+                    }
+                    "approval_request" => {
+                        let request_id = obj.get("requestId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let tool_name = obj.get("toolName").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let input = obj.get("input")
+                            .map(|v| serde_json::to_string_pretty(v).unwrap_or_default())
+                            .unwrap_or_default();
+                        let description = format!("{tool_name}: {input}");
+                        vec![AgentEvent::ApprovalRequired { request_id, description }]
+                    }
+                    "ask_user_question" => {
+                        let request_id = obj.get("requestId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let questions = obj.get("questions")
+                            .map(|v| serde_json::to_string_pretty(v).unwrap_or_default())
+                            .unwrap_or_default();
+                        let description = format!("Question: {questions}");
+                        vec![AgentEvent::ApprovalRequired { request_id, description }]
+                    }
+                    "turn_completed" => {
+                        let sid = obj.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        vec![AgentEvent::TurnCompleted { turn_id: sid }]
+                    }
+                    "usage" => {
+                        let input_tokens = obj.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let output_tokens = obj.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let cache_read = obj.get("cacheRead").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let cache_write = obj.get("cacheWrite").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let cost_usd = obj.get("costUsd").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let model = obj.get("model").and_then(|m| m.as_str()).unwrap_or("unknown").to_string();
+                        vec![AgentEvent::UsageReport {
+                            input_tokens,
+                            output_tokens,
+                            cache_read_tokens: cache_read,
+                            cache_write_tokens: cache_write,
+                            cost_usd,
+                            model,
+                        }]
+                    }
+                    "error" => {
+                        let message = obj.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string();
+                        vec![AgentEvent::SessionError { message }]
                     }
                     _ => {
-                        debug!("Unhandled Claude event type: {event_type}");
+                        debug!("Unhandled sidecar event type: {event_type}");
                         vec![]
                     }
                 };
@@ -299,299 +290,72 @@ impl ClaudeSession {
                     }
                 }
             }
-            debug!("Claude stdout reader finished");
+            debug!("Sidecar stdout reader finished");
         });
 
-        Ok((Self { child, stdin_tx, claude_session_id }, event_rx))
-    }
-
-    pub fn send_message(&self, text: &str) -> Result<()> {
-        let msg = serde_json::json!({
-            "type": "user",
-            "session_id": "",
-            "message": {"role": "user", "content": text},
-            "parent_tool_use_id": null
-        });
-        self.stdin_tx
-            .send(msg.to_string())
-            .map_err(|_| anyhow::anyhow!("Claude stdin channel closed"))?;
-        Ok(())
-    }
-
-    pub fn interrupt(&self) -> Result<()> {
-        if let Some(pid) = self.child.id() {
-            #[cfg(unix)]
-            unsafe { libc::kill(pid as i32, libc::SIGINT); }
-        }
-        Ok(())
-    }
-
-    pub async fn stop(&mut self) -> Result<()> {
-        let _ = self.child.kill().await;
-        Ok(())
-    }
-
-    pub fn pid(&self) -> Option<u32> {
-        self.child.id()
+        Ok((Self { child, stdin_tx: user_tx, claude_session_id }, event_rx))
     }
 }
 
-fn handle_assistant(obj: &Value, last_len: &mut usize, turn_started: &mut bool) -> Vec<AgentEvent> {
-    let mut events = Vec::new();
-
-    // Extract full text from message.content array
-    let full_text: String = obj
-        .get("message")
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_array())
-        .map(|blocks| {
-            blocks
-                .iter()
-                .filter_map(|b| {
-                    if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        b.get("text").and_then(|t| t.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("")
-        })
-        .unwrap_or_default();
-
-    if !full_text.is_empty() && !*turn_started {
-        *turn_started = true;
-        let id = obj
-            .get("message")
-            .and_then(|m| m.get("id"))
-            .and_then(|id| id.as_str())
-            .unwrap_or("unknown");
-        events.push(AgentEvent::TurnStarted { turn_id: id.to_string() });
-    }
-
-    // Emit only the new delta (difference from last snapshot)
-    if full_text.len() > *last_len {
-        let delta = &full_text[*last_len..];
-        if !delta.is_empty() {
-            events.push(AgentEvent::ContentDelta { text: delta.to_string() });
-        }
-    }
-    *last_len = full_text.len();
-
-    events
+/// Parameters captured at session creation time, injected into the first
+/// query command sent to the sidecar.
+struct SidecarInitParams {
+    cwd: String,
+    model: Option<String>,
+    permission_mode: Option<String>,
+    session_id: Option<String>,
 }
 
-/// Tracks active content blocks by their stream index.
-#[derive(Debug, Clone)]
-struct BlockInfo {
-    block_type: String,
-    tool_id: Option<String>,
-    tool_name: Option<String>,
-}
-
-fn handle_stream_event(
-    obj: &Value,
-    turn_started: &mut bool,
-    active_blocks: &mut std::collections::HashMap<u64, BlockInfo>,
-    current_model: &mut Option<String>,
-) -> Vec<AgentEvent> {
-    let event = match obj.get("event") {
-        Some(e) => e,
-        None => return vec![],
+/// If `msg` is a JSON object with `type: "query"` and init params haven't
+/// been consumed yet, inject the init params into the command.
+fn augment_query_if_needed(msg: &str, init: &Arc<Mutex<Option<SidecarInitParams>>>) -> String {
+    let mut parsed: Value = match serde_json::from_str(msg) {
+        Ok(v) => v,
+        Err(_) => return msg.to_string(),
     };
-    let inner = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-    match inner {
-        "message_start" => {
-            // Capture model from message_start for later use in usage report
-            if let Some(model) = event
-                .get("message")
-                .and_then(|m| m.get("model"))
-                .and_then(|m| m.as_str())
-            {
-                *current_model = Some(model.to_string());
-            }
-
-            if !*turn_started {
-                *turn_started = true;
-                let id = event
-                    .get("message")
-                    .and_then(|m| m.get("id"))
-                    .and_then(|id| id.as_str())
-                    .unwrap_or("unknown");
-                vec![AgentEvent::TurnStarted { turn_id: id.to_string() }]
-            } else {
-                vec![]
-            }
-        }
-        "content_block_start" => {
-            let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
-            let block = event.get("content_block").unwrap_or(&Value::Null);
-            let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("text");
-
-            match block_type {
-                "tool_use" => {
-                    let tool_id = block.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
-                    let tool_name = block.get("name").and_then(|n| n.as_str()).unwrap_or("tool").to_string();
-                    active_blocks.insert(index, BlockInfo {
-                        block_type: "tool_use".into(),
-                        tool_id: Some(tool_id.clone()),
-                        tool_name: Some(tool_name.clone()),
-                    });
-                    vec![AgentEvent::ToolUseStart { tool_id, tool_name }]
-                }
-                "thinking" => {
-                    active_blocks.insert(index, BlockInfo {
-                        block_type: "thinking".into(),
-                        tool_id: None,
-                        tool_name: None,
-                    });
-                    vec![]
-                }
-                _ => {
-                    active_blocks.insert(index, BlockInfo {
-                        block_type: block_type.into(),
-                        tool_id: None,
-                        tool_name: None,
-                    });
-                    vec![]
-                }
-            }
-        }
-        "content_block_delta" => {
-            let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
-            let delta = event.get("delta").unwrap_or(&Value::Null);
-            let dtype = delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-            match dtype {
-                "text_delta" => {
-                    let text = delta.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                    if text.is_empty() {
-                        vec![]
-                    } else {
-                        vec![AgentEvent::ContentDelta { text: text.to_string() }]
-                    }
-                }
-                "input_json_delta" => {
-                    let json_str = delta.get("partial_json").and_then(|j| j.as_str()).unwrap_or("");
-                    if let Some(block) = active_blocks.get(&index) {
-                        if let Some(tool_id) = &block.tool_id {
-                            return vec![AgentEvent::ToolInputDelta {
-                                tool_id: tool_id.clone(),
-                                input_json: json_str.to_string(),
-                            }];
-                        }
-                    }
-                    vec![]
-                }
-                "thinking_delta" => {
-                    let text = delta.get("thinking").and_then(|t| t.as_str()).unwrap_or("");
-                    if text.is_empty() {
-                        vec![]
-                    } else {
-                        vec![AgentEvent::ThinkingDelta { text: text.to_string() }]
-                    }
-                }
-                _ => vec![],
-            }
-        }
-        "content_block_end" => {
-            let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
-            if let Some(block) = active_blocks.remove(&index) {
-                if block.block_type == "tool_use" {
-                    if let Some(tool_id) = block.tool_id {
-                        return vec![AgentEvent::ToolUseEnd { tool_id }];
-                    }
-                }
-            }
-            vec![]
-        }
-        _ => vec![],
+    if parsed.get("type").and_then(|t| t.as_str()) != Some("query") {
+        return msg.to_string();
     }
+
+    // Take the init params (only used once).
+    let params = {
+        let mut guard = init.lock().unwrap();
+        guard.take()
+    };
+
+    if let Some(p) = params {
+        let obj = parsed.as_object_mut().unwrap();
+        obj.insert("cwd".into(), Value::String(p.cwd));
+        if let Some(m) = p.model {
+            obj.entry("model").or_insert(Value::String(m));
+        }
+        if let Some(pm) = p.permission_mode {
+            obj.entry("permissionMode").or_insert(Value::String(pm));
+        }
+        if let Some(sid) = p.session_id {
+            obj.entry("sessionId").or_insert(Value::String(sid));
+        }
+    }
+
+    serde_json::to_string(&parsed).unwrap_or_else(|_| msg.to_string())
 }
 
-fn handle_result(obj: &Value, current_model: &Option<String>) -> Vec<AgentEvent> {
-    let mut events = Vec::new();
-
-    // Extract usage data if present
-    let cost_usd = obj
-        .get("total_cost_usd")
-        .or_else(|| obj.get("cost_usd"))
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let usage = obj.get("usage");
-    let input_tokens = usage
-        .and_then(|u| u.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let output_tokens = usage
-        .and_then(|u| u.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_read = usage
-        .and_then(|u| u.get("cache_read_input_tokens"))
-        .or_else(|| usage.and_then(|u| u.get("cache_read_tokens")))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_write = usage
-        .and_then(|u| u.get("cache_creation_input_tokens"))
-        .or_else(|| usage.and_then(|u| u.get("cache_write_tokens")))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    // Use model from result, fall back to model captured from message_start
-    let model = obj
-        .get("model")
-        .and_then(|m| m.as_str())
-        .or_else(|| current_model.as_deref())
-        .unwrap_or("unknown")
-        .to_string();
-
-    if cost_usd > 0.0 || input_tokens > 0 || output_tokens > 0 {
-        events.push(AgentEvent::UsageReport {
-            input_tokens,
-            output_tokens,
-            cache_read_tokens: cache_read,
-            cache_write_tokens: cache_write,
-            cost_usd,
-            model,
-        });
-    }
-
-    // Check for permission denials and surface them
-    if let Some(denials) = obj.get("permission_denials").and_then(|d| d.as_array()) {
-        if !denials.is_empty() {
-            let denied_tools: Vec<String> = denials
-                .iter()
-                .map(|d| {
-                    let tool = d.get("tool_name").and_then(|t| t.as_str()).unwrap_or("unknown");
-                    let input = d.get("tool_input")
-                        .and_then(|i| i.get("command"))
-                        .and_then(|c| c.as_str())
-                        .or_else(|| d.get("tool_input").and_then(|i| i.get("file_path")).and_then(|f| f.as_str()))
-                        .unwrap_or("");
-                    if input.is_empty() {
-                        tool.to_string()
-                    } else {
-                        format!("{tool}: {input}")
-                    }
-                })
-                .collect();
-            events.push(AgentEvent::SessionError {
-                message: format!("Permission denied for: {}", denied_tools.join(", ")),
-            });
+/// Walk up from `start` to find the workspace root (a directory containing
+/// a Cargo.toml with `[workspace]`).
+fn find_workspace_root(start: &Path) -> Option<std::path::PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        let cargo = dir.join("Cargo.toml");
+        if cargo.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&cargo) {
+                if contents.contains("[workspace]") {
+                    return Some(dir);
+                }
+            }
+        }
+        if !dir.pop() {
+            return None;
         }
     }
-
-    let is_error = obj.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
-    if is_error {
-        events.push(AgentEvent::SessionError {
-            message: obj.get("result").and_then(|r| r.as_str()).unwrap_or("Error").to_string(),
-        });
-    } else {
-        events.push(AgentEvent::TurnCompleted {
-            turn_id: obj.get("session_id").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-        });
-    }
-
-    events
 }

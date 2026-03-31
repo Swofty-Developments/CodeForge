@@ -7,10 +7,17 @@ import { loadSavedTheme } from "./themes";
 
 function Root() {
   onMount(async () => {
-    await loadSavedTheme();
-    await appStore.loadData();
-    await listenAgentEvent(appStore.handleAgentEvent);
-    await appStore.requestNotificationPermission();
+    // Load theme first (non-blocking)
+    loadSavedTheme().catch(() => {});
+    // Core initialization
+    try {
+      await appStore.loadData();
+      await listenAgentEvent(appStore.handleAgentEvent);
+    } catch (e) {
+      console.error("Init failed:", e);
+    }
+    // Non-critical
+    appStore.requestNotificationPermission().catch(() => {});
   });
 
   return <App />;

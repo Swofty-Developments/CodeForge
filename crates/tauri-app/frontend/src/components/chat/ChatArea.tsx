@@ -6,6 +6,7 @@ import { ToolUseCard } from "./ToolUseCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PrDashboard } from "../github/PrDashboard";
 import { McpPanel } from "../sidebar/McpPanel";
+import { ThemeSelector } from "../settings/ThemeSelector";
 import type { ContentBlock } from "../../types";
 
 export function ChatArea() {
@@ -135,10 +136,7 @@ export function ChatArea() {
       </Show>
       <Show when={store.activeTab === "__themes__"}>
         <div class="virtual-tab-content">
-          <Show when={typeof (window as any).__THEME_SELECTOR__ !== "undefined"}
-            fallback={<div class="virtual-tab-placeholder"><p>Theme selector loading...</p></div>}>
-            {/* ThemeSelector will be rendered here once the agent finishes */}
-          </Show>
+          <ThemeSelector inline />
         </div>
       </Show>
 
