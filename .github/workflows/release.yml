@@ -55,6 +55,20 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Setting version to $VERSION"
+          # Update workspace Cargo.toml
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          # Update each crate's Cargo.toml
+          for f in crates/*/Cargo.toml; do
+            sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$f" 2>/dev/null || true
+          done
+          rm -f Cargo.toml.bak crates/*/Cargo.toml.bak
+
       - name: Install frontend dependencies
         working-directory: crates/tauri-app/frontend
         run: npm ci --ignore-scripts || npm install

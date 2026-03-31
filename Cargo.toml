@@ -1,6 +1,21 @@
 [workspace]
 resolver = "2"
-members = ["crates/tauri-app", "crates/session", "crates/persistence"]
+members = [
+    "crates/tauri-app",
+    "crates/session",
+    "crates/persistence",
+    "crates/core",
+    "crates/git",
+    "crates/ai",
+    "crates/plugin",
+    "crates/telemetry",
+]
+# Only build app crates by default — library crates are standalone
+default-members = [
+    "crates/tauri-app",
+    "crates/session",
+    "crates/persistence",
+]
 
 [workspace.package]
 version = "0.1.0"

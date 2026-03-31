@@ -1,0 +1,15 @@
+[package]
+name = "codeforge-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AI provider abstraction and message types for CodeForge"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
