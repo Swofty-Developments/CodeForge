@@ -1,5 +1,7 @@
 # CodeForge
 
+[<img src="https://discordapp.com/assets/e4923594e694a21542a489471ecffa50.svg" alt="Discord" height="55" />](https://discord.swofty.net)
+
 An AI code editor that wraps Claude Code and Codex into a native desktop app with multi-thread sessions, an embedded browser, and a sleek dark UI.
 
 <img width="1921" height="1078" alt="image" src="https://github.com/user-attachments/assets/0f3f4dc6-f57f-4d02-96ab-d35e70b79c29" />
