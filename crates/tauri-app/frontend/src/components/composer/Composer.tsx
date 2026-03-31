@@ -9,7 +9,7 @@ import type { SlashCommand } from "../../ipc";
 export function Composer() {
   const { store, setStore, sendUserMessage } = appStore;
 
-  const isActive = () => store.activeTab !== null;
+  const isActive = () => store.activeTab !== null && !store.activeTab.startsWith("__");
   const isGenerating = () => {
     if (!store.activeTab) return false;
     const s = store.sessionStatuses[store.activeTab];

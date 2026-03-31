@@ -12,6 +12,7 @@ import { ProviderPicker } from "./components/composer/ProviderPicker";
 import { CommandPalette } from "./components/shared/CommandPalette";
 import { SearchOverlay } from "./components/shared/SearchOverlay";
 import { UsageDashboard } from "./components/settings/UsageDashboard";
+import { ThemeSelector } from "./components/settings/ThemeSelector";
 import { SplitView } from "./components/shared/SplitView";
 import { BrowserPanel } from "./components/browser/BrowserPanel";
 import { DiffEditor } from "./components/diff/DiffEditor";
@@ -229,6 +230,10 @@ export function App() {
         <UsageDashboard />
       </Show>
 
+      <Show when={store.themeOpen}>
+        <ThemeSelector />
+      </Show>
+
       <Show when={showWelcome()}>
         <WelcomeScreen onDismiss={() => setShowWelcome(false)} />
       </Show>
@@ -300,6 +305,14 @@ export function App() {
           min-height: 0;
           min-width: 0;
           overflow: hidden;
+        }
+        .main-panel-side > * {
+          flex: 1;
+          min-height: 0;
+          overflow: auto;
+        }
+        .main-panel-side > * + * {
+          border-top: 1px solid var(--border);
         }
       `}</style>
     </>

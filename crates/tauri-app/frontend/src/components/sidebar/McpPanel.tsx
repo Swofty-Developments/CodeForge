@@ -8,7 +8,7 @@ export function McpPanel() {
   const [servers, setServers] = createSignal<McpServer[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [adding, setAdding] = createSignal(false);
-  const [expanded, setExpanded] = createSignal(false);
+  const [expanded, setExpanded] = createSignal(true);
   const [provider, setProvider] = createSignal(store.selectedProvider === "codex" ? "codex" : "claude_code");
 
   // Add form state
@@ -202,8 +202,10 @@ if (!document.getElementById("mcp-styles")) {
   s.id = "mcp-styles";
   s.textContent = `
     .mcp-panel {
-      padding: 8px 12px 12px;
-      border-top: 1px solid var(--border);
+      padding: 24px;
+      max-width: 600px;
+      margin: 0 auto;
+      width: 100%;
     }
     .mcp-header {
       display: flex;

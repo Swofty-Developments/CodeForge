@@ -67,7 +67,7 @@ export function ThreadItem(props: {
         class="thread-item"
         classList={{
           active: isActive(),
-          dragging: props.isDragging,
+          dragging: !!props.isDragging,
           "can-drag": props.isUncategorized,
         }}
         onClick={() => selectThread(props.thread.id)}
@@ -144,9 +144,13 @@ if (!document.getElementById("thread-item-styles")) {
       padding: 5px 12px; margin: 1px 0;
       border-radius: var(--radius-sm); cursor: pointer;
       transition: background 0.15s, color 0.15s;
-      font-size: 13px; color: var(--text);
+      font-size: 13px; color: var(--text-secondary);
       touch-action: none;
       position: relative;
+    }
+    .thread-item[aria-disabled="true"] {
+      opacity: 1;
+      cursor: pointer;
     }
     .thread-item:hover { background: var(--bg-hover); color: var(--text); }
     .thread-item.active {
@@ -166,7 +170,8 @@ if (!document.getElementById("thread-item-styles")) {
     .thread-item.dragging { opacity: 0.3; }
     .thread-item.can-drag { cursor: grab; }
     .thread-item.can-drag:active { cursor: grabbing; }
-    .thread-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .thread-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+    .thread-item.active .thread-title { color: var(--text); }
     .thread-right {
       display: flex;
       align-items: center;

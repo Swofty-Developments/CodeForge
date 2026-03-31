@@ -24,6 +24,7 @@ impl ClaudeSession {
         permission_mode: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
         let perm_mode = permission_mode.unwrap_or("bypassPermissions");
+        let cwd_str = cwd.to_string_lossy().to_string();
         let mut args = vec![
             "-p",
             "--output-format", "stream-json",
@@ -31,6 +32,8 @@ impl ClaudeSession {
             "--input-format", "stream-json",
             "--include-partial-messages",
             "--permission-mode", perm_mode,
+            // Allow the working directory for file operations
+            "--add-dir", &cwd_str,
         ];
         if let Some(m) = model {
             args.push("--model");
@@ -552,6 +555,31 @@ fn handle_result(obj: &Value, current_model: &Option<String>) -> Vec<AgentEvent>
             cost_usd,
             model,
         });
+    }
+
+    // Check for permission denials and surface them
+    if let Some(denials) = obj.get("permission_denials").and_then(|d| d.as_array()) {
+        if !denials.is_empty() {
+            let denied_tools: Vec<String> = denials
+                .iter()
+                .map(|d| {
+                    let tool = d.get("tool_name").and_then(|t| t.as_str()).unwrap_or("unknown");
+                    let input = d.get("tool_input")
+                        .and_then(|i| i.get("command"))
+                        .and_then(|c| c.as_str())
+                        .or_else(|| d.get("tool_input").and_then(|i| i.get("file_path")).and_then(|f| f.as_str()))
+                        .unwrap_or("");
+                    if input.is_empty() {
+                        tool.to_string()
+                    } else {
+                        format!("{tool}: {input}")
+                    }
+                })
+                .collect();
+            events.push(AgentEvent::SessionError {
+                message: format!("Permission denied for: {}", denied_tools.join(", ")),
+            });
+        }
     }
 
     let is_error = obj.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);

@@ -19,7 +19,7 @@ function SortableThread(props: { thread: any; index: number; isUncategorized: bo
       isUncategorized={props.isUncategorized}
       groupColor={props.groupColor}
       sortableRef={sortable.ref}
-      isDragging={sortable.isDragging}
+      isDragging={typeof sortable.isDragging === 'function' ? sortable.isDragging() : !!sortable.isDragging}
       prNumber={props.prNumber}
       hasWorktree={props.hasWorktree}
     />
@@ -76,7 +76,7 @@ export function ProjectGroup(props: { project: Project }) {
     setStore("contextMenu", { type: "project", id: props.project.id, x: e.clientX, y: e.clientY });
   }
 
-  const color = () => props.project.color || "var(--text)";
+  const color = () => props.project.color || (isUncategorized() ? "var(--text)" : "var(--text-tertiary)");
 
   return (
     <div

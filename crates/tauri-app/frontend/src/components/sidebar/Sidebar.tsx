@@ -2,7 +2,6 @@ import { For, Show } from "solid-js";
 import { DragDropProvider } from "@dnd-kit/solid";
 import { appStore } from "../../stores/app-store";
 import { ProjectGroup } from "./ProjectGroup";
-import { McpPanel } from "./McpPanel";
 import * as ipc from "../../ipc";
 
 export function Sidebar() {
@@ -47,16 +46,30 @@ export function Sidebar() {
       >
         <div class="sidebar-header">
           <span class="sidebar-title">CodeForge</span>
-          <button
-            class="icon-btn"
-            onClick={() => setStore("settingsOpen", true)}
-            title="Settings"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-            </svg>
-          </button>
+          <div style={{ display: "flex", gap: "2px" }}>
+            <button
+              class="icon-btn"
+              onClick={() => setStore("themeOpen", true)}
+              title="Themes"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.38-.15-.74-.42-1.02-.27-.28-.42-.64-.42-1.02 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-5.17-4.5-9-10-9z" />
+                <circle cx="7.5" cy="11.5" r="1.5" fill="currentColor" />
+                <circle cx="12" cy="7.5" r="1.5" fill="currentColor" />
+                <circle cx="16.5" cy="11.5" r="1.5" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              class="icon-btn"
+              onClick={() => setStore("settingsOpen", true)}
+              title="Settings"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="sidebar-content">
@@ -112,8 +125,6 @@ export function Sidebar() {
           </DragDropProvider>
         </div>
 
-        <McpPanel />
-
         <div class="sidebar-footer">
           <button class="new-thread-btn" onClick={() => newThread()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -121,6 +132,20 @@ export function Sidebar() {
             </svg>
             New Thread
           </button>
+          <div class="sidebar-actions">
+            <button class="sidebar-action" onClick={() => appStore.openVirtualTab("__mcp__")} title="MCP Servers">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><circle cx="6" cy="6" r="1" fill="currentColor" /><circle cx="6" cy="18" r="1" fill="currentColor" />
+              </svg>
+              MCP
+            </button>
+            <button class="sidebar-action" onClick={() => appStore.openVirtualTab("__themes__")} title="Themes">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="13.5" cy="6.5" r="2.5" /><circle cx="17.5" cy="10.5" r="2.5" /><circle cx="8.5" cy="7.5" r="2.5" /><circle cx="6.5" cy="12.5" r="2.5" /><path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-1.5 4-3 4h-1.7c-.8 0-1.3.8-.9 1.5.6 1.1 1 2.2 1 3.5 0 1.5-.5 2-1.4 2z" />
+              </svg>
+              Themes
+            </button>
+          </div>
           <div class="sidebar-actions">
             <button class="sidebar-action" onClick={() => setStore("searchOpen", true)} title="Search (Cmd+Shift+F)">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

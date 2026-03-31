@@ -5,6 +5,7 @@ import { Markdown } from "./Markdown";
 import { ToolUseCard } from "./ToolUseCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PrDashboard } from "../github/PrDashboard";
+import { McpPanel } from "../sidebar/McpPanel";
 import type { ContentBlock } from "../../types";
 
 export function ChatArea() {
@@ -122,8 +123,27 @@ export function ChatArea() {
     appStore.setStore("composerText", text);
   }
 
+  const isVirtualTab = () => store.activeTab?.startsWith("__") || false;
+
   return (
     <div class="chat-area" ref={scrollRef} onScroll={handleScroll}>
+      {/* Virtual tab content */}
+      <Show when={store.activeTab === "__mcp__"}>
+        <div class="virtual-tab-content">
+          <McpPanel />
+        </div>
+      </Show>
+      <Show when={store.activeTab === "__themes__"}>
+        <div class="virtual-tab-content">
+          <Show when={typeof (window as any).__THEME_SELECTOR__ !== "undefined"}
+            fallback={<div class="virtual-tab-placeholder"><p>Theme selector loading...</p></div>}>
+            {/* ThemeSelector will be rendered here once the agent finishes */}
+          </Show>
+        </div>
+      </Show>
+
+      {/* Regular chat content */}
+      <Show when={!isVirtualTab()}>
       <Show
         when={store.activeTab}
         fallback={
@@ -251,6 +271,7 @@ export function ChatArea() {
             </Show>
           </div>
         </Show>
+      </Show>
       </Show>
     </div>
   );
@@ -458,6 +479,21 @@ if (!document.getElementById("chat-styles")) {
       overflow-y: auto;
       display: flex;
       flex-direction: column;
+    }
+
+    /* ── Virtual tab content ── */
+    .virtual-tab-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    .virtual-tab-placeholder {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-tertiary);
+      font-size: 14px;
     }
 
     /* ── Empty states ── */

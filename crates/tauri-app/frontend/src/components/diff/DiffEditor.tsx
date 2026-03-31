@@ -33,6 +33,7 @@ export function DiffEditor(props: { cwd: string }) {
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
   const [collapsedHunks, setCollapsedHunks] = createSignal<Set<string>>(new Set());
+  const [gitPanelOpen, setGitPanelOpen] = createSignal(true);
 
   function close() {
     setStore("diffPanelOpen", false);
@@ -230,8 +231,18 @@ export function DiffEditor(props: { cwd: string }) {
           </div>
         </div>
 
-        {/* Git management panel */}
-        <GitPanel cwd={props.cwd} />
+        {/* Git management panel — collapsible */}
+        <div class="de-git-section">
+          <button class="de-git-toggle" onClick={() => setGitPanelOpen(!gitPanelOpen())}>
+            <svg class="de-git-chevron" classList={{ "de-git-chevron--open": gitPanelOpen() }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+            <span>Git</span>
+          </button>
+          <Show when={gitPanelOpen()}>
+            <GitPanel cwd={props.cwd} />
+          </Show>
+        </div>
     </div>
   );
 }
@@ -528,5 +539,35 @@ const DIFF_STYLES = `
     font-size: 10px;
     color: var(--text-tertiary);
     opacity: 0.5;
+  }
+
+  /* Collapsible git section */
+  .de-git-section {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+  }
+  .de-git-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    transition: color 0.1s, background 0.1s;
+  }
+  .de-git-toggle:hover {
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+  }
+  .de-git-chevron {
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+  .de-git-chevron--open {
+    transform: rotate(90deg);
   }
 `;

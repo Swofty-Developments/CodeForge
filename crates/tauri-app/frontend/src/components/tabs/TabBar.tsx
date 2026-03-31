@@ -31,12 +31,17 @@ function SortableTab(props: { tabId: string; index: number }) {
       class="tab"
       classList={{
         active: isActive(),
-        dragging: sortable.isDragging,
+        dragging: typeof sortable.isDragging === 'function' ? sortable.isDragging() : !!sortable.isDragging,
       }}
       style={color() ? { "border-bottom": `2px solid ${color()}` } : {}}
       onClick={() => setStore("activeTab", props.tabId)}
     >
-      <span class="tab-label">{thread()?.title || "..."}</span>
+      <span class="tab-label">{
+        props.tabId === "__mcp__" ? "MCP Servers" :
+        props.tabId === "__themes__" ? "Themes" :
+        props.tabId === "__settings__" ? "Settings" :
+        thread()?.title || "..."
+      }</span>
       <button
         class="tab-close"
         onClick={(e) => { e.stopPropagation(); closeTab(props.tabId); }}

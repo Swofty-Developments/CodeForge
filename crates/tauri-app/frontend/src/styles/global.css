@@ -96,6 +96,13 @@ button {
   font-size: inherit;
 }
 
+/* Override WebKit's default disabled styling for dnd-kit sortable items */
+[aria-disabled="true"] {
+  opacity: 1;
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+}
+
 input {
   font-family: var(--font-body);
   background: var(--bg-muted);

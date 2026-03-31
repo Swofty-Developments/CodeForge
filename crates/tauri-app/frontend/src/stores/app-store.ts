@@ -30,6 +30,7 @@ export interface AppStore {
   commandPaletteOpen: boolean;
   searchOpen: boolean;
   usageDashboardOpen: boolean;
+  themeOpen: boolean;
   worktrees: Record<string, { thread_id: string; branch: string; path: string; active: boolean } | undefined>;
   splitTab: string | null;
   diffPanelOpen: boolean;
@@ -64,6 +65,7 @@ function createAppStore() {
     commandPaletteOpen: false,
     searchOpen: false,
     usageDashboardOpen: false,
+    themeOpen: false,
     worktrees: {},
     splitTab: null,
     diffPanelOpen: false,
@@ -148,12 +150,21 @@ function createAppStore() {
     if (id) loadThreadMessages(id);
   }
 
+  function openVirtualTab(id: string) {
+    if (!store.openTabs.includes(id)) {
+      setStore("openTabs", (tabs) => [...tabs, id]);
+    }
+    setStore("activeTab", id);
+  }
+
   function selectThread(id: string) {
     if (!store.openTabs.includes(id)) {
       setStore("openTabs", (tabs) => [...tabs, id]);
     }
     setStore("activeTab", id);
-    loadThreadMessages(id);
+    if (!id.startsWith("__")) {
+      loadThreadMessages(id);
+    }
   }
 
   function closeTab(id: string) {
@@ -697,6 +708,7 @@ function createAppStore() {
     loadThreadMessages,
     newThread,
     selectThread,
+    openVirtualTab,
     closeTab,
     reorderTabs,
     sendUserMessage,
