@@ -46,6 +46,7 @@ export interface AppStore {
   threadMessagesLoading: Record<string, boolean>;
   projectGitStatus: Record<string, "none" | "git" | "github">;
   projectPrMap: Record<string, Record<string, number>>;
+  activeModel: string | null;
 }
 
 function createAppStore() {
@@ -85,6 +86,7 @@ function createAppStore() {
     threadMessagesLoading: {},
     projectGitStatus: {},
     projectPrMap: {},
+    activeModel: null,
   });
 
   async function loadData() {
@@ -228,10 +230,35 @@ function createAppStore() {
     });
   }
 
+  /** Map slash commands to natural language prompts the agent can act on. */
+  function resolveSlashCommand(input: string): string {
+    if (!input.startsWith("/")) return input;
+    const cmdName = input.split(" ")[0];
+    const cmdArgs = input.slice(cmdName.length).trim();
+    const mappings: Record<string, string> = {
+      "/commit": "Create a git commit with a descriptive message for the current changes",
+      "/review-pr": "Review the current pull request",
+      "/compact": "Summarize the conversation so far",
+      "/help": "Show what you can help with",
+      "/fix": "Fix the issues in the current code",
+      "/test": "Run the tests and fix any failures",
+      "/lint": "Run the linter and fix any issues",
+      "/refactor": "Refactor the current code for better readability and maintainability",
+    };
+    const mapped = mappings[cmdName];
+    if (mapped) {
+      return cmdArgs ? `${mapped}: ${cmdArgs}` : mapped;
+    }
+    return input;
+  }
+
   async function sendUserMessage() {
-    const text = store.composerText.trim();
+    let text = store.composerText.trim();
     const atts = [...store.attachments];
     if ((!text && atts.length === 0) || !store.activeTab) return;
+
+    // Resolve slash commands to natural language prompts
+    text = resolveSlashCommand(text);
 
     const threadId = store.activeTab;
     setStore("composerText", "");
@@ -563,6 +590,10 @@ function createAppStore() {
         // session_ready fires when the sidecar initializes but before the response
         if (store.sessionStatuses[thread_id] !== "generating") {
           setStore("sessionStatuses", thread_id, "ready");
+        }
+        // Capture the confirmed model from the SDK
+        if (payload.model) {
+          setStore("activeModel", payload.model);
         }
         break;
       case "session_error": {

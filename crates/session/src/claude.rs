@@ -223,16 +223,17 @@ impl ClaudeSession {
                 let events: Vec<AgentEvent> = match event_type {
                     "ready" => {
                         // Sidecar is initialised. Emit SessionReady with no session ID yet.
-                        vec![AgentEvent::SessionReady { claude_session_id: None }]
+                        vec![AgentEvent::SessionReady { claude_session_id: None, model: None }]
                     }
                     "session_ready" => {
                         let sid = obj.get("sessionId").and_then(|s| s.as_str()).map(|s| s.to_string());
+                        let confirmed_model = obj.get("model").and_then(|m| m.as_str()).map(|m| m.to_string());
                         if let Some(ref s) = sid {
                             if let Ok(mut guard) = session_id_clone.lock() {
                                 *guard = Some(s.clone());
                             }
                         }
-                        vec![AgentEvent::SessionReady { claude_session_id: sid }]
+                        vec![AgentEvent::SessionReady { claude_session_id: sid, model: confirmed_model }]
                     }
                     "turn_started" => {
                         vec![AgentEvent::TurnStarted { turn_id: "sidecar".to_string() }]

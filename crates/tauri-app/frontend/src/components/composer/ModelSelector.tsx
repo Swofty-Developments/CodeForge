@@ -23,6 +23,15 @@ export function ModelSelector() {
     return preset ? preset.label : store.selectedModel;
   };
 
+  /** Show the confirmed model from the SDK, if it differs from the selected alias. */
+  const confirmedLabel = () => {
+    if (!store.activeModel) return null;
+    const selected = store.selectedModel;
+    // Only show if it adds info (e.g. alias "opus" resolved to "claude-opus-4-6")
+    if (store.activeModel === selected) return null;
+    return store.activeModel;
+  };
+
   function select(value: string | null) {
     setStore("selectedModel", value);
     setOpen(false);
@@ -67,6 +76,9 @@ export function ModelSelector() {
           <path d="M2 12l10 5 10-5" />
         </svg>
         {currentLabel()}
+        <Show when={confirmedLabel()}>
+          <span class="model-confirmed">{confirmedLabel()}</span>
+        </Show>
         <svg class="chevron" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9" /></svg>
       </button>
 
@@ -234,6 +246,12 @@ if (!document.getElementById("model-selector-styles")) {
       border-radius: var(--radius-sm);
     }
     .model-custom-clear:hover { color: var(--text-secondary); background: var(--bg-hover); }
+    .model-confirmed {
+      font-size: 9px;
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      opacity: 0.7;
+    }
   `;
   document.head.appendChild(style);
 }

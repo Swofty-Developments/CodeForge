@@ -190,6 +190,7 @@ async function handleQuery(cmd) {
   options.signal = abort.signal;
 
   let capturedSessionId = sessionId || null;
+  const expectedResumeId = options.resume || null;
   let turnEmitted = false;
 
   // Reset incremental streaming counters for new query.
@@ -210,7 +211,12 @@ async function handleQuery(cmd) {
       if (msgType === "system") {
         if (message.subtype === "init" && message.session_id) {
           capturedSessionId = message.session_id;
-          emit({ type: "session_ready", sessionId: message.session_id });
+          // Detect resume failure: expected to resume a specific session but got a different one
+          if (expectedResumeId && message.session_id !== expectedResumeId) {
+            emit({ type: "error", message: "Session resume failed, starting fresh" });
+          }
+          const confirmedModel = message.model || model || null;
+          emit({ type: "session_ready", sessionId: message.session_id, model: confirmedModel });
         }
         continue;
       }

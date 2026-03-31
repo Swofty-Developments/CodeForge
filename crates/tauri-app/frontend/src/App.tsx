@@ -1,4 +1,4 @@
-import { Show, createSignal, onMount, onCleanup } from "solid-js";
+import { Show, ErrorBoundary, createSignal, onMount, onCleanup } from "solid-js";
 import { appStore } from "./stores/app-store";
 import { WelcomeScreen } from "./components/shared/WelcomeScreen";
 import { SetupWizard } from "./components/onboarding/SetupWizard";
@@ -186,6 +186,19 @@ export function App() {
   };
 
   return (
+    <ErrorBoundary fallback={(err, reset) => (
+      <div class="error-boundary">
+        <div class="error-boundary-content">
+          <h2 class="error-boundary-title">Something went wrong</h2>
+          <p class="error-boundary-message">{err?.message || String(err)}</p>
+          <details class="error-boundary-details">
+            <summary>Stack trace</summary>
+            <pre class="error-boundary-stack">{err?.stack || "No stack trace available"}</pre>
+          </details>
+          <button class="error-boundary-reload" onClick={() => location.reload()}>Reload</button>
+        </div>
+      </div>
+    )}>
     <>
       <Show when={showSetup()}>
         <SetupWizard onComplete={() => setShowSetup(false)} />
@@ -264,6 +277,73 @@ export function App() {
       <Show when={showWelcome()}>
         <WelcomeScreen onDismiss={() => setShowWelcome(false)} />
       </Show>
+
+      <style>{`
+        .error-boundary {
+          position: fixed;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--bg-base, #1a1a2e);
+          z-index: 9999;
+        }
+        .error-boundary-content {
+          max-width: 520px;
+          width: 90%;
+          padding: 32px;
+          background: var(--bg-card, #22223a);
+          border: 1px solid var(--border, #333);
+          border-radius: 12px;
+          text-align: center;
+        }
+        .error-boundary-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: var(--red, #f87171);
+          margin: 0 0 12px;
+        }
+        .error-boundary-message {
+          font-size: 14px;
+          color: var(--text, #e0e0e0);
+          margin: 0 0 16px;
+          word-break: break-word;
+        }
+        .error-boundary-details {
+          text-align: left;
+          margin-bottom: 20px;
+        }
+        .error-boundary-details summary {
+          cursor: pointer;
+          font-size: 12px;
+          color: var(--text-secondary, #999);
+          margin-bottom: 8px;
+        }
+        .error-boundary-stack {
+          font-size: 11px;
+          color: var(--text-tertiary, #777);
+          background: var(--bg-base, #1a1a2e);
+          padding: 12px;
+          border-radius: 6px;
+          overflow-x: auto;
+          max-height: 200px;
+          white-space: pre-wrap;
+          word-break: break-all;
+        }
+        .error-boundary-reload {
+          padding: 10px 24px;
+          background: var(--primary, #6b7cff);
+          color: white;
+          border: none;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .error-boundary-reload:hover {
+          filter: brightness(1.1);
+        }
+      `}</style>
 
       <style>{`
         .main-panel {
@@ -352,5 +432,6 @@ export function App() {
         }
       `}</style>
     </>
+    </ErrorBoundary>
   );
 }

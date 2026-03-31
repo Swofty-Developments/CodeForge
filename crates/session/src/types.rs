@@ -46,6 +46,9 @@ pub enum AgentEvent {
         /// The Claude CLI session ID (for `--resume`), if available.
         #[serde(skip_serializing_if = "Option::is_none")]
         claude_session_id: Option<String>,
+        /// The model confirmed by the SDK.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
     /// An error occurred in the session.
     SessionError { message: String },

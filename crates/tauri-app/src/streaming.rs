@@ -185,7 +185,7 @@ pub fn spawn_event_forwarder(
                         ..default_payload()
                     }
                 }
-                AgentEvent::SessionReady { claude_session_id } => {
+                AgentEvent::SessionReady { claude_session_id, ref model } => {
                     // Persist session record via spawn_blocking
                     let db_clone = db.clone();
                     let csid = claude_session_id.clone();
@@ -218,6 +218,7 @@ pub fn spawn_event_forwarder(
                         session_id: session_id.to_string(),
                         thread_id: thread_id.to_string(),
                         event_type: "session_ready".into(),
+                        model: model.clone(),
                         ..default_payload()
                     }
                 }
