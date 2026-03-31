@@ -61,24 +61,24 @@ export function SettingsOverlay() {
 
         <div class="settings-section">
           <label>Permission Mode</label>
-          <select
-            class="settings-select"
-            value={permissionMode()}
-            onChange={(e) => {
-              const val = e.currentTarget.value;
-              setPermissionMode(val);
-              ipc.setSetting("permission_mode", val);
-            }}
-          >
+          <div class="settings-perm-list">
             <For each={PERMISSION_MODES}>
               {(mode) => (
-                <option value={mode.value}>
-                  {mode.label} — {mode.description}
-                </option>
+                <button
+                  class="settings-perm-option"
+                  classList={{ "settings-perm-option--active": permissionMode() === mode.value }}
+                  onClick={() => {
+                    setPermissionMode(mode.value);
+                    ipc.setSetting("permission_mode", mode.value);
+                  }}
+                >
+                  <span class="settings-perm-label">{mode.label}</span>
+                  <span class="settings-perm-desc">{mode.description}</span>
+                </button>
               )}
             </For>
-          </select>
-          <span class="settings-hint">Controls how Claude Code handles tool approvals. Takes effect on next session.</span>
+          </div>
+          <span class="settings-hint">Takes effect on next session.</span>
         </div>
 
         <div class="settings-section">
@@ -143,24 +143,43 @@ export function SettingsOverlay() {
           text-transform: uppercase;
           letter-spacing: 0.06em;
         }
-        .settings-section input,
-        .settings-section .settings-select {
+        .settings-section input {
           width: 100%;
           font-family: var(--font-mono);
           font-size: 12px;
         }
-        .settings-select {
+        .settings-perm-list {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
           background: var(--bg-muted);
-          color: var(--text);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-sm);
-          padding: 6px 8px;
-          cursor: pointer;
-          outline: none;
-          transition: border-color 0.15s;
+          border-radius: var(--radius-md);
+          padding: 3px;
         }
-        .settings-select:hover { border-color: var(--border-strong); }
-        .settings-select:focus { border-color: var(--primary); }
+        .settings-perm-option {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+          padding: 7px 10px;
+          border-radius: var(--radius-sm);
+          text-align: left;
+          transition: background 0.1s;
+        }
+        .settings-perm-option:hover { background: var(--bg-hover); }
+        .settings-perm-option--active {
+          background: var(--bg-accent);
+          box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+        }
+        .settings-perm-label {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text);
+        }
+        .settings-perm-option--active .settings-perm-label { color: var(--primary); }
+        .settings-perm-desc {
+          font-size: 10px;
+          color: var(--text-tertiary);
+        }
         .settings-hint {
           display: block;
           font-size: 10px;

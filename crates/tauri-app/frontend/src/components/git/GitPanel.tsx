@@ -366,6 +366,10 @@ export function GitPanel(props: { cwd: string }) {
 }
 
 const GIT_PANEL_STYLES = `
+  @keyframes gp-slide-in {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 320px; }
+  }
   .gp-root {
     border-top: 1px solid var(--border);
     background: var(--bg-card);
@@ -373,6 +377,7 @@ const GIT_PANEL_STYLES = `
     flex-direction: column;
     max-height: 320px;
     overflow: hidden;
+    animation: gp-slide-in 0.25s ease both;
   }
 
   /* Tabs */

@@ -512,14 +512,14 @@ if (!document.getElementById("chat-styles")) {
       color: var(--text-secondary);
       line-height: 1.4;
     }
-    .new-convo {
-      font-size: 18px !important;
+    .chat-empty .new-convo {
+      font-size: 18px;
       font-weight: 600;
-      color: var(--text) !important;
+      color: var(--text);
       letter-spacing: -0.3px;
     }
-    .provider-hint {
-      font-size: 12px !important;
+    .chat-empty .provider-hint {
+      font-size: 12px;
       color: var(--text-tertiary);
       margin-bottom: 8px;
     }
@@ -701,14 +701,14 @@ if (!document.getElementById("chat-styles")) {
       border-radius: var(--radius-sm);
       color: var(--text-tertiary);
       opacity: 0;
-      transition: all 0.12s ease;
+      transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
       cursor: pointer;
     }
     .msg:hover .msg-action-btn {
       opacity: 0.5;
     }
-    .msg-action-btn:hover {
-      opacity: 1 !important;
+    .msg:hover .msg-action-btn:hover {
+      opacity: 1;
       background: var(--bg-accent);
       color: var(--text-secondary);
     }

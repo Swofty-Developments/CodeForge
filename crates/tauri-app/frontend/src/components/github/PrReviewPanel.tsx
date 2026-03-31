@@ -488,6 +488,10 @@ export function PrReviewPanel(props: Props) {
 }
 
 const PRR_STYLES = `
+  @keyframes prr-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   .prr-pane {
     background: var(--bg-card);
     border-left: 1px solid var(--border);
@@ -495,6 +499,7 @@ const PRR_STYLES = `
     flex-direction: column;
     overflow: hidden;
     height: 100%;
+    animation: prr-fade-in 0.2s ease both;
   }
 
   /* ── Header ── */
