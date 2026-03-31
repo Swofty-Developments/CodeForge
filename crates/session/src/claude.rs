@@ -104,14 +104,29 @@ impl ClaudeSession {
         permission_mode: Option<&str>,
         session_id: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
-        // Resolve the sidecar script path relative to the executable, not cwd.
-        // In dev mode the exe is in target/debug/, so we walk up to find the workspace root.
-        // In production the sidecar would be bundled alongside the binary.
+        // Resolve the sidecar script path.
+        // Priority: 1) Bundled in app (production) 2) Dev workspace 3) CARGO_MANIFEST_DIR
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|exe| {
-                // Walk up from exe path to find workspace root
-                let mut dir = exe.parent()?;
+                // Production: bundled as a resource next to the binary
+                // macOS: App.app/Contents/Resources/agent-sidecar/index.mjs
+                // Linux/Windows: next to the binary in agent-sidecar/
+                let exe_dir = exe.parent()?;
+
+                // macOS .app bundle: binary is in Contents/MacOS/, resources in Contents/Resources/
+                let macos_resource = exe_dir.parent()
+                    .map(|contents| contents.join("Resources/agent-sidecar/index.mjs"));
+                if let Some(ref p) = macos_resource {
+                    if p.exists() { return macos_resource; }
+                }
+
+                // Linux/Windows: resources next to the binary
+                let beside_exe = exe_dir.join("agent-sidecar/index.mjs");
+                if beside_exe.exists() { return Some(beside_exe); }
+
+                // Dev mode: walk up from target/debug/ to find workspace root
+                let mut dir = exe_dir;
                 for _ in 0..10 {
                     let candidate = dir.join(SIDECAR_SCRIPT);
                     if candidate.exists() {
@@ -122,15 +137,11 @@ impl ClaudeSession {
                 None
             })
             .or_else(|| {
-                // Fallback: try from CARGO_MANIFEST_DIR (set at compile time).
-                // This crate is at crates/session/, sidecar is at crates/tauri-app/agent-sidecar/
+                // Fallback: CARGO_MANIFEST_DIR (compile time)
                 let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-                // Go up to workspace root (crates/session -> crates -> root)
                 let workspace_root = manifest_dir.parent()?.parent()?;
                 let candidate = workspace_root.join(SIDECAR_SCRIPT);
-                if candidate.exists() {
-                    return Some(candidate);
-                }
+                if candidate.exists() { return Some(candidate); }
                 None
             })
             .unwrap_or_else(|| std::path::PathBuf::from(SIDECAR_SCRIPT));
