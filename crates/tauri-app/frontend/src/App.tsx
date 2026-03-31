@@ -93,25 +93,33 @@ export function App() {
 
   function handleDividerDown(e: MouseEvent) {
     e.preventDefault();
-    setDraggingDivider(true);
+    if (!bodyRef) return;
+
+    // Cache rect once at start — no layout thrashing during drag
+    const rect = bodyRef.getBoundingClientRect();
+    const vert = isVertical();
+
+    // Add dragging class directly on DOM — no SolidJS reactivity
+    bodyRef.classList.add("dragging");
+    document.body.style.cursor = vert ? "row-resize" : "col-resize";
+    document.body.style.userSelect = "none";
+
     const onMove = (ev: MouseEvent) => {
-      if (!bodyRef) return;
-      const rect = bodyRef.getBoundingClientRect();
       let pct: number;
-      if (isVertical()) {
+      if (vert) {
         pct = ((ev.clientY - rect.top) / rect.height) * 100;
       } else {
         pct = ((ev.clientX - rect.left) / rect.width) * 100;
       }
       pct = Math.min(Math.max(pct, 25), 80);
-      // Set CSS custom property directly — bypasses SolidJS reactivity for smooth drag
-      bodyRef.style.setProperty("--chat-pct", `${pct}%`);
-      bodyRef.style.setProperty("--side-pct", `${100 - pct}%`);
+      bodyRef!.style.setProperty("--chat-pct", `${pct}%`);
+      bodyRef!.style.setProperty("--side-pct", `${100 - pct}%`);
       chatPercentRef = pct;
     };
     const onUp = () => {
-      setDraggingDivider(false);
-      // Sync back to signal for persistence
+      bodyRef?.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
       setChatPercent(chatPercentRef);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
@@ -193,7 +201,7 @@ export function App() {
               class="main-panel-body"
               classList={{
                 vertical: isVertical(),
-                dragging: draggingDivider(),
+                /* dragging class added/removed via DOM directly for performance */
               }}
             >
               <div class="main-panel-chat" style={hasSidePane() ? chatStyle() : { flex: "1" }}>
