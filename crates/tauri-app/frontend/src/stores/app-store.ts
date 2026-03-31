@@ -42,6 +42,7 @@ export interface AppStore {
   attachments: Attachment[];
   threadTokenUsage: Record<string, ThreadTokenUsage>;
   notificationsEnabled: boolean;
+  autoAcceptEnabled: boolean;
   threadMessagesLoading: Record<string, boolean>;
   projectGitStatus: Record<string, "none" | "git" | "github">;
   projectPrMap: Record<string, Record<string, number>>;
@@ -80,6 +81,7 @@ function createAppStore() {
     attachments: [],
     threadTokenUsage: {},
     notificationsEnabled: true,
+    autoAcceptEnabled: false,
     threadMessagesLoading: {},
     projectGitStatus: {},
     projectPrMap: {},
@@ -557,7 +559,11 @@ function createAppStore() {
         break;
       }
       case "session_ready":
-        setStore("sessionStatuses", thread_id, "ready");
+        // Don't reset to "ready" if we're mid-generation —
+        // session_ready fires when the sidecar initializes but before the response
+        if (store.sessionStatuses[thread_id] !== "generating") {
+          setStore("sessionStatuses", thread_id, "ready");
+        }
         break;
       case "session_error": {
         setStore("sessionStatuses", thread_id, "error");
@@ -572,15 +578,20 @@ function createAppStore() {
       }
       case "approval_required":
         if (payload.request_id && payload.description) {
-          setStore("pendingApprovals", (a) => [
-            ...a,
-            {
-              sessionId: payload.session_id,
-              requestId: payload.request_id!,
-              description: payload.description!,
-              threadId: thread_id,
-            },
-          ]);
+          // Auto-accept if enabled
+          if (store.autoAcceptEnabled) {
+            ipc.respondToApproval(payload.session_id, payload.request_id!, true).catch(() => {});
+          } else {
+            setStore("pendingApprovals", (a) => [
+              ...a,
+              {
+                sessionId: payload.session_id,
+                requestId: payload.request_id!,
+                description: payload.description!,
+                threadId: thread_id,
+              },
+            ]);
+          }
         }
         break;
     }

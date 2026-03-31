@@ -267,26 +267,15 @@ export function ChatArea() {
               {(approval) => {
                 const toolName = () => approval.description.split(":")[0]?.trim() || "tool";
 
-                function handleApproveAndRemember() {
-                  // Store an allow rule for this tool
-                  const rule = `${toolName()}`;
-                  ipc.getSetting("allowed_tools").then((current) => {
-                    const rules = current ? current.split(",") : [];
-                    if (!rules.includes(rule)) {
-                      rules.push(rule);
-                      ipc.setSetting("allowed_tools", rules.join(","));
-                    }
-                  }).catch(() => {});
-                  approveRequest(approval);
-                }
-
-                function handleBypassSession() {
-                  // Approve this request and set session to bypass
+                function handleAutoAccept() {
+                  // Set permission mode to bypass and approve ALL pending
                   ipc.setSetting("permission_mode", "bypassPermissions").catch(() => {});
+                  appStore.setStore("autoAcceptEnabled", true);
                   // Approve all pending approvals for this thread
-                  store.pendingApprovals
-                    .filter((a) => a.threadId === approval.threadId)
-                    .forEach((a) => approveRequest(a));
+                  const pending = [...store.pendingApprovals.filter((a) => a.threadId === approval.threadId)];
+                  for (const a of pending) {
+                    approveRequest(a);
+                  }
                 }
 
                 return (
@@ -303,11 +292,8 @@ export function ChatArea() {
                     <div class="approval-actions">
                       <button class="deny-btn" onClick={() => denyRequest(approval)}>Deny</button>
                       <button class="approve-btn" onClick={() => approveRequest(approval)}>Approve</button>
-                      <button class="approve-remember-btn" onClick={handleApproveAndRemember} title={`Always allow ${toolName()}`}>
-                        Approve &amp; Remember
-                      </button>
-                      <button class="bypass-btn" onClick={handleBypassSession} title="Auto-approve everything for this session">
-                        Bypass All
+                      <button class="bypass-btn" onClick={handleAutoAccept} title="Auto-approve everything from now on">
+                        Auto Accept
                       </button>
                     </div>
                   </div>
@@ -910,7 +896,7 @@ if (!document.getElementById("chat-styles")) {
       border-radius: var(--radius-pill);
     }
     .approval-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
-    .approve-btn, .deny-btn, .approve-remember-btn, .bypass-btn {
+    .approve-btn, .deny-btn, .bypass-btn {
       padding: 6px 12px;
       border-radius: var(--radius-sm);
       font-size: 11px;
@@ -922,15 +908,6 @@ if (!document.getElementById("chat-styles")) {
       color: #fff;
     }
     .approve-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
-    .approve-remember-btn {
-      background: rgba(76, 214, 148, 0.12);
-      border: 1px solid rgba(76, 214, 148, 0.25);
-      color: var(--green);
-    }
-    .approve-remember-btn:hover {
-      background: rgba(76, 214, 148, 0.2);
-      border-color: rgba(76, 214, 148, 0.4);
-    }
     .bypass-btn {
       background: rgba(240, 184, 64, 0.1);
       border: 1px solid rgba(240, 184, 64, 0.2);

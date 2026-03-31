@@ -352,6 +352,21 @@ export function Composer() {
               <svg class="chevron" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9" /></svg>
             </button>
             <ModelSelector />
+            <button
+              class="meta-pill"
+              classList={{ "meta-pill--active": store.autoAcceptEnabled }}
+              onClick={() => {
+                const next = !store.autoAcceptEnabled;
+                appStore.setStore("autoAcceptEnabled", next);
+                ipc.setSetting("permission_mode", next ? "bypassPermissions" : "default").catch(() => {});
+              }}
+              title={store.autoAcceptEnabled ? "Auto-accepting all tools (click to require approval)" : "Requiring approval (click to auto-accept)"}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              {store.autoAcceptEnabled ? "Auto" : "Ask"}
+            </button>
             <button class="meta-pill subtle" onClick={pickFolder}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
@@ -571,6 +586,15 @@ if (!document.getElementById("composer-styles")) {
       gap: 5px;
     }
     .meta-pill:hover { background: var(--bg-accent); border-color: var(--border-strong); }
+    .meta-pill--active {
+      background: rgba(76, 214, 148, 0.1);
+      border-color: rgba(76, 214, 148, 0.2);
+      color: var(--green);
+    }
+    .meta-pill--active:hover {
+      background: rgba(76, 214, 148, 0.15);
+      border-color: rgba(76, 214, 148, 0.3);
+    }
     .meta-pill .chevron {
       color: var(--text-tertiary);
       transition: color 0.15s;
