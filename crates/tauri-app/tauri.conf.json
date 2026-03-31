@@ -6,7 +6,10 @@
     "devUrl": "http://localhost:5173",
     "frontendDist": "./frontend/dist",
     "beforeDevCommand": "",
-    "beforeBuildCommand": "npm install && npm run build"
+    "beforeBuildCommand": {
+      "script": "npm install && npm run build",
+      "cwd": "./frontend"
+    }
   },
   "app": {
     "withGlobalTauri": true,
