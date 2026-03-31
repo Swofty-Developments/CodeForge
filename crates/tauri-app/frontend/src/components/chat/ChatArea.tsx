@@ -182,7 +182,17 @@ export function ChatArea() {
               <span class="wt-branch">{worktree()!.branch}</span>
               <span class="wt-path">{worktree()!.path}</span>
             </div>
-            <button class="wt-merge-btn" onClick={handleMergeWorktree}>Merge back to main</button>
+            <button class="wt-merge-btn" onClick={handleMergeWorktree}>
+              {(() => {
+                const proj = activeProject();
+                const tab = store.activeTab;
+                if (proj && tab) {
+                  const prMap = store.projectPrMap[proj.id];
+                  if (prMap?.[tab]) return `Push to PR #${prMap[tab]}`;
+                }
+                return "Merge back to main";
+              })()}
+            </button>
           </div>
         </Show>
 

@@ -141,40 +141,111 @@ pub fn merge_worktree(
         main_branch
     };
 
-    // Merge the worktree branch into main
-    let merge = Command::new("git")
-        .args(["merge", &branch, "--no-edit"])
-        .current_dir(&project_path)
-        .output()
-        .map_err(|e| format!("Failed to merge: {e}"))?;
-
-    if !merge.status.success() {
-        return Err(format!(
-            "Merge failed (may have conflicts): {}",
-            String::from_utf8_lossy(&merge.stderr)
-        ));
-    }
-
-    // Remove worktree
-    let _ = Command::new("git")
-        .args(["worktree", "remove", &worktree_path, "--force"])
-        .current_dir(&project_path)
-        .output();
-
-    // Delete the branch
-    let _ = Command::new("git")
-        .args(["branch", "-d", &branch])
-        .current_dir(&project_path)
-        .output();
-
-    // Remove setting
-    {
+    // Check if this thread is linked to a PR
+    let pr_number = {
         let db = state.db.lock().map_err(|e| format!("{e}"))?;
-        let _ = codeforge_persistence::queries::delete_setting(
+        codeforge_persistence::queries::get_setting(
             db.conn(),
-            &format!("worktree:{thread_id}"),
-        );
-    }
+            &format!("pr:{thread_id}"),
+        )
+        .ok()
+        .flatten()
+    };
 
-    Ok(format!("Merged {branch} into {main_branch}"))
+    if let Some(_pr_num) = &pr_number {
+        // PR mode: commit and push the worktree branch (don't merge to main)
+        // First, commit any uncommitted changes in the worktree
+        let status = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&worktree_path)
+            .output()
+            .map_err(|e| format!("Failed to check status: {e}"))?;
+
+        let has_changes = !String::from_utf8_lossy(&status.stdout).trim().is_empty();
+
+        if has_changes {
+            let _ = Command::new("git")
+                .args(["add", "-A"])
+                .current_dir(&worktree_path)
+                .output();
+
+            let _ = Command::new("git")
+                .args(["commit", "-m", "Changes from CodeForge"])
+                .current_dir(&worktree_path)
+                .output();
+        }
+
+        // Push the branch
+        let push = Command::new("git")
+            .args(["push", "origin", &branch])
+            .current_dir(&worktree_path)
+            .output()
+            .map_err(|e| format!("Failed to push: {e}"))?;
+
+        if !push.status.success() {
+            let stderr = String::from_utf8_lossy(&push.stderr);
+            return Err(format!("Push failed: {stderr}"));
+        }
+
+        // Remove worktree but keep branch (PR is still open)
+        let _ = Command::new("git")
+            .args(["worktree", "remove", &worktree_path, "--force"])
+            .current_dir(&project_path)
+            .output();
+
+        // Remove worktree setting
+        {
+            let db = state.db.lock().map_err(|e| format!("{e}"))?;
+            let _ = codeforge_persistence::queries::delete_setting(
+                db.conn(),
+                &format!("worktree:{thread_id}"),
+            );
+        }
+
+        Ok(format!("Pushed {branch} to origin"))
+    } else {
+        // Normal mode: merge worktree branch into main
+        let merge = Command::new("git")
+            .args(["merge", &branch, "--no-edit"])
+            .current_dir(&project_path)
+            .output()
+            .map_err(|e| format!("Failed to merge: {e}"))?;
+
+        if !merge.status.success() {
+            let stderr = String::from_utf8_lossy(&merge.stderr).to_string();
+
+            // Abort the failed merge to leave repo in clean state
+            let _ = Command::new("git")
+                .args(["merge", "--abort"])
+                .current_dir(&project_path)
+                .output();
+
+            return Err(format!(
+                "Merge has conflicts. Resolve them manually in the worktree at {worktree_path} then try again.\n\nConflict details: {stderr}"
+            ));
+        }
+
+        // Remove worktree
+        let _ = Command::new("git")
+            .args(["worktree", "remove", &worktree_path, "--force"])
+            .current_dir(&project_path)
+            .output();
+
+        // Delete the branch
+        let _ = Command::new("git")
+            .args(["branch", "-d", &branch])
+            .current_dir(&project_path)
+            .output();
+
+        // Remove setting
+        {
+            let db = state.db.lock().map_err(|e| format!("{e}"))?;
+            let _ = codeforge_persistence::queries::delete_setting(
+                db.conn(),
+                &format!("worktree:{thread_id}"),
+            );
+        }
+
+        Ok(format!("Merged {branch} into {main_branch}"))
+    }
 }

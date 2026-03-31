@@ -55,10 +55,11 @@ export function ThreadSetup(props: Props) {
           }))
         );
       }
-      // Add a context message
-      const context = createWorktree
-        ? `Working on branch \`${branchName}\` in a worktree. What would you like to do?`
-        : `Working on the main branch. What would you like to do?`;
+      // Add a context message — include worktree path
+      const wt = store.worktrees[props.threadId];
+      const context = createWorktree && wt
+        ? `Working on branch \`${branchName}\` in a worktree at ${wt.path}. What would you like to do?`
+        : `Working on the main branch at ${props.repoPath}. What would you like to do?`;
       const msgId = await ipc.persistUserMessage(props.threadId, context);
       setStore("threadMessages", props.threadId, (msgs) => [
         ...(msgs || []),
@@ -102,8 +103,10 @@ export function ThreadSetup(props: Props) {
         console.error("Worktree creation failed (continuing without):", e);
       }
 
-      // Inject context
-      const context = `I'm working on PR #${pr.number}: "${pr.title}" by ${pr.author}\n\nBranch: ${pr.branch} → ${pr.base}\n+${pr.additions} -${pr.deletions} across ${pr.changed_files} files\n${pr.labels.length > 0 ? `Labels: ${pr.labels.join(", ")}\n` : ""}Help me review or continue work on this PR.`;
+      // Inject context — include worktree path so the agent knows where to work
+      const wt = store.worktrees[props.threadId];
+      const wtInfo = wt ? `\n\nWorktree: ${wt.path} (branch: ${wt.branch})` : "";
+      const context = `I'm working on PR #${pr.number}: "${pr.title}" by ${pr.author}\n\nBranch: ${pr.branch} → ${pr.base}\n+${pr.additions} -${pr.deletions} across ${pr.changed_files} files\n${pr.labels.length > 0 ? `Labels: ${pr.labels.join(", ")}\n` : ""}${wtInfo}\n\nHelp me review or continue work on this PR.`;
       const msgId = await ipc.persistUserMessage(props.threadId, context);
       setStore("threadMessages", props.threadId, (msgs) => [
         ...(msgs || []),
