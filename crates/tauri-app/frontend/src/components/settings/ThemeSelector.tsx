@@ -120,23 +120,58 @@ export function ThemeSelector(props?: { inline?: boolean }) {
       <div class="theme-grid">
           <For each={themes()}>
             {(theme) => (
-              <button
+              <div
                 class="theme-card"
                 classList={{ active: activeId() === theme.id }}
                 onClick={() => selectTheme(theme.id)}
               >
-                <div class="theme-preview" style={{ background: theme.vars["--bg-base"] || theme.preview[0] }}>
-                  <div class="theme-preview-sidebar" style={{ background: theme.vars["--bg-surface"] || theme.preview[1] }}>
-                    <div class="theme-preview-sidebar-line" style={{ background: theme.vars["--text-tertiary"] || "#888" }} />
-                    <div class="theme-preview-sidebar-line" style={{ background: theme.vars["--primary"] || theme.preview[2], opacity: "0.7" }} />
-                    <div class="theme-preview-sidebar-line" style={{ background: theme.vars["--text-tertiary"] || "#888" }} />
+                <div class="tp" style={{ background: theme.vars["--bg-base"] || "#0f1012" }}>
+                  <div class="tp-side" style={{ background: theme.vars["--bg-surface"] || "#18181c", "border-right": `1px solid ${theme.vars["--border"] || "rgba(255,255,255,0.06)"}` }}>
+                    <div class="tp-sln" style={{ background: theme.vars["--primary"] || "#6b7cff", opacity: "0.7" }} />
+                    <div class="tp-sln" style={{ background: theme.vars["--bg-accent"] || "#222", height: "4px" }} />
+                    <div class="tp-sln" style={{ background: theme.vars["--text-tertiary"] || "#888", opacity: "0.2" }} />
+                    <div class="tp-sln" style={{ background: theme.vars["--text-tertiary"] || "#888", opacity: "0.15" }} />
                   </div>
-                  <div class="theme-preview-main">
-                    <div class="theme-preview-topbar" style={{ background: theme.vars["--text-tertiary"] || "#888" }} />
-                    <div class="theme-preview-msg-user" style={{ background: theme.vars["--primary"] || theme.preview[2] }} />
-                    <div class="theme-preview-msg-bot" style={{ background: theme.vars["--text"] || "#fff" }} />
-                    <div class="theme-preview-composer" style={{ background: theme.vars["--text"] || "#fff" }} />
+                  <div class="tp-body">
+                    <div class="tp-tabbar" style={{ background: theme.vars["--bg-surface"] || "#18181c" }}>
+                      <div class="tp-tab-a" style={{ background: theme.vars["--bg-base"] || "#0f1012", border: `1px solid ${theme.vars["--border"] || "rgba(255,255,255,0.06)"}` }} />
+                      <div class="tp-tab-i" style={{ background: theme.vars["--text-tertiary"] || "#888", opacity: "0.2" }} />
+                    </div>
+                    <div class="tp-msgs">
+                      <div class="tp-u" style={{ background: `${theme.vars["--primary"] || "#6b7cff"}15`, border: `1px solid ${theme.vars["--primary"] || "#6b7cff"}20` }}>
+                        <div class="tp-l" style={{ background: theme.vars["--text"] || "#eee", width: "70%" }} />
+                      </div>
+                      <div class="tp-a">
+                        <div class="tp-l tp-h" style={{ background: theme.vars["--text"] || "#eee", width: "35%" }} />
+                        <div class="tp-l" style={{ background: theme.vars["--text-secondary"] || "#aaa", width: "88%" }} />
+                        <div class="tp-l" style={{ background: theme.vars["--text-secondary"] || "#aaa", width: "55%" }} />
+                        <div class="tp-cb" style={{ background: theme.vars["--bg-card"] || "#151518", border: `1px solid ${theme.vars["--border"] || "rgba(255,255,255,0.06)"}` }}>
+                          <div class="tp-l" style={{ background: theme.vars["--hljs-keyword"] || "#c678dd", width: "30%" }} />
+                          <div class="tp-l" style={{ background: theme.vars["--hljs-string"] || "#98c379", width: "50%" }} />
+                          <div class="tp-l" style={{ background: theme.vars["--hljs-function"] || "#61afef", width: "38%" }} />
+                        </div>
+                        <div class="tp-il">
+                          <div class="tp-l" style={{ background: theme.vars["--text-secondary"] || "#aaa", width: "22%" }} />
+                          <div class="tp-ic" style={{ background: `${theme.vars["--text"] || "#fff"}14` }}>
+                            <div style={{ background: theme.vars["--hljs-keyword"] || "#dda0f7", height: "2px", "border-radius": "1px" }} />
+                          </div>
+                          <div class="tp-l" style={{ background: theme.vars["--text-secondary"] || "#aaa", width: "18%" }} />
+                        </div>
+                      </div>
+                      <div class="tp-dots">
+                        <div class="tp-d" style={{ background: theme.vars["--primary"] || "#6b7cff" }} />
+                        <div class="tp-d" style={{ background: theme.vars["--green"] || "#4cd694" }} />
+                        <div class="tp-d" style={{ background: theme.vars["--amber"] || "#f0b840" }} />
+                        <div class="tp-d" style={{ background: theme.vars["--red"] || "#f25f67" }} />
+                        <div class="tp-d" style={{ background: theme.vars["--purple"] || "#b47aff" }} />
+                      </div>
+                    </div>
+                    <div class="tp-comp" style={{ background: theme.vars["--bg-card"] || "#151518", border: `1px solid ${theme.vars["--border"] || "rgba(255,255,255,0.06)"}` }}>
+                      <div class="tp-comp-in" style={{ background: theme.vars["--text-tertiary"] || "#888", opacity: "0.12" }} />
+                      <div class="tp-comp-btn" style={{ background: theme.vars["--primary"] || "#6b7cff" }} />
+                    </div>
                   </div>
+                  <div class="tp-glow" style={{ background: `radial-gradient(ellipse at 65% 30%, ${theme.vars["--primary-glow"] || "rgba(107,124,255,0.12)"} 0%, transparent 70%)` }} />
                 </div>
                 <div class="theme-info">
                   <span class="theme-name">{theme.name}</span>
@@ -171,7 +206,7 @@ export function ThemeSelector(props?: { inline?: boolean }) {
                     </button>
                   )}
                 </div>
-              </button>
+              </div>
             )}
           </For>
         </div>
@@ -285,55 +320,117 @@ if (!document.getElementById("theme-selector-styles")) {
       border-color: var(--primary);
       box-shadow: 0 0 0 1px var(--primary-glow);
     }
-    .theme-preview {
+    /* Rich theme preview — mini app mockup */
+    .tp {
       display: flex;
-      height: 80px;
+      height: 120px;
       border-radius: 6px;
       overflow: hidden;
-      border: 1px solid rgba(128,128,128,0.15);
+      border: 1px solid rgba(128,128,128,0.12);
+      position: relative;
     }
-    .theme-preview-sidebar {
-      width: 22%;
+    .tp-side {
+      width: 20%;
       display: flex;
       flex-direction: column;
       gap: 3px;
-      padding: 4px 3px;
+      padding: 5px 3px;
     }
-    .theme-preview-sidebar-line {
-      height: 3px;
-      border-radius: 1px;
-      opacity: 0.5;
+    .tp-sln { height: 3px; border-radius: 1px; }
+    .tp-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
     }
-    .theme-preview-main {
+    .tp-tabbar {
+      display: flex;
+      gap: 2px;
+      padding: 2px 3px;
+      align-items: flex-end;
+      height: 10px;
+    }
+    .tp-tab-a { width: 20px; height: 6px; border-radius: 2px 2px 0 0; }
+    .tp-tab-i { width: 14px; height: 3px; border-radius: 1px; margin-bottom: 1px; }
+    .tp-msgs {
       flex: 1;
       display: flex;
       flex-direction: column;
       padding: 4px 5px;
       gap: 3px;
+      overflow: hidden;
     }
-    .theme-preview-topbar {
-      height: 4px;
-      border-radius: 1px;
-      opacity: 0.3;
-    }
-    .theme-preview-msg-user {
-      height: 6px;
-      border-radius: 3px;
+    .tp-u {
       align-self: flex-end;
-      width: 50%;
-      opacity: 0.15;
-    }
-    .theme-preview-msg-bot {
-      height: 10px;
+      padding: 2px 4px;
       border-radius: 3px;
-      width: 70%;
-      opacity: 0.08;
+      max-width: 55%;
     }
-    .theme-preview-composer {
+    .tp-a {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .tp-l {
+      height: 2px;
+      border-radius: 1px;
+    }
+    .tp-h {
+      height: 3px;
+      margin-bottom: 1px;
+    }
+    .tp-cb {
+      padding: 3px 4px;
+      border-radius: 3px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin: 1px 0;
+    }
+    .tp-il {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .tp-ic {
+      padding: 1px 3px;
+      border-radius: 2px;
+    }
+    .tp-dots {
+      display: flex;
+      gap: 3px;
       margin-top: auto;
-      height: 8px;
+      padding-top: 2px;
+    }
+    .tp-d {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+    }
+    .tp-comp {
+      display: flex;
+      gap: 3px;
+      padding: 3px 4px;
+      margin: 0 4px 4px;
       border-radius: 4px;
-      opacity: 0.12;
+      align-items: center;
+    }
+    .tp-comp-in {
+      flex: 1;
+      height: 4px;
+      border-radius: 2px;
+    }
+    .tp-comp-btn {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .tp-glow {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.5;
     }
     .theme-info {
       display: flex;
