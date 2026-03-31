@@ -411,6 +411,28 @@ export const mcpRemoveServer = (provider: string, name: string, scope: string) =
 export const listSlashCommands = (provider: string) =>
   invoke<SlashCommand[]>("list_slash_commands", { provider });
 
+// Themes
+export interface ThemeData {
+  id: string;
+  name: string;
+  description: string;
+  preview: string[];
+  vars: Record<string, string>;
+  is_custom: boolean;
+}
+
+export const listThemes = () =>
+  invoke<ThemeData[]>("list_themes");
+
+export const importTheme = (jsonContent: string) =>
+  invoke<ThemeData>("import_theme", { jsonContent });
+
+export const deleteCustomTheme = (id: string) =>
+  invoke("delete_custom_theme", { id });
+
+export const exportTheme = (id: string) =>
+  invoke<string>("export_theme", { id });
+
 // Events
 export const listenAgentEvent = (callback: (payload: AgentEventPayload) => void) =>
   listen<AgentEventPayload>("agent-event", (e) => callback(e.payload));

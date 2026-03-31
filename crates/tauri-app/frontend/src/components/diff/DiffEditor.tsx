@@ -39,23 +39,53 @@ export function DiffEditor(props: { cwd: string }) {
     setStore("diffPanelOpen", false);
   }
 
+  // Cache diffs per cwd to avoid re-fetching on thread switch
+  const diffCache = new Map<string, { files: any[]; diffs: any[] }>();
+
   async function loadAll() {
+    const cwd = props.cwd;
+    if (!cwd || cwd === ".") {
+      setFiles([]);
+      setDiffs([]);
+      setLoading(false);
+      return;
+    }
+
+    // Check cache first
+    const cached = diffCache.get(cwd);
+    if (cached) {
+      setFiles(cached.files);
+      setDiffs(cached.diffs);
+      if (cached.files.length > 0) setSelectedFile(cached.files[0].path);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    // Clear old data immediately for clean transition
+    setFiles([]);
+    setDiffs([]);
+    setSelectedFile(null);
+
     try {
       const [changedFiles, sessionDiffs] = await Promise.all([
-        ipc.getChangedFiles(props.cwd),
-        ipc.getSessionDiff(props.cwd),
+        ipc.getChangedFiles(cwd),
+        ipc.getSessionDiff(cwd),
       ]);
-      setFiles(changedFiles);
-      setDiffs(sessionDiffs);
-      if (changedFiles.length > 0 && !selectedFile()) {
-        setSelectedFile(changedFiles[0].path);
+      // Only update if cwd hasn't changed while we were fetching
+      if (props.cwd === cwd) {
+        setFiles(changedFiles);
+        setDiffs(sessionDiffs);
+        if (changedFiles.length > 0) setSelectedFile(changedFiles[0].path);
+        // Cache for 30 seconds
+        diffCache.set(cwd, { files: changedFiles, diffs: sessionDiffs });
+        setTimeout(() => diffCache.delete(cwd), 30000);
       }
     } catch (e) {
-      setError(String(e));
+      if (props.cwd === cwd) setError(String(e));
     } finally {
-      setLoading(false);
+      if (props.cwd === cwd) setLoading(false);
     }
   }
 
@@ -132,7 +162,9 @@ export function DiffEditor(props: { cwd: string }) {
           {/* File sidebar */}
           <div class="de-file-list">
             <Show when={loading()}>
-              <div class="de-empty">Loading...</div>
+              <div class="de-loading-skeleton">
+                <div class="de-skel-line" /><div class="de-skel-line short" /><div class="de-skel-line" />
+              </div>
             </Show>
             <Show when={error()}>
               <div class="de-empty de-error">{error()}</div>
@@ -339,6 +371,25 @@ const DIFF_STYLES = `
     font-size: 12px;
   }
   .de-error { color: var(--red); }
+
+  /* Loading skeleton */
+  .de-loading-skeleton {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .de-skel-line {
+    height: 10px;
+    background: var(--bg-accent);
+    border-radius: 4px;
+    animation: de-pulse 1.2s ease-in-out infinite;
+  }
+  .de-skel-line.short { width: 60%; }
+  @keyframes de-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+  }
 
   .de-file-item {
     display: flex;

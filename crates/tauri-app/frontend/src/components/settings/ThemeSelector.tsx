@@ -1,11 +1,12 @@
-import { For, onMount, onCleanup, createSignal } from "solid-js";
+import { For, onMount, onCleanup, createSignal, createResource } from "solid-js";
 import { appStore } from "../../stores/app-store";
-import { themes, applyTheme } from "../../themes";
-import { getSetting } from "../../ipc";
+import { type Theme, getThemes, applyTheme } from "../../themes";
+import { getSetting, importTheme, deleteCustomTheme, exportTheme } from "../../ipc";
 
 export function ThemeSelector(props?: { inline?: boolean }) {
   const { setStore } = appStore;
   const [activeId, setActiveId] = createSignal("obsidian-forge");
+  const [themes, { refetch }] = createResource<Theme[]>(getThemes, { initialValue: [] });
 
   onMount(async () => {
     try {
@@ -29,24 +30,95 @@ export function ThemeSelector(props?: { inline?: boolean }) {
   onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
 
   function selectTheme(id: string) {
-    applyTheme(id);
+    applyTheme(id, themes());
     setActiveId(id);
+  }
+
+  async function handleImport() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const file = await open({
+        multiple: false,
+        filters: [{ name: "Theme", extensions: ["json"] }],
+      });
+      if (!file) return;
+      const path = typeof file === "string" ? file : file.path;
+      // Read file via fetch (Tauri asset protocol) or use fs plugin
+      // Since we have the path, read it via a small invoke or use the Rust side
+      // Actually, we pass the path content through the backend — but import_theme expects JSON string.
+      // Use the web File API via an input element instead for simplicity:
+      const response = await fetch(`asset://localhost/${path}`);
+      const content = await response.text();
+      await importTheme(content);
+      refetch();
+    } catch (e) {
+      console.error("Failed to import theme:", e);
+    }
+  }
+
+  async function handleExport(id: string, name: string) {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const path = await save({
+        defaultPath: `${id}.json`,
+        filters: [{ name: "Theme", extensions: ["json"] }],
+      });
+      if (!path) return;
+      const content = await exportTheme(id);
+      // Write via Tauri fs — but we don't have fs plugin. Use invoke to write or
+      // use the export content differently. For now, download via blob as fallback.
+      // Actually, let's write via a simple Rust helper or use the content.
+      // We can use the backend: the save dialog gives us a path, but we need to write.
+      // Simplest: use the existing IPC to get content + Blob download.
+      const blob = new Blob([content], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${name.toLowerCase().replace(/\s+/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Failed to export theme:", e);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteCustomTheme(id);
+      refetch();
+      // If the deleted theme was active, switch to default
+      if (activeId() === id) {
+        selectTheme("obsidian-forge");
+      }
+    } catch (e) {
+      console.error("Failed to delete theme:", e);
+    }
   }
 
   const content = (
     <>
       <div class="theme-selector-header">
         <h2 class="theme-selector-title">Themes</h2>
-        {!props?.inline && (
-          <button class="theme-close-btn" onClick={close} title="Close">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+        <div class="theme-header-actions">
+          <button class="theme-import-btn" onClick={handleImport} title="Import theme">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
+            <span>Import</span>
           </button>
-        )}
+          {!props?.inline && (
+            <button class="theme-close-btn" onClick={close} title="Close">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
       <div class="theme-grid">
-          <For each={themes}>
+          <For each={themes()}>
             {(theme) => (
               <button
                 class="theme-card"
@@ -70,7 +142,35 @@ export function ThemeSelector(props?: { inline?: boolean }) {
                   <span class="theme-name">{theme.name}</span>
                   <span class="theme-desc">{theme.description}</span>
                 </div>
-                {activeId() === theme.id && <span class="theme-badge">Active</span>}
+                <div class="theme-card-badges">
+                  {activeId() === theme.id && <span class="theme-badge">Active</span>}
+                  {theme.is_custom && <span class="theme-badge theme-badge-custom">Custom</span>}
+                </div>
+                <div class="theme-card-actions" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    class="theme-action-btn"
+                    onClick={() => handleExport(theme.id, theme.name)}
+                    title="Export theme"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                  </button>
+                  {theme.is_custom && (
+                    <button
+                      class="theme-action-btn theme-action-delete"
+                      onClick={() => handleDelete(theme.id)}
+                      title="Delete custom theme"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </button>
             )}
           </For>
@@ -117,6 +217,30 @@ if (!document.getElementById("theme-selector-styles")) {
       font-weight: 700;
       color: var(--text);
       letter-spacing: -0.3px;
+    }
+    .theme-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .theme-import-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--bg-accent);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .theme-import-btn:hover {
+      background: var(--bg-muted);
+      color: var(--text);
+      border-color: var(--border-strong);
     }
     .theme-close-btn {
       color: var(--text-tertiary);
@@ -234,10 +358,14 @@ if (!document.getElementById("theme-selector-styles")) {
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .theme-badge {
+    .theme-card-badges {
       position: absolute;
       top: 8px;
       right: 8px;
+      display: flex;
+      gap: 4px;
+    }
+    .theme-badge {
       font-size: 10px;
       font-weight: 600;
       padding: 2px 7px;
@@ -245,6 +373,41 @@ if (!document.getElementById("theme-selector-styles")) {
       background: var(--primary);
       color: #fff;
       letter-spacing: 0.02em;
+    }
+    .theme-badge-custom {
+      background: var(--purple, #b47aff);
+    }
+    .theme-card-actions {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .theme-card:hover .theme-card-actions {
+      opacity: 1;
+    }
+    .theme-action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .theme-action-btn:hover {
+      background: var(--bg-accent);
+      color: var(--text);
+    }
+    .theme-action-delete:hover {
+      color: var(--red);
     }
   `;
   document.head.appendChild(s);

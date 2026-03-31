@@ -12,4 +12,5 @@ pub mod sessions;
 pub mod settings;
 pub mod threads;
 pub mod usage;
+pub mod themes;
 pub mod worktree;

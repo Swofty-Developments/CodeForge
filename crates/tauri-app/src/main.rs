@@ -111,6 +111,10 @@ fn main() {
             commands::git::git_commit,
             commands::git::git_push,
             commands::git::git_status,
+            commands::themes::list_themes,
+            commands::themes::import_theme,
+            commands::themes::delete_custom_theme,
+            commands::themes::export_theme,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

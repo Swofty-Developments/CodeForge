@@ -292,6 +292,36 @@ export async function injectMockIPC(page: Page) {
         case "auto_name_thread":
           return null;
 
+        // Themes
+        case "list_themes":
+          return [
+            {
+              id: "obsidian-forge",
+              name: "Obsidian Forge",
+              description: "Warm dark theme",
+              preview: ["#0f1012", "#151518", "#6b7cff", "#4cd694"],
+              vars: { "--bg-base": "#0f1012", "--bg-card": "#151518", "--primary": "#6b7cff", "--text": "#f0eef8", "--text-secondary": "#b8b6c8", "--text-tertiary": "#807e92", "--bg-surface": "#18181c" },
+              is_custom: false,
+            },
+            {
+              id: "midnight",
+              name: "Midnight",
+              description: "Pure dark with cyan accents",
+              preview: ["#0a0e14", "#111820", "#00bcd4", "#66bb6a"],
+              vars: { "--bg-base": "#0a0e14", "--bg-card": "#111820", "--primary": "#00bcd4", "--text": "#e8edf3", "--text-secondary": "#a0b0c0", "--text-tertiary": "#607080", "--bg-surface": "#131a24" },
+              is_custom: false,
+            },
+          ];
+        case "import_theme": {
+          const imported = JSON.parse(args.jsonContent);
+          imported.is_custom = true;
+          return imported;
+        }
+        case "delete_custom_theme":
+          return null;
+        case "export_theme":
+          return JSON.stringify({ id: args.id, name: "Exported", description: "", preview: [], vars: {} });
+
         default:
           console.warn(`[mock-ipc] unhandled command: ${cmd}`, args);
           return null;
