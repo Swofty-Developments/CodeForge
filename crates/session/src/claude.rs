@@ -8,6 +8,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use crate::shell_env;
 use crate::types::AgentEvent;
 
 /// Path to the agent sidecar script, relative to the workspace root.
@@ -136,15 +137,25 @@ impl ClaudeSession {
 
         debug!("Spawning agent sidecar: node {}", sidecar_path.display());
 
-        let mut child = Command::new("node")
-            .arg(&sidecar_path)
+        // Resolve `node` using the user's real shell PATH so that desktop-launched
+        // apps (which may have a minimal environment) find the correct binary and
+        // its matching shared libraries (e.g. libnghttp2).
+        let node_bin = shell_env::which("node")
+            .unwrap_or_else(|| std::path::PathBuf::from("node"));
+
+        let mut cmd = Command::new(&node_bin);
+        cmd.arg(&sidecar_path)
             .current_dir(cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .context("Failed to spawn node agent sidecar")?;
+            .kill_on_drop(true);
+        shell_env::apply(&mut cmd);
+
+        let mut child = cmd.spawn().context(format!(
+            "Failed to spawn node agent sidecar (node={})",
+            node_bin.display()
+        ))?;
 
         let stdout = child.stdout.take().context("Failed to capture stdout")?;
         let stdin = child.stdin.take().context("Failed to capture stdin")?;

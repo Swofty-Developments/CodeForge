@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, warn};
 
 use crate::protocol::{self, JsonRpcMessage, JsonRpcResponse};
+use crate::shell_env;
 use crate::types::AgentEvent;
 
 /// Message sent to the writer task.
@@ -47,15 +48,24 @@ impl CodexSession {
         cwd: &Path,
         model: &str,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
-        let mut child = Command::new("codex")
-            .arg("app-server")
+        // Resolve `codex` using the user's real shell PATH so that desktop-launched
+        // apps find the correct binary with matching shared libraries.
+        let codex_bin = shell_env::which("codex")
+            .unwrap_or_else(|| std::path::PathBuf::from("codex"));
+
+        let mut cmd = Command::new(&codex_bin);
+        cmd.arg("app-server")
             .current_dir(cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .context("Failed to spawn codex app-server")?;
+            .kill_on_drop(true);
+        shell_env::apply(&mut cmd);
+
+        let mut child = cmd.spawn().context(format!(
+            "Failed to spawn codex app-server (codex={})",
+            codex_bin.display()
+        ))?;
 
         let stdout = child.stdout.take().context("Failed to capture codex stdout")?;
         let stderr = child.stderr.take().context("Failed to capture codex stderr")?;

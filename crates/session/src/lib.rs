@@ -5,6 +5,7 @@ pub mod claude;
 pub mod codex;
 pub mod manager;
 pub mod protocol;
+pub mod shell_env;
 pub mod types;
 
 /// Unique identifier for a session.
