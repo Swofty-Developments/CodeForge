@@ -5,10 +5,12 @@ import { appStore } from "../../stores/app-store";
 // (e.g. 'sonnet' or 'opus') or a model's full name (e.g. 'claude-sonnet-4-6')."
 // These are suggestions, not exhaustive — users can type any model ID.
 const PRESETS = [
-  { value: null, label: "Default", desc: "Use CLI default" },
-  { value: "opus", label: "opus", desc: "Latest Opus (alias)" },
-  { value: "sonnet", label: "sonnet", desc: "Latest Sonnet (alias)" },
-  { value: "haiku", label: "haiku", desc: "Latest Haiku (alias)" },
+  { value: null, label: "Default", desc: "CLI default model" },
+  { value: "claude-opus-4-6", label: "Opus 4.6", desc: "Most capable, 1M context" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6", desc: "Fast + capable, 1M context" },
+  { value: "claude-opus-4-0", label: "Opus 4", desc: "Previous Opus" },
+  { value: "claude-sonnet-4-5", label: "Sonnet 4.5", desc: "Previous Sonnet" },
+  { value: "claude-haiku-4-5", label: "Haiku 4.5", desc: "Fast and lightweight" },
 ];
 
 export function ModelSelector() {
@@ -23,13 +25,15 @@ export function ModelSelector() {
     return preset ? preset.label : store.selectedModel;
   };
 
-  /** Show the confirmed model from the SDK, if it differs from the selected alias. */
+  /** Show the confirmed model from the SDK, shortened for display. */
   const confirmedLabel = () => {
     if (!store.activeModel) return null;
     const selected = store.selectedModel;
-    // Only show if it adds info (e.g. alias "opus" resolved to "claude-opus-4-6")
     if (store.activeModel === selected) return null;
-    return store.activeModel;
+    // Shorten "claude-opus-4-6[1m]" → "opus-4.6"
+    let m = store.activeModel;
+    m = m.replace("claude-", "").replace("[1m]", "").replace("[200k]", "");
+    return m;
   };
 
   function select(value: string | null) {

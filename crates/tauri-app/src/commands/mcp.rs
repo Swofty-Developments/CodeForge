@@ -25,6 +25,7 @@ pub async fn mcp_list_servers(provider: String) -> Result<Vec<McpServer>, String
         _ => "claude",
     };
 
+    // Try CLI first
     let output = Command::new(binary)
         .args(["mcp", "list"])
         .output()
@@ -32,7 +33,43 @@ pub async fn mcp_list_servers(provider: String) -> Result<Vec<McpServer>, String
         .map_err(|e| format!("Failed to run {binary} mcp list: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let servers = parse_mcp_list(&stdout);
+    let mut servers = parse_mcp_list(&stdout);
+
+    // If CLI returned nothing, try reading config files directly
+    if servers.is_empty() && provider != "codex" {
+        let home = std::env::var("HOME").unwrap_or_default();
+        // Check ~/.claude/.mcp.json and project .mcp.json
+        for (path, scope) in [
+            (format!("{home}/.claude/.mcp.json"), "user"),
+            (".mcp.json".to_string(), "project"),
+        ] {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(obj) = json.get("mcpServers").and_then(|s| s.as_object())
+                        .or_else(|| json.as_object()) {
+                        for (name, config) in obj {
+                            let url_or_cmd = config.get("url")
+                                .or_else(|| config.get("command"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let transport = if url_or_cmd.starts_with("http") { "http" }
+                                else if url_or_cmd.contains("sse") { "sse" }
+                                else { "stdio" };
+                            servers.push(McpServer {
+                                name: name.clone(),
+                                url_or_command: url_or_cmd,
+                                transport: transport.to_string(),
+                                scope: scope.to_string(),
+                                status: "unknown".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(servers)
 }
 
