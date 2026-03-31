@@ -75,7 +75,7 @@ export function App() {
   const hasSidePane = () => {
     const tab = store.activeTab;
     const browserOpen = tab && store.threadBrowserOpen[tab];
-    const diffOpen = store.diffPanelOpen && isGitProject();
+    const diffOpen = store.activeTab && store.threadDiffOpen[store.activeTab] && isGitProject();
     return browserOpen || diffOpen;
   };
 
@@ -147,7 +147,7 @@ export function App() {
     }
     if (mod && e.shiftKey && key === "d") {
       e.preventDefault();
-      setStore("diffPanelOpen", !store.diffPanelOpen);
+      if (store.activeTab) setStore("threadDiffOpen", store.activeTab, !store.threadDiffOpen[store.activeTab]);
     }
   }
 
@@ -204,7 +204,7 @@ export function App() {
                   <Show when={store.activeTab && store.threadBrowserOpen[store.activeTab!]}>
                     <BrowserPanel threadId={store.activeTab!} />
                   </Show>
-                  <Show when={store.diffPanelOpen && diffCwd()}>
+                  <Show when={store.activeTab && store.threadDiffOpen[store.activeTab!] && diffCwd()}>
                     <DiffEditor cwd={diffCwd()} prNumber={activePrNumber()} />
                   </Show>
                 </div>

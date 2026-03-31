@@ -70,7 +70,8 @@ export function TabBar() {
   }
 
   function toggleDiff() {
-    setStore("diffPanelOpen", !store.diffPanelOpen);
+    const tab = store.activeTab;
+    if (tab) setStore("threadDiffOpen", tab, !store.threadDiffOpen[tab]);
   }
 
   function exportChat() {
@@ -126,7 +127,7 @@ export function TabBar() {
               </button>
               <button
                 class="tb-action"
-                classList={{ active: store.diffPanelOpen }}
+                classList={{ active: !!(store.activeTab && store.threadDiffOpen[store.activeTab]) }}
                 onClick={toggleDiff}
                 title="Diff view (Cmd+Shift+D)"
               >

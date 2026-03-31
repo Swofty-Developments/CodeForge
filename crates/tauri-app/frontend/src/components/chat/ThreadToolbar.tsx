@@ -153,7 +153,10 @@ export function ThreadToolbar() {
     const tab = activeTab();
     return tab ? !!store.threadBrowserOpen[tab] : false;
   };
-  const diffOpen = () => store.diffPanelOpen;
+  const diffOpen = () => {
+    const tab = activeTab();
+    return tab ? !!store.threadDiffOpen[tab] : false;
+  };
 
   // Only show diff for git-activated projects (path !== ".")
   const isGitProject = () => {
@@ -171,7 +174,8 @@ export function ThreadToolbar() {
   }
 
   function toggleDiff() {
-    setStore("diffPanelOpen", !store.diffPanelOpen);
+    const tab = activeTab();
+    if (tab) setStore("threadDiffOpen", tab, !store.threadDiffOpen[tab]);
   }
 
   function exportChat() {

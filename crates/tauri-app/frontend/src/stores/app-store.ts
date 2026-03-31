@@ -33,7 +33,7 @@ export interface AppStore {
   themeOpen: boolean;
   worktrees: Record<string, { thread_id: string; branch: string; path: string; active: boolean } | undefined>;
   splitTab: string | null;
-  diffPanelOpen: boolean;
+  threadDiffOpen: Record<string, boolean>;
   selectedModel: string | null;
   threadBrowserOpen: Record<string, boolean>;
   threadBrowserUrls: Record<string, string>;
@@ -72,7 +72,7 @@ function createAppStore() {
     themeOpen: false,
     worktrees: {},
     splitTab: null,
-    diffPanelOpen: false,
+    threadDiffOpen: {},
     selectedModel: null,
     threadBrowserOpen: {},
     threadBrowserUrls: {},

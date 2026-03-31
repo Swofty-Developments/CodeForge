@@ -36,7 +36,8 @@ export function DiffEditor(props: { cwd: string; prNumber?: number | null }) {
   const [gitPanelOpen, setGitPanelOpen] = createSignal(true);
 
   function close() {
-    setStore("diffPanelOpen", false);
+    const tab = appStore.store.activeTab;
+    if (tab) setStore("threadDiffOpen", tab, false);
   }
 
   // Cache diffs per cwd to avoid re-fetching on thread switch
