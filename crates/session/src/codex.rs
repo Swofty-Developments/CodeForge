@@ -93,14 +93,24 @@ impl CodexSession {
             }
         });
 
-        // Stderr reader task.
+        // Stderr reader task — surface crash diagnostics.
+        let err_tx = event_tx.clone();
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
+            let mut stderr_lines = Vec::new();
             while let Ok(Some(line)) = lines.next_line().await {
                 if !line.trim().is_empty() {
                     warn!("codex stderr: {line}");
+                    stderr_lines.push(line);
                 }
+            }
+            if !stderr_lines.is_empty() {
+                let message = format!(
+                    "Codex process crashed: {}",
+                    stderr_lines.join("; ")
+                );
+                let _ = err_tx.send(AgentEvent::SessionError { message });
             }
         });
 

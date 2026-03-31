@@ -161,20 +161,32 @@ impl ClaudeSession {
         let stdin = child.stdin.take().context("Failed to capture stdin")?;
         let stderr = child.stderr.take();
 
-        // Stderr reader — log sidecar errors
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+
+        // Stderr reader — collect stderr and emit a SessionError if the sidecar
+        // crashes before producing any stdout (e.g. shared-library mismatch).
         if let Some(stderr) = stderr {
+            let err_tx = event_tx.clone();
             tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
+                let mut stderr_lines = Vec::new();
                 while let Ok(Some(line)) = lines.next_line().await {
                     if !line.trim().is_empty() {
                         tracing::warn!("sidecar stderr: {line}");
+                        stderr_lines.push(line);
                     }
+                }
+                // If the sidecar wrote to stderr and then exited, surface it.
+                if !stderr_lines.is_empty() {
+                    let message = format!(
+                        "Agent sidecar crashed: {}",
+                        stderr_lines.join("; ")
+                    );
+                    let _ = err_tx.send(AgentEvent::SessionError { message });
                 }
             });
         }
-
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
         let claude_session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
