@@ -1,14 +1,13 @@
-import { For, Show, createEffect, createSignal, lazy } from "solid-js";
+import { For, Show, createEffect, createSignal } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 import { Markdown } from "./Markdown";
 import { ToolUseCard } from "./ToolUseCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PrDashboard } from "../github/PrDashboard";
+import { McpPanel } from "../sidebar/McpPanel";
+import { ThemeSelector } from "../settings/ThemeSelector";
 import type { ContentBlock } from "../../types";
-
-const McpPanel = lazy(() => import("../sidebar/McpPanel").then(m => ({ default: m.McpPanel })));
-const ThemeSelector = lazy(() => import("../settings/ThemeSelector").then(m => ({ default: m.ThemeSelector })));
 
 export function ChatArea() {
   const { store, approveRequest, denyRequest } = appStore;
@@ -265,22 +264,55 @@ export function ChatArea() {
             </For>
 
             <For each={store.pendingApprovals.filter((a) => a.threadId === store.activeTab)}>
-              {(approval) => (
-                <div class="approval-card">
-                  <div class="approval-header">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                      <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
-                    </svg>
-                    <span class="approval-title">Permission Required</span>
+              {(approval) => {
+                const toolName = () => approval.description.split(":")[0]?.trim() || "tool";
+
+                function handleApproveAndRemember() {
+                  // Store an allow rule for this tool
+                  const rule = `${toolName()}`;
+                  ipc.getSetting("allowed_tools").then((current) => {
+                    const rules = current ? current.split(",") : [];
+                    if (!rules.includes(rule)) {
+                      rules.push(rule);
+                      ipc.setSetting("allowed_tools", rules.join(","));
+                    }
+                  }).catch(() => {});
+                  approveRequest(approval);
+                }
+
+                function handleBypassSession() {
+                  // Approve this request and set session to bypass
+                  ipc.setSetting("permission_mode", "bypassPermissions").catch(() => {});
+                  // Approve all pending approvals for this thread
+                  store.pendingApprovals
+                    .filter((a) => a.threadId === approval.threadId)
+                    .forEach((a) => approveRequest(a));
+                }
+
+                return (
+                  <div class="approval-card">
+                    <div class="approval-header">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <span class="approval-title">Permission Required</span>
+                      <span class="approval-tool">{toolName()}</span>
+                    </div>
+                    <pre class="approval-desc">{approval.description}</pre>
+                    <div class="approval-actions">
+                      <button class="deny-btn" onClick={() => denyRequest(approval)}>Deny</button>
+                      <button class="approve-btn" onClick={() => approveRequest(approval)}>Approve</button>
+                      <button class="approve-remember-btn" onClick={handleApproveAndRemember} title={`Always allow ${toolName()}`}>
+                        Approve &amp; Remember
+                      </button>
+                      <button class="bypass-btn" onClick={handleBypassSession} title="Auto-approve everything for this session">
+                        Bypass All
+                      </button>
+                    </div>
                   </div>
-                  <pre class="approval-desc">{approval.description}</pre>
-                  <div class="approval-actions">
-                    <button class="deny-btn" onClick={() => denyRequest(approval)}>Deny</button>
-                    <button class="approve-btn" onClick={() => approveRequest(approval)}>Approve</button>
-                  </div>
-                </div>
-              )}
+                );
+              }}
             </For>
 
             <Show when={isGenerating() && messages().length === 0}>
@@ -868,11 +900,20 @@ if (!document.getElementById("chat-styles")) {
       overflow-y: auto;
       margin: 0 0 12px;
     }
-    .approval-actions { display: flex; gap: 8px; justify-content: flex-end; }
-    .approve-btn, .deny-btn {
-      padding: 7px 16px;
+    .approval-tool {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+      margin-left: auto;
+      padding: 1px 6px;
+      background: var(--bg-accent);
+      border-radius: var(--radius-pill);
+    }
+    .approval-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+    .approve-btn, .deny-btn, .approve-remember-btn, .bypass-btn {
+      padding: 6px 12px;
       border-radius: var(--radius-sm);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       transition: all 0.12s;
     }
@@ -881,6 +922,24 @@ if (!document.getElementById("chat-styles")) {
       color: #fff;
     }
     .approve-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .approve-remember-btn {
+      background: rgba(76, 214, 148, 0.12);
+      border: 1px solid rgba(76, 214, 148, 0.25);
+      color: var(--green);
+    }
+    .approve-remember-btn:hover {
+      background: rgba(76, 214, 148, 0.2);
+      border-color: rgba(76, 214, 148, 0.4);
+    }
+    .bypass-btn {
+      background: rgba(240, 184, 64, 0.1);
+      border: 1px solid rgba(240, 184, 64, 0.2);
+      color: var(--amber);
+    }
+    .bypass-btn:hover {
+      background: rgba(240, 184, 64, 0.18);
+      border-color: rgba(240, 184, 64, 0.35);
+    }
     .deny-btn {
       background: var(--bg-muted);
       border: 1px solid var(--border);
