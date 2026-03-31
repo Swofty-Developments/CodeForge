@@ -12,7 +12,13 @@ export function Composer() {
   const isActive = () => store.activeTab !== null;
   const isGenerating = () => {
     if (!store.activeTab) return false;
-    return store.sessionStatuses[store.activeTab] === "generating";
+    const s = store.sessionStatuses[store.activeTab];
+    return s === "generating" || s === "interrupting";
+  };
+
+  const isInterrupting = () => {
+    if (!store.activeTab) return false;
+    return store.sessionStatuses[store.activeTab] === "interrupting";
   };
 
   const sessionStatus = () => {
@@ -89,11 +95,30 @@ export function Composer() {
 
   async function handleStop() {
     if (!store.activeTab) return;
+    const threadId = store.activeTab;
+    const status = store.sessionStatuses[threadId];
+
+    if (status === "interrupting") {
+      // Second click: force kill
+      try {
+        await ipc.stopSession(threadId);
+        appStore.setStore("sessionStatuses", threadId, "ready");
+      } catch (e) {
+        console.error("Failed to kill session:", e);
+      }
+      return;
+    }
+
+    // First click: graceful interrupt via SIGINT
     try {
-      await ipc.stopSession(store.activeTab);
-      appStore.setStore("sessionStatuses", store.activeTab, "ready");
+      setStore("sessionStatuses", threadId, "interrupting");
+      await ipc.interruptSession(threadId);
+
+      // After 2 seconds, if still interrupting, the button will show "Force stop"
+      // (the status stays "interrupting" until a turn_completed/turn_aborted event
+      // resets it to "ready", or the user clicks again to force kill)
     } catch (e) {
-      console.error("Failed to stop session:", e);
+      console.error("Failed to interrupt session:", e);
     }
   }
 
@@ -163,6 +188,7 @@ export function Composer() {
     const s = sessionStatus();
     if (s === "ready") return "var(--green)";
     if (s === "generating") return "var(--sky)";
+    if (s === "interrupting") return "var(--amber)";
     if (s === "starting") return "var(--amber)";
     if (s === "error") return "var(--red)";
     return null;
@@ -172,6 +198,7 @@ export function Composer() {
     const s = sessionStatus();
     if (s === "ready") return "Ready";
     if (s === "generating") return "Working";
+    if (s === "interrupting") return "Interrupting...";
     if (s === "starting") return "Connecting";
     if (s === "error") return "Error";
     return null;
@@ -291,10 +318,15 @@ export function Composer() {
             <Show when={isGenerating() && !store.composerText.trim()}>
               <button
                 class="send-btn stop"
+                classList={{ "force-stop": isInterrupting() }}
                 onClick={handleStop}
-                title="Stop generating"
+                title={isInterrupting() ? "Force stop" : "Interrupt"}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+                <Show when={isInterrupting()} fallback={
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+                }>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </Show>
               </button>
             </Show>
             <Show when={!isGenerating() || store.composerText.trim()}>
@@ -455,7 +487,8 @@ if (!document.getElementById("composer-styles")) {
     }
     .send-btn:hover { filter: brightness(1.1); transform: scale(1.04); }
     .send-btn:active { transform: scale(0.96); }
-    .send-btn.stop { background: var(--red); }
+    .send-btn.stop { background: var(--amber, #e6b84d); }
+    .send-btn.stop.force-stop { background: var(--red); }
     .send-btn.steering {
       background: var(--amber, #e6b84d);
     }

@@ -41,7 +41,7 @@ async fn claude_code_send_and_receive() {
         match timeout(Duration::from_secs(30), rx.recv()).await {
             Ok(Some(event)) => {
                 match &event {
-                    AgentEvent::SessionReady => {
+                    AgentEvent::SessionReady { .. } => {
                         println!("[OK] SessionReady");
                         got_session_ready = true;
                     }

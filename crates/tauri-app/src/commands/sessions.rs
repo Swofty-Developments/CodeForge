@@ -17,6 +17,7 @@ pub async fn send_message(
     provider: String,
     cwd: String,
     model: Option<String>,
+    permission_mode: Option<String>,
 ) -> Result<(), String> {
     let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
 
@@ -38,11 +39,42 @@ pub async fn send_message(
         };
         let cwd_path = PathBuf::from(&cwd);
 
+        // Resolve permission mode
+        let perm_mode = permission_mode.or_else(|| {
+            state.db.lock().ok().and_then(|db| {
+                codeforge_persistence::queries::get_setting(db.conn(), "permission_mode").ok().flatten()
+            })
+        });
+
+        // Check if there's a previous Claude session we can resume
+        let previous_claude_session_id = if prov == Provider::ClaudeCode {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            codeforge_persistence::queries::get_latest_claude_session_id(db.conn(), tid)
+                .unwrap_or(None)
+        } else {
+            None
+        };
+
         let mut mgr = state.session_manager.lock().await;
-        let (session_id, event_rx) = mgr
-            .create_session(prov, &cwd_path, model.as_deref())
-            .await
-            .map_err(|e| format!("{e:#}"))?;
+
+        let (session_id, event_rx) = if let Some(ref claude_sid) = previous_claude_session_id {
+            match mgr
+                .resume_session(claude_sid, &cwd_path, model.as_deref())
+                .await
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    tracing::warn!("Failed to resume session, creating new one: {e:#}");
+                    mgr.create_session(prov, &cwd_path, model.as_deref(), perm_mode.as_deref())
+                        .await
+                        .map_err(|e| format!("{e:#}"))?
+                }
+            }
+        } else {
+            mgr.create_session(prov, &cwd_path, model.as_deref(), perm_mode.as_deref())
+                .await
+                .map_err(|e| format!("{e:#}"))?
+        };
 
         // Store session mapping
         {
@@ -58,36 +90,29 @@ pub async fn send_message(
             state.db.clone(),
         );
 
-        // If the thread has prior messages, prepend full conversation history
-        // so the new session has context. Let the CLI handle its own compaction.
-        let history = {
-            let db = state.db.lock().map_err(|e| e.to_string())?;
-            codeforge_persistence::queries::get_messages_by_thread(db.conn(), tid)
-                .unwrap_or_default()
-        };
-
-        let message_to_send = if !history.is_empty() {
-            let mut context = String::from("<conversation_history>\n");
-            for msg in &history {
-                let role = match msg.role {
-                    codeforge_persistence::MessageRole::User => "User",
-                    codeforge_persistence::MessageRole::Assistant => "Assistant",
-                    codeforge_persistence::MessageRole::System => "System",
-                };
-                context.push_str(&format!("{role}: {}\n\n", msg.content));
-            }
-            context.push_str("</conversation_history>\n\n");
-            context.push_str(&text);
-            context
-        } else {
-            text.clone()
-        };
-
-        mgr.send_message(session_id, &message_to_send)
+        mgr.send_message(session_id, &text)
             .await
             .map_err(|e| format!("{e:#}"))?;
     }
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn interrupt_session(
+    state: State<'_, TauriState>,
+    thread_id: String,
+) -> Result<(), String> {
+    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
+    let session_id = {
+        let sessions = state.thread_sessions.lock().await;
+        sessions.get(&tid).copied()
+    };
+    if let Some(session_id) = session_id {
+        let mgr = state.session_manager.lock().await;
+        mgr.interrupt_session(session_id)
+            .map_err(|e| format!("{e:#}"))?;
+    }
     Ok(())
 }
 

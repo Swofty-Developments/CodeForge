@@ -45,14 +45,21 @@ export const moveThreadToProject = (threadId: string, targetProjectId: string) =
 export const persistUserMessage = (threadId: string, content: string) =>
   invoke<string>("persist_user_message", { threadId, content });
 
+export const deleteMessagesAfter = (threadId: string, messageId: string) =>
+  invoke<number>("delete_messages_after", { threadId, messageId });
+
 // Sessions
 export const sendMessage = (
   threadId: string,
   text: string,
   provider: string,
   cwd: string,
-  model?: string
-) => invoke("send_message", { threadId, text, provider, cwd, model: model || null });
+  model?: string,
+  permissionMode?: string
+) => invoke("send_message", { threadId, text, provider, cwd, model: model || null, permissionMode: permissionMode || null });
+
+export const interruptSession = (threadId: string) =>
+  invoke("interrupt_session", { threadId });
 
 export const stopSession = (threadId: string) =>
   invoke("stop_session", { threadId });
@@ -325,6 +332,47 @@ export const getRepoInfo = (repoPath: string) =>
 
 export const isGithubRepo = (path: string) =>
   invoke<boolean>("is_github_repo", { path });
+
+// Git
+export interface GitLogEntry {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface GitBranch {
+  name: string;
+  current: boolean;
+  remote: boolean;
+}
+
+export interface GitStatusEntry {
+  path: string;
+  status: string;
+  staged: boolean;
+}
+
+export const gitLog = (cwd: string, limit: number) =>
+  invoke<GitLogEntry[]>("git_log", { cwd, limit });
+
+export const gitBranches = (cwd: string) =>
+  invoke<GitBranch[]>("git_branches", { cwd });
+
+export const gitCheckout = (cwd: string, branch: string) =>
+  invoke<string>("git_checkout", { cwd, branch });
+
+export const gitCreateBranch = (cwd: string, name: string) =>
+  invoke<string>("git_create_branch", { cwd, name });
+
+export const gitCommit = (cwd: string, message: string, files: string[]) =>
+  invoke<string>("git_commit", { cwd, message, files });
+
+export const gitPush = (cwd: string) =>
+  invoke<string>("git_push", { cwd });
+
+export const gitStatus = (cwd: string) =>
+  invoke<GitStatusEntry[]>("git_status", { cwd });
 
 // MCP
 export interface McpServer {

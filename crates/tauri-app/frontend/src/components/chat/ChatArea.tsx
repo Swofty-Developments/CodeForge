@@ -213,6 +213,14 @@ export function ChatArea() {
                   msg={msg}
                   isGenerating={isGenerating()}
                   isLast={idx() === messages().length - 1}
+                  isLastUser={msg.role === "user" && (() => {
+                    const msgs = messages();
+                    for (let i = msgs.length - 1; i >= 0; i--) {
+                      if (msgs[i].role === "user") return msgs[i].id === msg.id;
+                    }
+                    return false;
+                  })()}
+                  threadId={store.activeTab!}
                 />
               )}
             </For>
@@ -261,7 +269,7 @@ function renderBlock(block: ContentBlock, isLastAndStreaming: boolean) {
   }
 }
 
-function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean }) {
+function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean; isLastUser: boolean; threadId: string }) {
   const [copied, setCopied] = createSignal(false);
   const [detailsHidden, setDetailsHidden] = createSignal(false);
   const isAssistant = () => props.msg.role === "assistant";
@@ -323,6 +331,30 @@ function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean
       </Show>
       <Show when={props.msg.role === "user"}>
         <div class="msg-user-bubble">{props.msg.content}</div>
+        <div class="msg-user-actions">
+          <button
+            class="msg-action-btn"
+            title="Edit & resend"
+            onClick={() => appStore.editAndResend(props.threadId, props.msg.id, props.msg.content)}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
+          <Show when={props.isLastUser && !props.isGenerating}>
+            <button
+              class="msg-action-btn"
+              title="Retry"
+              onClick={() => appStore.retryLastMessage(props.threadId)}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+              </svg>
+            </button>
+          </Show>
+        </div>
       </Show>
       <Show when={isAssistant()}>
         <div class="msg-assistant">
@@ -396,6 +428,18 @@ function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean
                     <polyline points="20 6 9 17 4 12"/>
                   </svg>
                 </Show>
+              </button>
+            </Show>
+            <Show when={isDone() && !props.isGenerating}>
+              <button
+                class="msg-action-btn"
+                title="Regenerate response"
+                onClick={() => appStore.regenerateResponse(props.threadId, props.msg.id)}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                </svg>
               </button>
             </Show>
           </div>
@@ -630,6 +674,44 @@ if (!document.getElementById("chat-styles")) {
       align-items: center;
     }
     .msg-copy:hover { opacity: 1; background: var(--bg-accent); color: var(--text-secondary); }
+
+    /* ── Message action buttons (edit, retry, regenerate) ── */
+    .msg-user-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 4px;
+      margin-top: 4px;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    .msg-user-bubble:hover + .msg-user-actions,
+    .msg-user-actions:hover {
+      opacity: 1;
+    }
+    .msg:hover .msg-user-actions {
+      opacity: 1;
+    }
+    .msg:hover .msg-action-btn.footer-action {
+      opacity: 1;
+    }
+    .msg-action-btn {
+      display: flex;
+      align-items: center;
+      padding: 3px;
+      border-radius: var(--radius-sm);
+      color: var(--text-tertiary);
+      opacity: 0;
+      transition: all 0.12s ease;
+      cursor: pointer;
+    }
+    .msg:hover .msg-action-btn {
+      opacity: 0.5;
+    }
+    .msg-action-btn:hover {
+      opacity: 1 !important;
+      background: var(--bg-accent);
+      color: var(--text-secondary);
+    }
 
     .typing-indicator {
       display: flex;

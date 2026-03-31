@@ -153,7 +153,7 @@ impl CodexSession {
             .await
             .context("Codex thread/start failed")?;
 
-        let _ = event_tx.send(AgentEvent::SessionReady);
+        let _ = event_tx.send(AgentEvent::SessionReady { claude_session_id: None });
 
         Ok((session, event_rx))
     }

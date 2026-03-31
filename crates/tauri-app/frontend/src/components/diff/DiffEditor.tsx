@@ -2,6 +2,7 @@ import { createSignal, onMount, For, Show, createEffect } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 import type { ChangedFile, FileDiff, DiffHunk } from "../../ipc";
+import { GitPanel } from "../git/GitPanel";
 
 function statusBadge(status: string): { label: string; cls: string } {
   switch (status) {
@@ -228,6 +229,9 @@ export function DiffEditor(props: { cwd: string }) {
             </Show>
           </div>
         </div>
+
+        {/* Git management panel */}
+        <GitPanel cwd={props.cwd} />
     </div>
   );
 }

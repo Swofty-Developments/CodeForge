@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -12,30 +13,70 @@ use crate::types::AgentEvent;
 pub struct ClaudeSession {
     child: Child,
     stdin_tx: mpsc::UnboundedSender<String>,
+    /// The Claude CLI session ID captured from the `system.init` event.
+    claude_session_id: Arc<Mutex<Option<String>>>,
 }
 
 impl ClaudeSession {
     pub async fn start(
         cwd: &Path,
         model: Option<&str>,
+        permission_mode: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
+        let perm_mode = permission_mode.unwrap_or("bypassPermissions");
         let mut args = vec![
             "-p",
             "--output-format", "stream-json",
             "--verbose",
             "--input-format", "stream-json",
             "--include-partial-messages",
-            // bypassPermissions since there's no TTY for Claude Code's
-            // own approval TUI — commands would silently hang otherwise.
-            "--permission-mode", "bypassPermissions",
+            "--permission-mode", perm_mode,
         ];
         if let Some(m) = model {
             args.push("--model");
             args.push(m);
         }
 
+        Self::spawn_with_args(cwd, &args).await
+    }
+
+    /// Resume a previous Claude CLI session using `--resume`.
+    pub async fn resume(
+        cwd: &Path,
+        claude_session_id: &str,
+        model: Option<&str>,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
+        let resume_id = claude_session_id.to_string();
+        let mut args = vec![
+            "-p",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--input-format", "stream-json",
+            "--include-partial-messages",
+            "--permission-mode", "bypassPermissions",
+            "--resume",
+        ];
+        // Push the resume ID; we need the String to live long enough.
+        args.push(&resume_id);
+        if let Some(m) = model {
+            args.push("--model");
+            args.push(m);
+        }
+
+        Self::spawn_with_args(cwd, &args).await
+    }
+
+    /// Return the captured Claude CLI session ID, if available.
+    pub fn claude_session_id(&self) -> Option<String> {
+        self.claude_session_id.lock().ok().and_then(|g| g.clone())
+    }
+
+    async fn spawn_with_args(
+        cwd: &Path,
+        args: &[&str],
+    ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
         let mut child = Command::new("claude")
-            .args(&args)
+            .args(args)
             .current_dir(cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -49,6 +90,7 @@ impl ClaudeSession {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
+        let claude_session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         // Stdin writer
         tokio::spawn(async move {
@@ -62,6 +104,7 @@ impl ClaudeSession {
 
         // Stdout reader
         let tx = event_tx;
+        let session_id_clone = claude_session_id.clone();
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
@@ -72,6 +115,10 @@ impl ClaudeSession {
             let mut got_stream_deltas = false;
             // Track active content blocks by their stream index for tool use / thinking.
             let mut active_blocks = std::collections::HashMap::<u64, BlockInfo>::new();
+            // Map tool_id -> tool_name persisted across the turn so we can
+            // look up names when the "user" tool_result event arrives (after
+            // content_block_end has already removed the block from active_blocks).
+            let mut tool_names = std::collections::HashMap::<String, String>::new();
             // Track model name from message_start so we can use it in result.
             let mut current_model: Option<String> = None;
 
@@ -89,13 +136,26 @@ impl ClaudeSession {
                 let events: Vec<AgentEvent> = match event_type {
                     "system" => {
                         if obj.get("subtype").and_then(|s| s.as_str()) == Some("init") {
-                            vec![AgentEvent::SessionReady]
+                            // Capture the session_id from the init event
+                            let sid = obj.get("session_id").and_then(|s| s.as_str()).map(|s| s.to_string());
+                            if let Some(ref s) = sid {
+                                if let Ok(mut guard) = session_id_clone.lock() {
+                                    *guard = Some(s.clone());
+                                }
+                            }
+                            vec![AgentEvent::SessionReady { claude_session_id: sid }]
                         } else {
                             vec![]
                         }
                     }
                     "stream_event" => {
                         let evts = handle_stream_event(&obj, &mut turn_started, &mut active_blocks, &mut current_model);
+                        // Record tool_id -> tool_name for later lookup
+                        for evt in &evts {
+                            if let AgentEvent::ToolUseStart { tool_id, tool_name } = evt {
+                                tool_names.insert(tool_id.clone(), tool_name.clone());
+                            }
+                        }
                         // Mark that we got real streaming deltas so we skip
                         // the `assistant` snapshot which would duplicate them.
                         if evts.iter().any(|e| matches!(e, AgentEvent::ContentDelta { .. }
@@ -141,6 +201,7 @@ impl ClaudeSession {
                         turn_started = false;
                         got_stream_deltas = false;
                         active_blocks.clear();
+                        tool_names.clear();
                         let evts = handle_result(&obj, &current_model);
                         current_model = None;
                         evts
@@ -155,6 +216,18 @@ impl ClaudeSession {
 
                         if let Some(blocks) = content {
                             let mut evts = Vec::new();
+
+                            // Extract stdout/stderr from top-level tool_use_result
+                            let tool_use_result = obj.get("tool_use_result");
+                            let stdout = tool_use_result
+                                .and_then(|r| r.get("stdout"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("");
+                            let stderr = tool_use_result
+                                .and_then(|r| r.get("stderr"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("");
+
                             for block in blocks {
                                 if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
                                     let tool_use_id = block
@@ -162,27 +235,40 @@ impl ClaudeSession {
                                         .and_then(|id| id.as_str())
                                         .unwrap_or("")
                                         .to_string();
-                                    let result_content = block
-                                        .get("content")
-                                        .map(|c| {
-                                            if let Some(s) = c.as_str() {
-                                                s.to_string()
-                                            } else {
-                                                serde_json::to_string_pretty(c).unwrap_or_default()
-                                            }
-                                        })
-                                        .unwrap_or_default();
+
+                                    // Build the result content: prefer stdout/stderr
+                                    // from tool_use_result, fall back to block content
+                                    let result_content = if !stdout.is_empty() || !stderr.is_empty() {
+                                        let mut parts = Vec::new();
+                                        if !stdout.is_empty() {
+                                            parts.push(stdout.to_string());
+                                        }
+                                        if !stderr.is_empty() {
+                                            parts.push(format!("[stderr]\n{stderr}"));
+                                        }
+                                        parts.join("\n")
+                                    } else {
+                                        block
+                                            .get("content")
+                                            .map(|c| {
+                                                if let Some(s) = c.as_str() {
+                                                    s.to_string()
+                                                } else {
+                                                    serde_json::to_string_pretty(c).unwrap_or_default()
+                                                }
+                                            })
+                                            .unwrap_or_default()
+                                    };
+
                                     let is_error = block
                                         .get("is_error")
                                         .and_then(|e| e.as_bool())
                                         .unwrap_or(false);
 
-                                    // Try to get the tool name from tool_use_result
-                                    let tool_name = obj
-                                        .get("tool_use_result")
-                                        .and_then(|r| r.get("stdout"))
-                                        .and_then(|s| s.as_str())
-                                        .map(|_| "Bash".to_string())
+                                    // Look up tool name from the turn's tool_names map
+                                    let tool_name = tool_names
+                                        .get(&tool_use_id)
+                                        .cloned()
                                         .unwrap_or_default();
 
                                     evts.push(AgentEvent::ToolResult {
@@ -213,7 +299,7 @@ impl ClaudeSession {
             debug!("Claude stdout reader finished");
         });
 
-        Ok((Self { child, stdin_tx }, event_rx))
+        Ok((Self { child, stdin_tx, claude_session_id }, event_rx))
     }
 
     pub fn send_message(&self, text: &str) -> Result<()> {

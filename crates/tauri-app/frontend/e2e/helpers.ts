@@ -119,6 +119,15 @@ export async function injectMockIPC(page: Page) {
           return id;
         }
 
+        case "delete_messages_after": {
+          const refMsg = state.messages.find((m: MockMessage) => m.id === args.messageId && m.thread_id === args.threadId);
+          if (!refMsg) return 0;
+          const refIdx = state.messages.indexOf(refMsg);
+          const toDelete = state.messages.filter((m: MockMessage, i: number) => m.thread_id === args.threadId && i > refIdx);
+          state.messages = state.messages.filter((m: MockMessage) => !toDelete.includes(m));
+          return toDelete.length;
+        }
+
         case "send_message": {
           // Simulate a streamed assistant response via agent-event emissions.
           // The real backend emits Tauri events; here we fire the registered

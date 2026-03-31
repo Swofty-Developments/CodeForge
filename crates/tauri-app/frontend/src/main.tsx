@@ -8,6 +8,7 @@ function Root() {
   onMount(async () => {
     await appStore.loadData();
     await listenAgentEvent(appStore.handleAgentEvent);
+    await appStore.requestNotificationPermission();
   });
 
   return <App />;

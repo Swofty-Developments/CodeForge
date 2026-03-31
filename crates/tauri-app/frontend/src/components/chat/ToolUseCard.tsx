@@ -129,6 +129,14 @@ function truncateOutput(output: string): string {
   return output.slice(0, 1000) + `\n\n… (${output.length - 1000} more chars)`;
 }
 
+/** Split tool output into stdout/stderr if the backend tagged stderr with [stderr]. */
+function splitOutput(raw: string): { stdout: string; stderr: string } {
+  const marker = "\n[stderr]\n";
+  const idx = raw.indexOf(marker);
+  if (idx === -1) return { stdout: raw, stderr: "" };
+  return { stdout: raw.slice(0, idx), stderr: raw.slice(idx + marker.length) };
+}
+
 export function ToolUseCard(props: { block: ContentBlock }) {
   const [expanded, setExpanded] = createSignal(false);
 
@@ -138,6 +146,7 @@ export function ToolUseCard(props: { block: ContentBlock }) {
   const summary = () => summarizeInput(toolName(), parsedInput());
   const isActive = () => props.block.tool_status === "generating" || props.block.tool_status === "running";
   const hasOutput = () => !!props.block.tool_output;
+  const outputParts = () => splitOutput(props.block.tool_output || "");
   const status = () => props.block.tool_status;
 
   return (
@@ -186,12 +195,25 @@ export function ToolUseCard(props: { block: ContentBlock }) {
             </div>
           </Show>
           <Show when={hasOutput()}>
-            <div class="tc-section">
-              <div class="tc-section-label">{props.block.tool_error ? "Error" : "Output"}</div>
-              <pre class="tc-code" classList={{ "tc-code--error": !!props.block.tool_error }}>
-                {truncateOutput(props.block.tool_output || "")}
-              </pre>
-            </div>
+            <Show when={outputParts().stderr} fallback={
+              <div class="tc-section">
+                <div class="tc-section-label">{props.block.tool_error ? "Error" : "Output"}</div>
+                <pre class="tc-code" classList={{ "tc-code--error": !!props.block.tool_error }}>
+                  {truncateOutput(props.block.tool_output || "")}
+                </pre>
+              </div>
+            }>
+              <Show when={outputParts().stdout}>
+                <div class="tc-section">
+                  <div class="tc-section-label">stdout</div>
+                  <pre class="tc-code">{truncateOutput(outputParts().stdout)}</pre>
+                </div>
+              </Show>
+              <div class="tc-section">
+                <div class="tc-section-label">stderr</div>
+                <pre class="tc-code tc-code--error">{truncateOutput(outputParts().stderr)}</pre>
+              </div>
+            </Show>
           </Show>
         </div>
       </div>

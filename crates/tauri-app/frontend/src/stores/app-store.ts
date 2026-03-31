@@ -1,6 +1,6 @@
 import { createRoot } from "solid-js";
 import { createStore } from "solid-js/store";
-import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload, Attachment, ContentBlock } from "../types";
+import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload, Attachment, ContentBlock, ThreadTokenUsage } from "../types";
 import * as ipc from "../ipc";
 
 export interface PendingApproval {
@@ -39,6 +39,8 @@ export interface AppStore {
   autoNamingEnabled: boolean;
   namingInProgress: Record<string, boolean>;
   attachments: Attachment[];
+  threadTokenUsage: Record<string, ThreadTokenUsage>;
+  notificationsEnabled: boolean;
 }
 
 function createAppStore() {
@@ -71,6 +73,8 @@ function createAppStore() {
     autoNamingEnabled: true,
     namingInProgress: {},
     attachments: [],
+    threadTokenUsage: {},
+    notificationsEnabled: true,
   });
 
   async function loadData() {
@@ -241,6 +245,35 @@ function createAppStore() {
 
   const turnStartTimes: Record<string, number> = {};
 
+  /** Send a desktop notification if permitted. */
+  function sendNotification(title: string, body: string) {
+    if (!store.notificationsEnabled) return;
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission !== "granted") return;
+    try {
+      new Notification(title, { body });
+    } catch {
+      // Silently ignore if notification fails
+    }
+  }
+
+  /** Look up the thread title by id. */
+  function getThreadTitle(threadId: string): string {
+    for (const p of store.projects) {
+      const t = p.threads.find((t) => t.id === threadId);
+      if (t) return t.title;
+    }
+    return "Thread";
+  }
+
+  /** Request notification permission if not already granted. */
+  async function requestNotificationPermission() {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+  }
+
   /** Get or create the in-progress assistant message for a thread. */
   function getOrCreateAssistantMsg(threadId: string): ChatMessage {
     const msgs = store.threadMessages[threadId];
@@ -370,8 +403,11 @@ function createAppStore() {
           const blocks = [...(msg.blocks || [])];
           for (let i = blocks.length - 1; i >= 0; i--) {
             if (blocks[i].type === "tool_use" && blocks[i].tool_id === payload.tool_id) {
+              // If the result carries an empty tool_name, inherit from the block
+              const resolvedName = payload.tool_name || blocks[i].tool_name;
               blocks[i] = {
                 ...blocks[i],
+                tool_name: resolvedName || blocks[i].tool_name,
                 tool_output: payload.tool_output,
                 tool_status: payload.is_error ? "error" : "completed",
                 tool_error: payload.is_error,
@@ -387,7 +423,7 @@ function createAppStore() {
         turnStartTimes[thread_id] = Date.now();
         setStore("sessionStatuses", thread_id, "generating");
         break;
-      case "turn_completed":
+      case "turn_completed": {
         setStore("sessionStatuses", thread_id, "ready");
         setStore("threadMessages", thread_id, (msgs) => {
           if (!msgs) return msgs;
@@ -403,8 +439,17 @@ function createAppStore() {
           }
           return msgs;
         });
+        // Notify for background threads (not the active tab)
+        if (thread_id !== store.activeTab) {
+          const title = getThreadTitle(thread_id);
+          const msgs = store.threadMessages[thread_id];
+          const lastMsg = msgs?.[msgs.length - 1];
+          const preview = lastMsg?.content?.slice(0, 120) || "Response complete";
+          sendNotification(`${title} - Complete`, preview);
+        }
         maybeAutoNameThread(thread_id);
         break;
+      }
       case "turn_aborted":
         setStore("sessionStatuses", thread_id, "ready");
         setStore("threadMessages", thread_id, (msgs) => {
@@ -443,18 +488,37 @@ function createAppStore() {
           }
           return msgs;
         });
+
+        // Accumulate token usage for context window tracking
+        const inputTkns = payload.input_tokens ?? 0;
+        const outputTkns = payload.output_tokens ?? 0;
+        const cacheReadTkns = payload.cache_read_tokens ?? 0;
+        const cacheWriteTkns = payload.cache_write_tokens ?? 0;
+        const prev = store.threadTokenUsage[thread_id];
+        setStore("threadTokenUsage", thread_id, {
+          inputTokens: (prev?.inputTokens ?? 0) + inputTkns,
+          outputTokens: (prev?.outputTokens ?? 0) + outputTkns,
+          cacheReadTokens: (prev?.cacheReadTokens ?? 0) + cacheReadTkns,
+          cacheWriteTokens: (prev?.cacheWriteTokens ?? 0) + cacheWriteTkns,
+          totalTokens: (prev?.totalTokens ?? 0) + inputTkns + outputTkns,
+          model: payload.model ?? prev?.model,
+        });
         break;
       }
       case "session_ready":
         setStore("sessionStatuses", thread_id, "ready");
         break;
-      case "session_error":
+      case "session_error": {
         setStore("sessionStatuses", thread_id, "error");
         setStore("threadMessages", thread_id, (msgs) => [
           ...(msgs || []),
           { id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Error: ${payload.message}` },
         ]);
+        // Always notify on errors
+        const errTitle = getThreadTitle(thread_id);
+        sendNotification(`${errTitle} - Error`, payload.message || "Session error");
         break;
+      }
       case "approval_required":
         if (payload.request_id && payload.description) {
           setStore("pendingApprovals", (a) => [
@@ -507,6 +571,125 @@ function createAppStore() {
     }
   }
 
+  async function editAndResend(threadId: string, messageId: string, newText: string) {
+    // Remove messages after (and including) the edited message from DB
+    // The messageId is the user message to edit — delete everything after it
+    try {
+      await ipc.deleteMessagesAfter(threadId, messageId);
+    } catch (e) {
+      console.error("Failed to delete messages after:", e);
+    }
+
+    // Remove from local store: keep messages up to and including the target message index,
+    // then remove the target message itself (we'll re-send it)
+    setStore("threadMessages", threadId, (msgs) => {
+      if (!msgs) return msgs;
+      const idx = msgs.findIndex((m) => m.id === messageId);
+      if (idx === -1) return msgs;
+      return msgs.slice(0, idx);
+    });
+
+    // Put text into composer and let the user send it (or auto-send)
+    setStore("composerText", newText);
+  }
+
+  async function retryLastMessage(threadId: string) {
+    const msgs = store.threadMessages[threadId];
+    if (!msgs || msgs.length === 0) return;
+
+    // Find the last user message
+    let lastUserIdx = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "user") {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx === -1) return;
+
+    const userMsg = msgs[lastUserIdx];
+    const userText = userMsg.content;
+
+    // Delete messages after the user message from DB
+    try {
+      await ipc.deleteMessagesAfter(threadId, userMsg.id);
+    } catch (e) {
+      console.error("Failed to delete messages:", e);
+    }
+
+    // Keep messages up to and including the user message, remove the rest
+    setStore("threadMessages", threadId, (m) => m ? m.slice(0, lastUserIdx + 1) : m);
+
+    // Re-send using the same flow as sendUserMessage but with known text
+    const project = store.projects.find((p) => p.threads.some((t) => t.id === threadId));
+    const wt = store.worktrees[threadId];
+    const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
+
+    try {
+      setStore("sessionStatuses", threadId, "generating");
+      await ipc.sendMessage(threadId, userText, store.selectedProvider, cwd, store.selectedModel ?? undefined);
+    } catch (e) {
+      const errMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        thread_id: threadId,
+        role: "system",
+        content: `Error: ${e}`,
+      };
+      setStore("threadMessages", threadId, (m) => [...(m || []), errMsg]);
+      setStore("sessionStatuses", threadId, "error");
+    }
+  }
+
+  async function regenerateResponse(threadId: string, assistantMsgId: string) {
+    const msgs = store.threadMessages[threadId];
+    if (!msgs) return;
+
+    // Find the assistant message
+    const assistantIdx = msgs.findIndex((m) => m.id === assistantMsgId);
+    if (assistantIdx === -1) return;
+
+    // Find the preceding user message
+    let userIdx = -1;
+    for (let i = assistantIdx - 1; i >= 0; i--) {
+      if (msgs[i].role === "user") {
+        userIdx = i;
+        break;
+      }
+    }
+    if (userIdx === -1) return;
+
+    const userText = msgs[userIdx].content;
+
+    // Delete assistant message and anything after the user message from DB
+    try {
+      await ipc.deleteMessagesAfter(threadId, msgs[userIdx].id);
+    } catch (e) {
+      console.error("Failed to delete messages:", e);
+    }
+
+    // Keep messages up to and including the user message
+    setStore("threadMessages", threadId, (m) => m ? m.slice(0, userIdx + 1) : m);
+
+    // Re-send
+    const project = store.projects.find((p) => p.threads.some((t) => t.id === threadId));
+    const wt = store.worktrees[threadId];
+    const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
+
+    try {
+      setStore("sessionStatuses", threadId, "generating");
+      await ipc.sendMessage(threadId, userText, store.selectedProvider, cwd, store.selectedModel ?? undefined);
+    } catch (e) {
+      const errMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        thread_id: threadId,
+        role: "system",
+        content: `Error: ${e}`,
+      };
+      setStore("threadMessages", threadId, (m) => [...(m || []), errMsg]);
+      setStore("sessionStatuses", threadId, "error");
+    }
+  }
+
   return {
     store,
     setStore,
@@ -521,6 +704,10 @@ function createAppStore() {
     denyRequest,
     setSplitTab,
     handleAgentEvent,
+    editAndResend,
+    retryLastMessage,
+    regenerateResponse,
+    requestNotificationPermission,
   };
 }
 

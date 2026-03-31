@@ -81,6 +81,19 @@ pub fn move_thread_to_project(
 }
 
 #[tauri::command]
+pub fn delete_messages_after(
+    state: State<'_, TauriState>,
+    thread_id: String,
+    message_id: String,
+) -> Result<u64, String> {
+    let db = state.db.lock().map_err(|e| format!("{e}"))?;
+    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
+    let mid = Uuid::parse_str(&message_id).map_err(|e| e.to_string())?;
+    codeforge_persistence::queries::delete_messages_after(db.conn(), tid, mid)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn persist_user_message(
     state: State<'_, TauriState>,
     thread_id: String,

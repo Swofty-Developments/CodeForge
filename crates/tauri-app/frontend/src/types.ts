@@ -50,6 +50,17 @@ export interface AgentEventPayload {
   input_json?: string;
   tool_output?: string;
   is_error?: boolean;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+}
+
+export interface ThreadTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  model?: string;
 }
 
 export type ToolStatus = "generating" | "running" | "completed" | "error";
@@ -73,7 +84,7 @@ export interface Attachment {
   language?: string;
 }
 
-export type SessionStatus = "idle" | "starting" | "ready" | "generating" | "error";
+export type SessionStatus = "idle" | "starting" | "ready" | "generating" | "interrupting" | "error";
 
 export const THREAD_COLORS = [
   { hex: "#e65961", label: "Red" },

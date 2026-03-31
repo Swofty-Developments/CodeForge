@@ -42,7 +42,11 @@ pub enum AgentEvent {
         description: String,
     },
     /// The session is ready to accept input.
-    SessionReady,
+    SessionReady {
+        /// The Claude CLI session ID (for `--resume`), if available.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        claude_session_id: Option<String>,
+    },
     /// An error occurred in the session.
     SessionError { message: String },
     /// Usage/cost report for a completed turn.

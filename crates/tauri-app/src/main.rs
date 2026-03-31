@@ -55,7 +55,9 @@ fn main() {
             commands::threads::delete_thread,
             commands::threads::move_thread_to_project,
             commands::threads::persist_user_message,
+            commands::threads::delete_messages_after,
             commands::sessions::send_message,
+            commands::sessions::interrupt_session,
             commands::sessions::stop_session,
             commands::sessions::respond_to_approval,
             commands::settings::get_setting,
@@ -101,6 +103,13 @@ fn main() {
             commands::github::get_issue_context,
             commands::github::get_repo_info,
             commands::github::is_github_repo,
+            commands::git::git_log,
+            commands::git::git_branches,
+            commands::git::git_checkout,
+            commands::git::git_create_branch,
+            commands::git::git_commit,
+            commands::git::git_push,
+            commands::git::git_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

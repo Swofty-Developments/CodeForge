@@ -184,6 +184,25 @@ pub fn delete_messages_by_thread(conn: &Connection, thread_id: Uuid) -> anyhow::
     Ok(())
 }
 
+pub fn delete_messages_after(
+    conn: &Connection,
+    thread_id: Uuid,
+    message_id: Uuid,
+) -> anyhow::Result<u64> {
+    // Get the created_at of the reference message
+    let created_at: String = conn.query_row(
+        "SELECT created_at FROM messages WHERE id = ?1 AND thread_id = ?2",
+        params![message_id.to_string(), thread_id.to_string()],
+        |row| row.get(0),
+    )?;
+    // Delete all messages in the thread created after this message (exclusive)
+    let deleted = conn.execute(
+        "DELETE FROM messages WHERE thread_id = ?1 AND created_at > ?2",
+        params![thread_id.to_string(), created_at],
+    )?;
+    Ok(deleted as u64)
+}
+
 // ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------
@@ -232,6 +251,35 @@ pub fn update_session_status(conn: &Connection, id: Uuid, status: &str) -> anyho
         params![status, id.to_string()],
     )?;
     Ok(())
+}
+
+pub fn update_session_claude_id(
+    conn: &Connection,
+    id: Uuid,
+    claude_session_id: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE sessions SET claude_session_id = ?1 WHERE id = ?2",
+        params![claude_session_id, id.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Get the most recent Claude session ID for a thread (for --resume).
+pub fn get_latest_claude_session_id(
+    conn: &Connection,
+    thread_id: Uuid,
+) -> anyhow::Result<Option<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT claude_session_id FROM sessions WHERE thread_id = ?1 AND claude_session_id IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map(params![thread_id.to_string()], |row| {
+        row.get::<_, Option<String>>(0)
+    })?;
+    match rows.next() {
+        Some(r) => Ok(r?),
+        None => Ok(None),
+    }
 }
 
 pub fn delete_session(conn: &Connection, id: Uuid) -> anyhow::Result<()> {

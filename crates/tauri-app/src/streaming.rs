@@ -43,6 +43,10 @@ pub struct AgentEventPayload {
     pub tool_output: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
 }
 
 pub fn spawn_event_forwarder(
@@ -165,15 +169,43 @@ pub fn spawn_event_forwarder(
                         output_tokens: Some(*output_tokens),
                         cost_usd: Some(*cost_usd),
                         model: Some(model.clone()),
+                        cache_read_tokens: Some(*cache_read_tokens),
+                        cache_write_tokens: Some(*cache_write_tokens),
                         ..default_payload()
                     }
                 }
-                AgentEvent::SessionReady => AgentEventPayload {
-                    session_id: session_id.to_string(),
-                    thread_id: thread_id.to_string(),
-                    event_type: "session_ready".into(),
-                    ..default_payload()
-                },
+                AgentEvent::SessionReady { claude_session_id } => {
+                    // Persist session record with claude_session_id for future --resume
+                    if let Ok(db) = db.lock() {
+                        let db_session = codeforge_persistence::Session {
+                            id: session_id,
+                            thread_id,
+                            provider: codeforge_persistence::Provider::Claude,
+                            status: "ready".to_string(),
+                            approval_mode: None,
+                            pid: None,
+                            created_at: chrono::Utc::now(),
+                        };
+                        let _ = codeforge_persistence::queries::insert_session(
+                            db.conn(),
+                            &db_session,
+                        );
+                        if let Some(ref csid) = claude_session_id {
+                            let _ = codeforge_persistence::queries::update_session_claude_id(
+                                db.conn(),
+                                session_id,
+                                csid,
+                            );
+                        }
+                    }
+
+                    AgentEventPayload {
+                        session_id: session_id.to_string(),
+                        thread_id: thread_id.to_string(),
+                        event_type: "session_ready".into(),
+                        ..default_payload()
+                    }
+                }
                 AgentEvent::SessionError { message } => {
                     accumulated_content.clear();
                     streaming_msg_id = None;
@@ -257,5 +289,7 @@ fn default_payload() -> AgentEventPayload {
         input_json: None,
         tool_output: None,
         is_error: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
     }
 }

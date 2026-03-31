@@ -1,17 +1,28 @@
-import { createSignal, onMount } from "solid-js";
+import { createSignal, onMount, For } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
+
+const PERMISSION_MODES = [
+  { value: "auto", label: "Auto", description: "AI decides when to ask (recommended)" },
+  { value: "acceptEdits", label: "Accept Edits", description: "Auto-approve file operations" },
+  { value: "bypassPermissions", label: "Bypass All", description: "Auto-approve everything" },
+  { value: "plan", label: "Plan Mode", description: "Only plans, doesn't execute" },
+  { value: "default", label: "Default", description: "Ask for everything (requires TTY, may hang)" },
+] as const;
 
 export function SettingsOverlay() {
   const { store, setStore } = appStore;
   const [claudePath, setClaudePath] = createSignal("claude");
   const [codexPath, setCodexPath] = createSignal("codex");
+  const [permissionMode, setPermissionMode] = createSignal("bypassPermissions");
 
   onMount(async () => {
     const cp = await ipc.getSetting("claude_path");
     const cx = await ipc.getSetting("codex_path");
+    const pm = await ipc.getSetting("permission_mode");
     if (cp) setClaudePath(cp);
     if (cx) setCodexPath(cx);
+    if (pm) setPermissionMode(pm);
   });
 
   function close() {
@@ -49,6 +60,28 @@ export function SettingsOverlay() {
         </div>
 
         <div class="settings-section">
+          <label>Permission Mode</label>
+          <select
+            class="settings-select"
+            value={permissionMode()}
+            onChange={(e) => {
+              const val = e.currentTarget.value;
+              setPermissionMode(val);
+              ipc.setSetting("permission_mode", val);
+            }}
+          >
+            <For each={PERMISSION_MODES}>
+              {(mode) => (
+                <option value={mode.value}>
+                  {mode.label} — {mode.description}
+                </option>
+              )}
+            </For>
+          </select>
+          <span class="settings-hint">Controls how Claude Code handles tool approvals. Takes effect on next session.</span>
+        </div>
+
+        <div class="settings-section">
           <label>Auto-name Threads</label>
           <div class="settings-toggle-row">
             <span class="settings-toggle-desc">Automatically generate thread names after 3 messages</span>
@@ -56,6 +89,20 @@ export function SettingsOverlay() {
               class="settings-toggle"
               classList={{ on: store.autoNamingEnabled }}
               onClick={() => setStore("autoNamingEnabled", !store.autoNamingEnabled)}
+            >
+              <span class="settings-toggle-knob" />
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <label>Desktop Notifications</label>
+          <div class="settings-toggle-row">
+            <span class="settings-toggle-desc">Notify when background threads complete or encounter errors</span>
+            <button
+              class="settings-toggle"
+              classList={{ on: store.notificationsEnabled }}
+              onClick={() => setStore("notificationsEnabled", !store.notificationsEnabled)}
             >
               <span class="settings-toggle-knob" />
             </button>
@@ -96,10 +143,29 @@ export function SettingsOverlay() {
           text-transform: uppercase;
           letter-spacing: 0.06em;
         }
-        .settings-section input {
+        .settings-section input,
+        .settings-section .settings-select {
           width: 100%;
           font-family: var(--font-mono);
           font-size: 12px;
+        }
+        .settings-select {
+          background: var(--bg-muted);
+          color: var(--text);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          padding: 6px 8px;
+          cursor: pointer;
+          outline: none;
+          transition: border-color 0.15s;
+        }
+        .settings-select:hover { border-color: var(--border-strong); }
+        .settings-select:focus { border-color: var(--primary); }
+        .settings-hint {
+          display: block;
+          font-size: 10px;
+          color: var(--text-tertiary);
+          margin-top: 4px;
         }
         .settings-toggle-row {
           display: flex;

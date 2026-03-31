@@ -73,5 +73,15 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         ",
     )?;
 
+    // Add claude_session_id column to sessions if missing (used for --resume)
+    let has_claude_session_id: bool = conn
+        .prepare("PRAGMA table_info(sessions)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .any(|col| col.as_deref() == Ok("claude_session_id"));
+
+    if !has_claude_session_id {
+        conn.execute_batch("ALTER TABLE sessions ADD COLUMN claude_session_id TEXT;")?;
+    }
+
     Ok(())
 }

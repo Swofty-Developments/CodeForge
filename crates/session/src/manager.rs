@@ -41,12 +41,13 @@ impl SessionManager {
         provider: Provider,
         cwd: &Path,
         model: Option<&str>,
+        permission_mode: Option<&str>,
     ) -> Result<(SessionId, mpsc::UnboundedReceiver<AgentEvent>)> {
         let id = uuid::Uuid::new_v4();
 
         let (active, event_rx) = match provider {
             Provider::ClaudeCode => {
-                let (session, rx) = ClaudeSession::start(cwd, model)
+                let (session, rx) = ClaudeSession::start(cwd, model, permission_mode)
                     .await
                     .context("Failed to start Claude Code session")?;
                 (ActiveSession::Claude(session), rx)
@@ -61,6 +62,33 @@ impl SessionManager {
 
         self.sessions.insert(id, active);
         Ok((id, event_rx))
+    }
+
+    /// Resume a previous Claude Code session using `--resume`.
+    ///
+    /// Returns the new internal session ID and event receiver.
+    pub async fn resume_session(
+        &mut self,
+        claude_session_id: &str,
+        cwd: &Path,
+        model: Option<&str>,
+    ) -> Result<(SessionId, mpsc::UnboundedReceiver<AgentEvent>)> {
+        let id = uuid::Uuid::new_v4();
+
+        let (session, rx) = ClaudeSession::resume(cwd, claude_session_id, model)
+            .await
+            .context("Failed to resume Claude Code session")?;
+
+        self.sessions.insert(id, ActiveSession::Claude(session));
+        Ok((id, rx))
+    }
+
+    /// Get the Claude CLI session ID for an active session, if available.
+    pub fn claude_session_id(&self, session_id: SessionId) -> Option<String> {
+        match self.sessions.get(&session_id) {
+            Some(ActiveSession::Claude(s)) => s.claude_session_id(),
+            _ => None,
+        }
     }
 
     /// Send a message to an existing session.

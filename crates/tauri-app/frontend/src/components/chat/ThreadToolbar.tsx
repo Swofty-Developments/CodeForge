@@ -1,5 +1,6 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, createMemo } from "solid-js";
 import { appStore } from "../../stores/app-store";
+import type { ThreadTokenUsage } from "../../types";
 
 function injectStyles() {
   if (document.getElementById("thread-toolbar-styles")) return;
@@ -64,6 +65,65 @@ function injectStyles() {
       from { opacity: 0; transform: translateX(-50%) translateY(4px); }
       to { opacity: 1; transform: translateX(-50%) translateY(0); }
     }
+    .ctx-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      position: relative;
+      padding: 2px 8px;
+      border-radius: var(--radius-sm, 6px);
+      transition: background 0.1s;
+      margin-right: 4px;
+    }
+    .ctx-indicator:hover {
+      background: var(--bg-accent);
+    }
+    .ctx-bar-track {
+      width: 48px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .ctx-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.3s ease, background 0.3s ease;
+    }
+    .ctx-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-tertiary);
+      white-space: nowrap;
+      line-height: 1;
+    }
+    .ctx-tooltip {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm, 6px);
+      padding: 8px 10px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      white-space: nowrap;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      animation: ttToastIn 0.12s ease-out;
+    }
+    .ctx-tooltip-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 1px 0;
+    }
+    .ctx-tooltip-row span:first-child {
+      color: var(--text-tertiary);
+    }
   `;
   document.head.appendChild(s);
 }
@@ -71,9 +131,22 @@ function injectStyles() {
 // Inject once on module load
 injectStyles();
 
+function getContextLimit(model?: string): number {
+  if (!model) return 200_000;
+  if (model.includes("[1m]") || model.includes("1m")) return 1_000_000;
+  return 200_000;
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+  return String(n);
+}
+
 export function ThreadToolbar() {
   const { store, setStore } = appStore;
   const [showCopied, setShowCopied] = createSignal(false);
+  const [showCtxTooltip, setShowCtxTooltip] = createSignal(false);
 
   const activeTab = () => store.activeTab;
   const browserOpen = () => {
@@ -130,8 +203,62 @@ export function ThreadToolbar() {
     });
   }
 
+  const tokenUsage = createMemo((): ThreadTokenUsage | undefined => {
+    const tab = activeTab();
+    return tab ? store.threadTokenUsage[tab] : undefined;
+  });
+
+  const contextLimit = createMemo(() => getContextLimit(tokenUsage()?.model));
+  const usagePercent = createMemo(() => {
+    const usage = tokenUsage();
+    if (!usage) return 0;
+    return Math.min((usage.totalTokens / contextLimit()) * 100, 100);
+  });
+
+  const barColor = createMemo(() => {
+    const pct = usagePercent();
+    if (pct >= 80) return "var(--red)";
+    if (pct >= 50) return "var(--amber)";
+    return "var(--green)";
+  });
+
   return (
     <div class="thread-toolbar">
+      {/* Context window usage */}
+      <Show when={tokenUsage()}>
+        {(usage) => (
+          <div
+            class="ctx-indicator"
+            onClick={() => setShowCtxTooltip((v) => !v)}
+            onMouseLeave={() => setShowCtxTooltip(false)}
+            title="Context window usage"
+          >
+            <div class="ctx-bar-track">
+              <div
+                class="ctx-bar-fill"
+                style={{ width: `${usagePercent()}%`, background: barColor() }}
+              />
+            </div>
+            <span class="ctx-label">
+              {formatTokenCount(usage().totalTokens)}{" / "}{formatTokenCount(contextLimit())}
+            </span>
+            <Show when={showCtxTooltip()}>
+              <div class="ctx-tooltip">
+                <div class="ctx-tooltip-row"><span>Input</span><span>{formatTokenCount(usage().inputTokens)}</span></div>
+                <div class="ctx-tooltip-row"><span>Output</span><span>{formatTokenCount(usage().outputTokens)}</span></div>
+                <div class="ctx-tooltip-row"><span>Cache read</span><span>{formatTokenCount(usage().cacheReadTokens)}</span></div>
+                <div class="ctx-tooltip-row"><span>Cache write</span><span>{formatTokenCount(usage().cacheWriteTokens)}</span></div>
+                <Show when={usage().model}>
+                  <div class="ctx-tooltip-row" style="margin-top: 4px; border-top: 1px solid var(--border); padding-top: 4px;">
+                    <span>Model</span><span>{usage().model}</span>
+                  </div>
+                </Show>
+              </div>
+            </Show>
+          </div>
+        )}
+      </Show>
+
       {/* Browser toggle */}
       <button
         class={`tt-btn ${browserOpen() ? "active" : ""}`}

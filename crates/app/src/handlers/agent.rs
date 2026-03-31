@@ -125,7 +125,7 @@ fn handle_event(
                 description,
             });
         }
-        AgentEvent::SessionReady => {
+        AgentEvent::SessionReady { .. } => {
             state
                 .session_states
                 .insert(session_id, SessionState::Ready);
