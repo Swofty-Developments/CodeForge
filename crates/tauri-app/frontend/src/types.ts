@@ -27,6 +27,7 @@ export interface ChatMessage {
   thread_id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  blocks?: ContentBlock[];
   meta?: MessageMeta;
 }
 
@@ -44,6 +45,24 @@ export interface AgentEventPayload {
   output_tokens?: number;
   cost_usd?: number;
   model?: string;
+  tool_id?: string;
+  tool_name?: string;
+  input_json?: string;
+  tool_output?: string;
+  is_error?: boolean;
+}
+
+export type ToolStatus = "generating" | "running" | "completed" | "error";
+
+export interface ContentBlock {
+  type: "text" | "tool_use" | "thinking";
+  content: string;
+  tool_id?: string;
+  tool_name?: string;
+  tool_input?: string;
+  tool_output?: string;
+  tool_status?: ToolStatus;
+  tool_error?: boolean;
 }
 
 export interface Attachment {

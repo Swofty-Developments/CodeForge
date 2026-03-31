@@ -57,7 +57,11 @@ export function DiffEditor(props: { cwd: string }) {
     }
   }
 
-  onMount(loadAll);
+  // Reload when cwd changes (thread switch)
+  createEffect(() => {
+    const _ = props.cwd; // track reactive prop
+    loadAll();
+  });
 
   const totalInsertions = () => files().reduce((s, f) => s + f.insertions, 0);
   const totalDeletions = () => files().reduce((s, f) => s + f.deletions, 0);

@@ -54,6 +54,29 @@ pub enum AgentEvent {
         cost_usd: f64,
         model: String,
     },
+    /// A tool use block has started (agent is calling a tool).
+    ToolUseStart {
+        tool_id: String,
+        tool_name: String,
+    },
+    /// Incremental JSON input being generated for a tool call.
+    ToolInputDelta {
+        tool_id: String,
+        input_json: String,
+    },
+    /// Tool input is complete; the tool is now executing.
+    ToolUseEnd {
+        tool_id: String,
+    },
+    /// Result returned from a tool execution.
+    ToolResult {
+        tool_id: String,
+        tool_name: String,
+        content: String,
+        is_error: bool,
+    },
+    /// Incremental thinking/reasoning output from the agent.
+    ThinkingDelta { text: String },
 }
 
 /// Metadata for an active session.

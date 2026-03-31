@@ -1,26 +1,41 @@
 import { createSignal, For, Show, onCleanup } from "solid-js";
 import { appStore } from "../../stores/app-store";
 
-const MODELS = [
-  { value: null, label: "Default", desc: "Use CLI default model" },
-  { value: "opus", label: "Opus", desc: "Most capable, complex tasks" },
-  { value: "sonnet", label: "Sonnet", desc: "Balanced speed and quality" },
-  { value: "haiku", label: "Haiku", desc: "Fast and lightweight" },
-] as const;
+// Known aliases from `claude --help`: "Provide an alias for the latest model
+// (e.g. 'sonnet' or 'opus') or a model's full name (e.g. 'claude-sonnet-4-6')."
+// These are suggestions, not exhaustive — users can type any model ID.
+const PRESETS = [
+  { value: null, label: "Default", desc: "Use CLI default" },
+  { value: "opus", label: "opus", desc: "Latest Opus (alias)" },
+  { value: "sonnet", label: "sonnet", desc: "Latest Sonnet (alias)" },
+  { value: "haiku", label: "haiku", desc: "Latest Haiku (alias)" },
+];
 
 export function ModelSelector() {
   const { store, setStore } = appStore;
   const [open, setOpen] = createSignal(false);
+  const [customInput, setCustomInput] = createSignal("");
   let dropdownRef: HTMLDivElement | undefined;
 
   const currentLabel = () => {
-    const m = MODELS.find((m) => m.value === store.selectedModel);
-    return m ? m.label : "Default";
+    if (!store.selectedModel) return "Default";
+    const preset = PRESETS.find((m) => m.value === store.selectedModel);
+    return preset ? preset.label : store.selectedModel;
   };
 
   function select(value: string | null) {
     setStore("selectedModel", value);
     setOpen(false);
+    setCustomInput("");
+  }
+
+  function submitCustom() {
+    const v = customInput().trim();
+    if (v) {
+      setStore("selectedModel", v);
+      setOpen(false);
+      setCustomInput("");
+    }
   }
 
   function handleClickOutside(e: MouseEvent) {
@@ -57,7 +72,7 @@ export function ModelSelector() {
 
       <Show when={open()}>
         <div class="model-dropdown">
-          <For each={MODELS}>
+          <For each={PRESETS}>
             {(model) => {
               const isSelected = () => store.selectedModel === model.value;
               return (
@@ -79,6 +94,34 @@ export function ModelSelector() {
               );
             }}
           </For>
+
+          {/* Custom model input */}
+          <div class="model-custom">
+            <input
+              class="model-custom-input"
+              placeholder="or type model ID…"
+              value={customInput()}
+              onInput={(e) => setCustomInput(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); submitCustom(); }
+                if (e.key === "Escape") setOpen(false);
+              }}
+            />
+            <Show when={customInput().trim()}>
+              <button class="model-custom-go" onClick={submitCustom}>Use</button>
+            </Show>
+          </div>
+
+          {/* Show current custom model if not a preset */}
+          <Show when={store.selectedModel && !PRESETS.some((p) => p.value === store.selectedModel)}>
+            <div class="model-current-custom">
+              <span class="model-option-label">
+                <svg class="model-check" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12" /></svg>
+                {store.selectedModel}
+              </span>
+              <button class="model-custom-clear" onClick={() => select(null)}>Clear</button>
+            </div>
+          </Show>
         </div>
       </Show>
     </div>
@@ -96,7 +139,7 @@ if (!document.getElementById("model-selector-styles")) {
       position: absolute;
       bottom: calc(100% + 6px);
       left: 0;
-      min-width: 200px;
+      min-width: 220px;
       background: var(--bg-card);
       border: 1px solid var(--border-strong);
       border-radius: var(--radius-md);
@@ -106,14 +149,8 @@ if (!document.getElementById("model-selector-styles")) {
       animation: model-dropdown-in 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
     }
     @keyframes model-dropdown-in {
-      from {
-        opacity: 0;
-        transform: translateY(4px) scale(0.97);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-      }
+      from { opacity: 0; transform: translateY(4px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
     }
     .model-option {
       display: flex;
@@ -128,12 +165,8 @@ if (!document.getElementById("model-selector-styles")) {
       text-align: left;
       transition: background 0.12s;
     }
-    .model-option:hover {
-      background: var(--bg-accent);
-    }
-    .model-option.selected {
-      background: rgba(107, 124, 255, 0.08);
-    }
+    .model-option:hover { background: var(--bg-accent); }
+    .model-option.selected { background: rgba(107, 124, 255, 0.08); }
     .model-option-header {
       display: flex;
       align-items: center;
@@ -144,21 +177,63 @@ if (!document.getElementById("model-selector-styles")) {
       font-size: 12px;
       font-weight: 500;
       color: var(--text);
-      font-family: var(--font-body);
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
-    .model-option.selected .model-option-label {
-      color: var(--primary);
-    }
-    .model-check {
-      color: var(--primary);
-      flex-shrink: 0;
-    }
+    .model-option.selected .model-option-label { color: var(--primary); }
+    .model-check { color: var(--primary); flex-shrink: 0; }
     .model-option-desc {
       font-size: 10px;
       color: var(--text-tertiary);
       font-family: var(--font-body);
       line-height: 1.3;
     }
+    .model-custom {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      margin-top: 2px;
+      border-top: 1px solid var(--border);
+    }
+    .model-custom-input {
+      flex: 1;
+      font-size: 11px;
+      padding: 5px 8px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: var(--font-mono);
+      outline: none;
+    }
+    .model-custom-input:focus { border-color: var(--primary); }
+    .model-custom-input::placeholder { color: var(--text-tertiary); font-family: var(--font-body); }
+    .model-custom-go {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 4px 8px;
+      background: var(--primary);
+      color: white;
+      border-radius: var(--radius-sm);
+      white-space: nowrap;
+    }
+    .model-current-custom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-top: 1px solid var(--border);
+      margin-top: 2px;
+    }
+    .model-custom-clear {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+    }
+    .model-custom-clear:hover { color: var(--text-secondary); background: var(--bg-hover); }
   `;
   document.head.appendChild(style);
 }

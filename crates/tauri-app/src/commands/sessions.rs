@@ -58,7 +58,32 @@ pub async fn send_message(
             state.db.clone(),
         );
 
-        mgr.send_message(session_id, &text)
+        // If the thread has prior messages, prepend full conversation history
+        // so the new session has context. Let the CLI handle its own compaction.
+        let history = {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            codeforge_persistence::queries::get_messages_by_thread(db.conn(), tid)
+                .unwrap_or_default()
+        };
+
+        let message_to_send = if !history.is_empty() {
+            let mut context = String::from("<conversation_history>\n");
+            for msg in &history {
+                let role = match msg.role {
+                    codeforge_persistence::MessageRole::User => "User",
+                    codeforge_persistence::MessageRole::Assistant => "Assistant",
+                    codeforge_persistence::MessageRole::System => "System",
+                };
+                context.push_str(&format!("{role}: {}\n\n", msg.content));
+            }
+            context.push_str("</conversation_history>\n\n");
+            context.push_str(&text);
+            context
+        } else {
+            text.clone()
+        };
+
+        mgr.send_message(session_id, &message_to_send)
             .await
             .map_err(|e| format!("{e:#}"))?;
     }

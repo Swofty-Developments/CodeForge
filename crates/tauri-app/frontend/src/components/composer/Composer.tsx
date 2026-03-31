@@ -1,9 +1,10 @@
-import { Show, For, createSignal } from "solid-js";
+import { Show, For, createSignal, createEffect, onMount } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as ipc from "../../ipc";
 import { ModelSelector } from "./ModelSelector";
 import type { Attachment } from "../../types";
+import type { SlashCommand } from "../../ipc";
 
 export function Composer() {
   const { store, setStore, sendUserMessage } = appStore;
@@ -63,7 +64,63 @@ export function Composer() {
     });
   }
 
+  // Slash command autocomplete
+  const [slashCommands, setSlashCommands] = createSignal<SlashCommand[]>([]);
+  const [showSlashMenu, setShowSlashMenu] = createSignal(false);
+  const [slashFilter, setSlashFilter] = createSignal("");
+  const [slashIndex, setSlashIndex] = createSignal(0);
+
+  // Load slash commands (and reload when provider changes)
+  createEffect(() => {
+    const p = store.selectedProvider;
+    ipc.listSlashCommands(p).then(setSlashCommands).catch(() => setSlashCommands([]));
+  });
+
+  const filteredSlash = () => {
+    const q = slashFilter().toLowerCase();
+    if (!q) return slashCommands().slice(0, 12);
+    return slashCommands().filter((c) => c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)).slice(0, 12);
+  };
+
+  function handleSlashSelect(cmd: SlashCommand) {
+    setStore("composerText", cmd.name + " ");
+    setShowSlashMenu(false);
+  }
+
+  async function handleStop() {
+    if (!store.activeTab) return;
+    try {
+      await ipc.stopSession(store.activeTab);
+      appStore.setStore("sessionStatuses", store.activeTab, "ready");
+    } catch (e) {
+      console.error("Failed to stop session:", e);
+    }
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
+    if (showSlashMenu()) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => Math.min(i + 1, filteredSlash().length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const cmds = filteredSlash();
+        if (cmds.length > 0) handleSlashSelect(cmds[slashIndex()]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setShowSlashMenu(false);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendUserMessage();
@@ -150,16 +207,47 @@ export function Composer() {
               </For>
             </div>
           </Show>
+          {/* Slash command autocomplete */}
+          <Show when={showSlashMenu() && filteredSlash().length > 0}>
+            <div class="slash-menu">
+              <For each={filteredSlash()}>
+                {(cmd, idx) => (
+                  <button
+                    class="slash-item"
+                    classList={{ "slash-item--active": idx() === slashIndex() }}
+                    onMouseDown={(e) => { e.preventDefault(); handleSlashSelect(cmd); }}
+                    onMouseEnter={() => setSlashIndex(idx())}
+                  >
+                    <span class="slash-name">{cmd.name}</span>
+                    <span class="slash-desc">{cmd.description}</span>
+                    <Show when={cmd.source !== "built-in"}>
+                      <span class="slash-source">{cmd.source}</span>
+                    </Show>
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
           <div class="composer-input-row">
             <textarea
               class="composer-input"
-              placeholder="Message..."
+              placeholder={isGenerating() ? "Send a message to steer…" : "Message..."}
               value={store.composerText}
               onInput={(e) => {
-                setStore("composerText", e.currentTarget.value);
+                const val = e.currentTarget.value;
+                setStore("composerText", val);
                 const el = e.currentTarget;
                 el.style.height = "auto";
                 el.style.height = Math.min(el.scrollHeight, 120) + "px";
+
+                // Slash command detection
+                if (val.startsWith("/") && !val.includes(" ")) {
+                  setSlashFilter(val);
+                  setShowSlashMenu(true);
+                  setSlashIndex(0);
+                } else {
+                  setShowSlashMenu(false);
+                }
               }}
               onKeyDown={handleKeyDown}
               rows={1}
@@ -200,20 +288,27 @@ export function Composer() {
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
               </svg>
             </button>
-            <button
-              class="send-btn"
-              classList={{ stop: isGenerating() }}
-              onClick={sendUserMessage}
-              disabled={isGenerating()}
-            >
-              <Show when={isGenerating()} fallback={
+            <Show when={isGenerating() && !store.composerText.trim()}>
+              <button
+                class="send-btn stop"
+                onClick={handleStop}
+                title="Stop generating"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+              </button>
+            </Show>
+            <Show when={!isGenerating() || store.composerText.trim()}>
+              <button
+                class="send-btn"
+                classList={{ steering: isGenerating() && !!store.composerText.trim() }}
+                onClick={sendUserMessage}
+                title={isGenerating() ? "Send to steer response" : "Send message"}
+              >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
                 </svg>
-              }>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
-              </Show>
-            </button>
+              </button>
+            </Show>
           </div>
           <div class="composer-meta">
             <button
@@ -268,6 +363,7 @@ if (!document.getElementById("composer-styles")) {
       flex-direction: column;
       gap: 8px;
       transition: border-color 0.2s, box-shadow 0.2s;
+      position: relative;
     }
     .composer-card:focus-within {
       border-color: var(--border-glow);
@@ -360,7 +456,69 @@ if (!document.getElementById("composer-styles")) {
     .send-btn:hover { filter: brightness(1.1); transform: scale(1.04); }
     .send-btn:active { transform: scale(0.96); }
     .send-btn.stop { background: var(--red); }
-    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .send-btn.steering {
+      background: var(--amber, #e6b84d);
+    }
+    /* ── Slash command menu ── */
+    @keyframes slash-menu-in {
+      from { opacity: 0; transform: translateY(6px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .slash-menu {
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      right: 0;
+      margin-bottom: 4px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255,255,255,0.05);
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 4px;
+      z-index: 50;
+      transform-origin: bottom center;
+      animation: slash-menu-in 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    .slash-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      transition: background 0.08s;
+      text-align: left;
+    }
+    .slash-item:hover, .slash-item--active {
+      background: var(--bg-accent);
+    }
+    .slash-name {
+      font-weight: 600;
+      color: var(--primary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .slash-desc {
+      flex: 1;
+      color: var(--text-secondary);
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .slash-source {
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      padding: 1px 5px;
+      background: var(--bg-muted);
+      border-radius: var(--radius-pill);
+      white-space: nowrap;
+    }
     .composer-meta {
       display: flex;
       align-items: center;

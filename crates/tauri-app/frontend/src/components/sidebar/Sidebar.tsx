@@ -2,6 +2,7 @@ import { For, Show } from "solid-js";
 import { DragDropProvider } from "@dnd-kit/solid";
 import { appStore } from "../../stores/app-store";
 import { ProjectGroup } from "./ProjectGroup";
+import { McpPanel } from "./McpPanel";
 import * as ipc from "../../ipc";
 
 export function Sidebar() {
@@ -110,6 +111,8 @@ export function Sidebar() {
             </Show>
           </DragDropProvider>
         </div>
+
+        <McpPanel />
 
         <div class="sidebar-footer">
           <button class="new-thread-btn" onClick={() => newThread()}>

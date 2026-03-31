@@ -2,6 +2,10 @@ import { For, Show, createEffect, createSignal } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 import { Markdown } from "./Markdown";
+import { ToolUseCard } from "./ToolUseCard";
+import { ThinkingBlock } from "./ThinkingBlock";
+import { PrDashboard } from "../github/PrDashboard";
+import type { ContentBlock } from "../../types";
 
 export function ChatArea() {
   const { store, approveRequest, denyRequest } = appStore;
@@ -19,14 +23,40 @@ export function ChatArea() {
 
   const worktree = () => store.worktrees[store.activeTab || ""] || null;
 
+  // Track whether user has manually scrolled away from the bottom
+  let userScrolledAway = false;
+
+  function handleScroll() {
+    if (!scrollRef) return;
+    const distFromBottom = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
+    userScrolledAway = distFromBottom > 150;
+  }
+
+  // Track content of the last message to trigger scroll during streaming
+  const lastMsgContent = () => {
+    const msgs = messages();
+    if (msgs.length === 0) return 0;
+    const last = msgs[msgs.length - 1];
+    return last.content?.length || 0;
+  };
+
+  // Reset scroll lock when message count changes (new user/assistant message)
+  let prevMsgCount = 0;
   createEffect(() => {
-    const _ = messages().length;
+    const len = messages().length;
     const _g = isGenerating();
-    requestAnimationFrame(() => {
-      if (scrollRef) {
-        scrollRef.scrollTo({ top: scrollRef.scrollHeight, behavior: "smooth" });
-      }
-    });
+    const _c = lastMsgContent();
+    if (len !== prevMsgCount) {
+      userScrolledAway = false;
+      prevMsgCount = len;
+    }
+    if (!userScrolledAway) {
+      requestAnimationFrame(() => {
+        if (scrollRef) {
+          scrollRef.scrollTo({ top: scrollRef.scrollHeight, behavior: "smooth" });
+        }
+      });
+    }
   });
 
   createEffect(() => {
@@ -78,12 +108,22 @@ export function ChatArea() {
     return project && project.path !== ".";
   };
 
+  const activeProject = () => {
+    if (!store.activeTab) return null;
+    return store.projects.find((p) => p.threads.some((t) => t.id === store.activeTab)) || null;
+  };
+
+  const isGitProject = () => {
+    const proj = activeProject();
+    return proj ? proj.path !== "." : false;
+  };
+
   function setSuggestion(text: string) {
     appStore.setStore("composerText", text);
   }
 
   return (
-    <div class="chat-area" ref={scrollRef}>
+    <div class="chat-area" ref={scrollRef} onScroll={handleScroll}>
       <Show
         when={store.activeTab}
         fallback={
@@ -112,21 +152,24 @@ export function ChatArea() {
           </div>
         }
       >
-        <Show when={worktree()}>
-          <div class="worktree-banner">
-            <div class="wt-info">
-              <span class="wt-branch">{worktree()!.branch}</span>
-              <span class="wt-path">{worktree()!.path}</span>
+        {/* Worktree banners — only for git-activated projects */}
+        <Show when={isGitProject()}>
+          <Show when={worktree()}>
+            <div class="worktree-banner">
+              <div class="wt-info">
+                <span class="wt-branch">{worktree()!.branch}</span>
+                <span class="wt-path">{worktree()!.path}</span>
+              </div>
+              <button class="wt-merge-btn" onClick={handleMergeWorktree}>Merge back to main</button>
             </div>
-            <button class="wt-merge-btn" onClick={handleMergeWorktree}>Merge back to main</button>
-          </div>
-        </Show>
+          </Show>
 
-        <Show when={!worktree() && hasFolder()}>
-          <div class="worktree-banner subtle">
-            <span class="wt-hint">Working in main branch</span>
-            <button class="wt-create-btn" onClick={handleCreateWorktree}>Create worktree</button>
-          </div>
+          <Show when={!worktree() && messages().length === 0 && !isGenerating()}>
+            <div class="worktree-banner subtle">
+              <span class="wt-hint">Working in main branch</span>
+              <button class="wt-create-btn" onClick={handleCreateWorktree}>Create worktree</button>
+            </div>
+          </Show>
         </Show>
 
         <Show
@@ -155,6 +198,11 @@ export function ChatArea() {
                   Refactor code
                 </button>
               </div>
+
+              {/* PR Dashboard for git-activated projects */}
+              <Show when={isGitProject() && activeProject()}>
+                <PrDashboard projectId={activeProject()!.id} repoPath={activeProject()!.path} />
+              </Show>
             </div>
           }
         >
@@ -172,10 +220,17 @@ export function ChatArea() {
             <For each={store.pendingApprovals.filter((a) => a.threadId === store.activeTab)}>
               {(approval) => (
                 <div class="approval-card">
-                  <div class="approval-desc">{approval.description}</div>
+                  <div class="approval-header">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <span class="approval-title">Permission Required</span>
+                  </div>
+                  <pre class="approval-desc">{approval.description}</pre>
                   <div class="approval-actions">
-                    <button class="approve-btn" onClick={() => approveRequest(approval)}>Approve</button>
                     <button class="deny-btn" onClick={() => denyRequest(approval)}>Deny</button>
+                    <button class="approve-btn" onClick={() => approveRequest(approval)}>Approve</button>
                   </div>
                 </div>
               )}
@@ -193,10 +248,49 @@ export function ChatArea() {
   );
 }
 
+function renderBlock(block: ContentBlock, isLastAndStreaming: boolean) {
+  switch (block.type) {
+    case "text":
+      return block.content.trim() ? <Markdown content={block.content} /> : null;
+    case "tool_use":
+      return <ToolUseCard block={block} />;
+    case "thinking":
+      return <ThinkingBlock content={block.content} streaming={isLastAndStreaming && block.type === "thinking"} />;
+    default:
+      return null;
+  }
+}
+
 function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean }) {
   const [copied, setCopied] = createSignal(false);
+  const [detailsHidden, setDetailsHidden] = createSignal(false);
   const isAssistant = () => props.msg.role === "assistant";
   const meta = () => props.msg.meta;
+  const hasBlocks = () => props.msg.blocks && props.msg.blocks.length > 0;
+  const isStreaming = () => isAssistant() && !props.msg.id.startsWith("done-");
+  const isDone = () => isAssistant() && props.msg.id.startsWith("done-");
+
+  // Check if there are non-text blocks (tool use or thinking) worth toggling
+  const hasDetails = () => {
+    if (!props.msg.blocks) return false;
+    return (props.msg.blocks as ContentBlock[]).some((b) => b.type !== "text");
+  };
+
+  // Get only text blocks for collapsed view
+  const textBlocks = () => {
+    if (!props.msg.blocks) return [];
+    return (props.msg.blocks as ContentBlock[]).filter((b) => b.type === "text" && b.content.trim());
+  };
+
+  // Count details for the toggle label
+  const detailCounts = () => {
+    if (!props.msg.blocks) return { tools: 0, thinking: 0 };
+    const blocks = props.msg.blocks as ContentBlock[];
+    return {
+      tools: blocks.filter((b) => b.type === "tool_use").length,
+      thinking: blocks.filter((b) => b.type === "thinking").length,
+    };
+  };
 
   async function copyContent() {
     await navigator.clipboard.writeText(props.msg.content);
@@ -214,43 +308,99 @@ function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean
     return String(n);
   }
 
+  function formatModel(model: string): string {
+    // Shorten long model IDs to friendly names
+    if (model.includes("opus")) return "Opus";
+    if (model.includes("sonnet")) return "Sonnet";
+    if (model.includes("haiku")) return "Haiku";
+    return model;
+  }
+
   return (
-    <div class={`message message-${props.msg.role}`}>
-      <div class="message-content">
-        <div class="message-bubble">
-          <Show when={isAssistant()} fallback={props.msg.content}>
-            <Markdown content={props.msg.content} />
-          </Show>
-        </div>
-        <div class="message-footer">
-          <Show when={isAssistant() && meta()}>
-            <div class="message-meta">
-              <Show when={meta()!.model}>
-                <span class="meta-tag">{meta()!.model}</span>
-              </Show>
-              <Show when={meta()!.inputTokens != null || meta()!.outputTokens != null}>
-                <span class="meta-tag">{formatTokens(meta()!.inputTokens || 0)} in / {formatTokens(meta()!.outputTokens || 0)} out</span>
-              </Show>
-              <Show when={meta()!.durationMs}>
-                <span class="meta-tag">{formatDuration(meta()!.durationMs!)}</span>
-              </Show>
-            </div>
-          </Show>
-          <Show when={isAssistant() && props.msg.content}>
-            <button class="copy-btn" onClick={copyContent} title={copied() ? "Copied!" : "Copy"}>
-              <Show when={copied()} fallback={
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                </svg>
-              }>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
+    <div class={`msg msg-${props.msg.role}`}>
+      <Show when={props.msg.role === "system"}>
+        <div class="msg-system-pill">{props.msg.content}</div>
+      </Show>
+      <Show when={props.msg.role === "user"}>
+        <div class="msg-user-bubble">{props.msg.content}</div>
+      </Show>
+      <Show when={isAssistant()}>
+        <div class="msg-assistant">
+          {/* Toggle for hiding details on completed messages */}
+          <Show when={isDone() && hasDetails()}>
+            <button class="msg-details-toggle" onClick={() => setDetailsHidden(!detailsHidden())}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <Show when={detailsHidden()} fallback={<><polyline points="6 9 12 15 18 9" /></>}>
+                  <polyline points="9 18 15 12 9 6" />
+                </Show>
+              </svg>
+              <Show when={detailsHidden()} fallback="Hide details">
+                {(() => {
+                  const c = detailCounts();
+                  const parts: string[] = [];
+                  if (c.tools > 0) parts.push(`${c.tools} tool${c.tools > 1 ? "s" : ""}`);
+                  if (c.thinking > 0) parts.push("thinking");
+                  return `Show ${parts.join(" + ")}`;
+                })()}
               </Show>
             </button>
           </Show>
+
+          {/* Message content */}
+          <div class="msg-body">
+            <Show when={hasBlocks()} fallback={<Markdown content={props.msg.content} />}>
+              <Show when={detailsHidden()}>
+                {/* Collapsed: only text blocks */}
+                <For each={textBlocks()}>
+                  {(block) => <Markdown content={block.content} />}
+                </For>
+                <Show when={textBlocks().length === 0}>
+                  <span class="msg-no-text">Response contained only tool use</span>
+                </Show>
+              </Show>
+              <Show when={!detailsHidden()}>
+                {/* Full: all blocks */}
+                <For each={props.msg.blocks as ContentBlock[]}>
+                  {(block, idx) => renderBlock(block, isStreaming() && idx() === (props.msg.blocks as ContentBlock[]).length - 1)}
+                </For>
+              </Show>
+            </Show>
+          </div>
+
+          {/* Footer: meta + copy */}
+          <div class="msg-footer">
+            <Show when={meta()}>
+              <div class="msg-meta">
+                <Show when={meta()!.model && meta()!.model !== "unknown"}>
+                  <span class="msg-meta-tag">{formatModel(meta()!.model!)}</span>
+                </Show>
+                <Show when={meta()!.inputTokens != null || meta()!.outputTokens != null}>
+                  <span class="msg-meta-tag">{formatTokens(meta()!.inputTokens || 0)} in / {formatTokens(meta()!.outputTokens || 0)} out</span>
+                </Show>
+                <Show when={meta()!.durationMs}>
+                  <span class="msg-meta-tag">{formatDuration(meta()!.durationMs!)}</span>
+                </Show>
+                <Show when={meta()!.costUsd != null && meta()!.costUsd! > 0}>
+                  <span class="msg-meta-tag">${meta()!.costUsd!.toFixed(4)}</span>
+                </Show>
+              </div>
+            </Show>
+            <Show when={props.msg.content}>
+              <button class="msg-copy" onClick={copyContent} title={copied() ? "Copied!" : "Copy"}>
+                <Show when={copied()} fallback={
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                  </svg>
+                }>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </Show>
+              </button>
+            </Show>
+          </div>
         </div>
-      </div>
+      </Show>
     </div>
   );
 }
@@ -369,88 +519,117 @@ if (!document.getElementById("chat-styles")) {
       padding: 16px 16px 24px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 20px;
     }
 
-    .message {
-      display: flex;
-    }
-    .message-user { justify-content: flex-end; }
-    .message-assistant { justify-content: flex-start; }
-    .message-system { justify-content: center; }
+    .msg { width: 100%; }
 
-    .message-content {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      max-width: 600px;
-    }
-    .message-user .message-content { align-items: flex-end; }
-    .message-assistant .message-content { align-items: flex-start; }
-    .message-system .message-content { align-items: center; }
-
-    .message-bubble {
+    /* ── User message ── */
+    .msg-user-bubble {
+      max-width: 85%;
+      margin-left: auto;
       padding: 10px 14px;
       border-radius: var(--radius-lg);
       font-size: 14px;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
-    }
-    .message-user .message-bubble {
       background: rgba(107, 124, 255, 0.08);
       border: 1px solid rgba(107, 124, 255, 0.12);
       color: var(--text);
     }
-    .message-assistant .message-bubble {
-      color: var(--text);
-      white-space: normal;
-    }
-    .message-system .message-bubble {
+
+    /* ── System message ── */
+    .msg-system-pill {
+      text-align: center;
       background: var(--bg-muted);
       border: 1px solid var(--border);
       font-size: 12px;
       color: var(--text-secondary);
       border-radius: var(--radius-pill);
       padding: 4px 12px;
+      display: inline-block;
+      margin: 0 auto;
+    }
+    .msg-system { text-align: center; }
+
+    /* ── Assistant message ── */
+    .msg-assistant {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
     }
 
-    .message-footer {
+    /* Details toggle */
+    .msg-details-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      padding: 3px 8px;
+      border-radius: var(--radius-pill);
+      margin-bottom: 6px;
+      transition: color 0.12s, background 0.12s;
+      align-self: flex-start;
+    }
+    .msg-details-toggle:hover {
+      color: var(--text-secondary);
+      background: var(--bg-hover);
+    }
+    .msg-details-toggle svg { flex-shrink: 0; }
+
+    /* Message body — full width, clean typography */
+    .msg-body {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+    .msg-no-text {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      font-style: italic;
+    }
+
+    /* Footer — right-aligned meta */
+    .msg-footer {
       display: flex;
       align-items: center;
-      gap: 8px;
-      min-height: 18px;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 6px;
+      min-height: 20px;
     }
-    .message-meta {
+    .msg-meta {
       display: flex;
       align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
+      gap: 0;
     }
-    .meta-tag {
+    .msg-meta-tag {
       font-size: 10px;
       font-weight: 500;
       color: var(--text-tertiary);
-      padding: 1px 0;
       font-family: var(--font-mono);
       white-space: nowrap;
+      opacity: 0.7;
     }
-    .meta-tag + .meta-tag::before {
+    .msg-meta-tag + .msg-meta-tag::before {
       content: "·";
-      margin-right: 6px;
-      color: var(--text-tertiary);
+      margin: 0 6px;
       opacity: 0.4;
     }
-    .copy-btn {
+    .msg-copy {
       color: var(--text-tertiary);
+      opacity: 0.5;
       padding: 3px;
       border-radius: var(--radius-sm);
       transition: all 0.12s;
-      margin-left: auto;
       display: flex;
       align-items: center;
     }
-    .copy-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
+    .msg-copy:hover { opacity: 1; background: var(--bg-accent); color: var(--text-secondary); }
 
     .typing-indicator {
       display: flex;
@@ -472,29 +651,61 @@ if (!document.getElementById("chat-styles")) {
       40% { transform: translateY(-5px); opacity: 1; }
     }
     /* ── Approvals ── */
+    @keyframes approval-pulse {
+      0%, 100% { border-color: rgba(240, 184, 64, 0.4); box-shadow: 0 0 0 0 rgba(240, 184, 64, 0); }
+      50% { border-color: rgba(240, 184, 64, 0.7); box-shadow: 0 0 12px -2px rgba(240, 184, 64, 0.15); }
+    }
     .approval-card {
-      background: var(--bg-card);
-      border: 1px solid var(--amber);
+      background: rgba(240, 184, 64, 0.04);
+      border: 1px solid rgba(240, 184, 64, 0.4);
       border-radius: var(--radius-md);
-      padding: 12px 16px;
+      padding: 14px 16px;
+      animation: approval-pulse 2s ease-in-out infinite;
+    }
+    .approval-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .approval-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--amber);
     }
     .approval-desc {
-      font-size: 13px;
+      font-size: 12px;
+      font-family: var(--font-mono);
       color: var(--text-secondary);
-      margin-bottom: 10px;
+      margin-bottom: 12px;
       white-space: pre-wrap;
+      overflow-wrap: break-word;
+      background: var(--bg-base);
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      max-height: 200px;
+      overflow-y: auto;
+      margin: 0 0 12px;
     }
-    .approval-actions { display: flex; gap: 8px; }
+    .approval-actions { display: flex; gap: 8px; justify-content: flex-end; }
     .approve-btn, .deny-btn {
-      padding: 6px 14px;
+      padding: 7px 16px;
       border-radius: var(--radius-sm);
       font-size: 12px;
-      font-weight: 500;
-      transition: filter 0.12s;
+      font-weight: 600;
+      transition: all 0.12s;
     }
-    .approve-btn { background: var(--green); color: #fff; }
-    .deny-btn { background: var(--bg-muted); border: 1px solid var(--border); color: var(--text-secondary); }
-    .approve-btn:hover, .deny-btn:hover { filter: brightness(1.15); }
+    .approve-btn {
+      background: var(--green);
+      color: #fff;
+    }
+    .approve-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .deny-btn {
+      background: var(--bg-muted);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+    .deny-btn:hover { border-color: var(--border-strong); color: var(--text); }
 
     /* ── Worktree banner ── */
     .worktree-banner {

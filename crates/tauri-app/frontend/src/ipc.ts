@@ -242,6 +242,124 @@ export const listenBrowserEvent = (cb: (p: BrowserEventPayload) => void) =>
 export const autoNameThread = (threadId: string, messagesSummary: string, provider: string) =>
   invoke<string>("auto_name_thread", { threadId, messagesSummary, provider });
 
+// Onboarding
+export interface BinaryStatus {
+  name: string;
+  installed: boolean;
+  version: string | null;
+  path: string | null;
+}
+
+export interface SetupStatus {
+  complete: boolean;
+  binaries: BinaryStatus[];
+  has_any_binary: boolean;
+  gh_installed: boolean;
+  gh_authenticated: boolean;
+  gh_username: string | null;
+}
+
+export const checkSetupStatus = () =>
+  invoke<SetupStatus>("check_setup_status");
+
+export const completeSetup = () =>
+  invoke("complete_setup");
+
+// GitHub
+export interface GhAuthStatus {
+  logged_in: boolean;
+  username: string | null;
+  scopes: string[];
+}
+
+export interface PullRequest {
+  number: number;
+  title: string;
+  state: string;
+  author: string;
+  branch: string;
+  base: string;
+  url: string;
+  additions: number;
+  deletions: number;
+  changed_files: number;
+  created_at: string;
+  updated_at: string;
+  draft: boolean;
+  labels: string[];
+  review_status: string;
+}
+
+export interface Issue {
+  number: number;
+  title: string;
+  state: string;
+  author: string;
+  body: string;
+  url: string;
+  labels: string[];
+  created_at: string;
+  comments_count: number;
+}
+
+export const ghAuthStatus = () =>
+  invoke<GhAuthStatus>("gh_auth_status");
+
+export const ghLogin = () =>
+  invoke<string>("gh_login");
+
+export const listPrs = (repoPath: string, state?: string) =>
+  invoke<PullRequest[]>("list_prs", { repoPath, state: state || null });
+
+export const getPrDiff = (repoPath: string, prNumber: number) =>
+  invoke<string>("get_pr_diff", { repoPath, prNumber });
+
+export const listIssues = (repoPath: string, state?: string, search?: string) =>
+  invoke<Issue[]>("list_issues", { repoPath, state: state || null, search: search || null });
+
+export const getIssueContext = (repoPath: string, issueNumber: number) =>
+  invoke<string>("get_issue_context", { repoPath, issueNumber });
+
+export const getRepoInfo = (repoPath: string) =>
+  invoke<any>("get_repo_info", { repoPath });
+
+export const isGithubRepo = (path: string) =>
+  invoke<boolean>("is_github_repo", { path });
+
+// MCP
+export interface McpServer {
+  name: string;
+  url_or_command: string;
+  transport: string;
+  scope: string;
+  status: string;
+}
+
+export interface SlashCommand {
+  name: string;
+  description: string;
+  source: string;
+}
+
+export const mcpListServers = (provider: string) =>
+  invoke<McpServer[]>("mcp_list_servers", { provider });
+
+export const mcpAddServer = (
+  provider: string,
+  name: string,
+  urlOrCommand: string,
+  transport: string,
+  scope: string,
+  envVars: string[],
+  extraArgs: string[],
+) => invoke<string>("mcp_add_server", { provider, name, urlOrCommand, transport, scope, envVars, extraArgs });
+
+export const mcpRemoveServer = (provider: string, name: string, scope: string) =>
+  invoke<string>("mcp_remove_server", { provider, name, scope });
+
+export const listSlashCommands = (provider: string) =>
+  invoke<SlashCommand[]>("list_slash_commands", { provider });
+
 // Events
 export const listenAgentEvent = (callback: (payload: AgentEventPayload) => void) =>
   listen<AgentEventPayload>("agent-event", (e) => callback(e.payload));

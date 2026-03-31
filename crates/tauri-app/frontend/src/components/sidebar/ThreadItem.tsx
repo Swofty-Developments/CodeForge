@@ -8,6 +8,8 @@ export function ThreadItem(props: {
   groupColor: string | null;
   sortableRef?: (el: HTMLElement) => void;
   isDragging?: boolean;
+  prNumber?: number;
+  hasWorktree?: boolean;
 }) {
   const { store, setStore, selectThread } = appStore;
 
@@ -78,6 +80,14 @@ export function ThreadItem(props: {
         >
           {props.thread.title}
         </span>
+        <Show when={props.prNumber}>
+          <span class="thread-pr-badge">PR #{props.prNumber}</span>
+        </Show>
+        <Show when={props.hasWorktree}>
+          <svg class="thread-wt-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 009 9" />
+          </svg>
+        </Show>
         <div class="thread-right">
           <Show when={statusColor()}>
             <span class="status-dot" style={{ background: statusColor()! }} />
@@ -186,6 +196,21 @@ if (!document.getElementById("thread-item-styles")) {
     .thread-action-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
     .thread-action-btn.delete:hover { color: var(--red); }
     .drag-hint { color: var(--text-tertiary); }
+    .thread-pr-badge {
+      font-size: 9px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: var(--primary);
+      background: rgba(107, 124, 255, 0.1);
+      padding: 1px 5px;
+      border-radius: var(--radius-pill);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .thread-wt-icon {
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
     .thread-rename { padding: 2px 12px; margin: 1px 0; }
     .thread-rename input { width: 100%; font-size: 13px; }
   `;

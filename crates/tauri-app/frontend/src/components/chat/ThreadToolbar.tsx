@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { appStore } from "../../stores/app-store";
 
 function injectStyles() {
@@ -82,6 +82,14 @@ export function ThreadToolbar() {
   };
   const diffOpen = () => store.diffPanelOpen;
 
+  // Only show diff for git-activated projects (path !== ".")
+  const isGitProject = () => {
+    const tab = activeTab();
+    if (!tab) return false;
+    const project = store.projects.find((p) => p.threads.some((t) => t.id === tab));
+    return project ? project.path !== "." : false;
+  };
+
   function toggleBrowser() {
     const tab = activeTab();
     if (tab) {
@@ -152,19 +160,21 @@ export function ThreadToolbar() {
         {showCopied() && <span class="tt-toast">Copied!</span>}
       </button>
 
-      {/* Diff view toggle */}
-      <button
-        class={`tt-btn ${diffOpen() ? "active" : ""}`}
-        onClick={toggleDiff}
-        title="Toggle diff view (Cmd+Shift+D)"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="6" y1="3" x2="6" y2="15"/>
-          <circle cx="18" cy="6" r="3"/>
-          <circle cx="6" cy="18" r="3"/>
-          <path d="M18 9a9 9 0 0 1-9 9"/>
-        </svg>
-      </button>
+      {/* Diff view toggle — only for git-activated projects */}
+      <Show when={isGitProject()}>
+        <button
+          class={`tt-btn ${diffOpen() ? "active" : ""}`}
+          onClick={toggleDiff}
+          title="Toggle diff view (Cmd+Shift+D)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="6" y1="3" x2="6" y2="15"/>
+            <circle cx="18" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/>
+            <path d="M18 9a9 9 0 0 1-9 9"/>
+          </svg>
+        </button>
+      </Show>
     </div>
   );
 }

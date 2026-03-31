@@ -1,6 +1,7 @@
 import { Show, createSignal, onMount, onCleanup } from "solid-js";
 import { appStore } from "./stores/app-store";
 import { WelcomeScreen } from "./components/shared/WelcomeScreen";
+import { SetupWizard } from "./components/onboarding/SetupWizard";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { TabBar } from "./components/tabs/TabBar";
 import { ChatArea } from "./components/chat/ChatArea";
@@ -14,10 +15,24 @@ import { UsageDashboard } from "./components/settings/UsageDashboard";
 import { SplitView } from "./components/shared/SplitView";
 import { BrowserPanel } from "./components/browser/BrowserPanel";
 import { DiffEditor } from "./components/diff/DiffEditor";
+import * as ipc from "./ipc";
 
 export function App() {
   const { store, setStore } = appStore;
   const [showWelcome, setShowWelcome] = createSignal(true);
+  const [showSetup, setShowSetup] = createSignal(false);
+
+  // Check onboarding status on mount
+  onMount(async () => {
+    try {
+      const status = await ipc.checkSetupStatus();
+      if (!status.complete) {
+        setShowSetup(true);
+      }
+    } catch {
+      // If check fails, don't block
+    }
+  });
 
   // Side pane resize state (percentage of main-panel-body width/height for chat)
   const [chatPercent, setChatPercent] = createSignal(60);
@@ -25,10 +40,32 @@ export function App() {
   const [isVertical, setIsVertical] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
 
-  // Check if side pane is open at all
+  // Whether active thread is in a git-activated project
+  const isGitProject = () => {
+    const tab = store.activeTab;
+    if (!tab) return false;
+    const project = store.projects.find((p) => p.threads.some((t) => t.id === tab));
+    return project ? project.path !== "." : false;
+  };
+
+  // Compute diff cwd reactively based on active thread
+  const diffCwd = () => {
+    const tab = store.activeTab;
+    if (tab) {
+      const wt = store.worktrees[tab];
+      if (wt?.active) return wt.path;
+      const proj = store.projects.find((p) => p.threads.some((t) => t.id === tab));
+      if (proj && proj.path !== ".") return proj.path;
+    }
+    return ".";
+  };
+
+  // Check if side pane is open at all (diff only for git projects)
   const hasSidePane = () => {
     const tab = store.activeTab;
-    return (tab && store.threadBrowserOpen[tab]) || store.diffPanelOpen;
+    const browserOpen = tab && store.threadBrowserOpen[tab];
+    const diffOpen = store.diffPanelOpen && isGitProject();
+    return browserOpen || diffOpen;
   };
 
   // Observe body width to switch vertical/horizontal
@@ -122,6 +159,9 @@ export function App() {
 
   return (
     <>
+      <Show when={showSetup()}>
+        <SetupWizard onComplete={() => setShowSetup(false)} />
+      </Show>
       <Sidebar />
       <Show
         when={store.splitTab}
@@ -153,17 +193,8 @@ export function App() {
                   <Show when={store.activeTab && store.threadBrowserOpen[store.activeTab!]}>
                     <BrowserPanel threadId={store.activeTab!} />
                   </Show>
-                  <Show when={store.diffPanelOpen}>
-                    <DiffEditor cwd={(() => {
-                      const tab = store.activeTab;
-                      if (tab) {
-                        const wt = store.worktrees[tab];
-                        if (wt?.active) return wt.path;
-                        const proj = store.projects.find((p) => p.threads.some((t) => t.id === tab));
-                        if (proj && proj.path !== ".") return proj.path;
-                      }
-                      return ".";
-                    })()} />
+                  <Show when={store.diffPanelOpen && diffCwd()}>
+                    <DiffEditor cwd={diffCwd()} />
                   </Show>
                 </div>
               </Show>

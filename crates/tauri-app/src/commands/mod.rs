@@ -1,6 +1,9 @@
 pub mod browser;
 pub mod diff;
+pub mod github;
+pub mod mcp;
 pub mod naming;
+pub mod onboarding;
 pub mod projects;
 pub mod providers;
 pub mod search;

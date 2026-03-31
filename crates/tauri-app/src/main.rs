@@ -87,6 +87,20 @@ fn main() {
             commands::browser::browser_stop_inspect,
             commands::browser::browser_extract,
             commands::browser::browser_close,
+            commands::mcp::mcp_list_servers,
+            commands::mcp::mcp_add_server,
+            commands::mcp::mcp_remove_server,
+            commands::mcp::list_slash_commands,
+            commands::onboarding::check_setup_status,
+            commands::onboarding::complete_setup,
+            commands::github::gh_auth_status,
+            commands::github::gh_login,
+            commands::github::list_prs,
+            commands::github::get_pr_diff,
+            commands::github::list_issues,
+            commands::github::get_issue_context,
+            commands::github::get_repo_info,
+            commands::github::is_github_repo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

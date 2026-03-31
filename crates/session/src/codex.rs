@@ -343,6 +343,75 @@ async fn handle_jsonrpc_message(
                         .to_string();
                     let _ = event_tx.send(AgentEvent::TurnAborted { reason });
                 }
+                "tool_use.start" | "tool/start" => {
+                    let tool_id = notif
+                        .params
+                        .get("toolId")
+                        .or_else(|| notif.params.get("id"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let tool_name = notif
+                        .params
+                        .get("name")
+                        .or_else(|| notif.params.get("toolName"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tool")
+                        .to_string();
+                    let _ = event_tx.send(AgentEvent::ToolUseStart { tool_id, tool_name });
+                }
+                "tool_use.end" | "tool/end" => {
+                    let tool_id = notif
+                        .params
+                        .get("toolId")
+                        .or_else(|| notif.params.get("id"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let tool_name = notif
+                        .params
+                        .get("name")
+                        .or_else(|| notif.params.get("toolName"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tool")
+                        .to_string();
+                    let content = notif
+                        .params
+                        .get("output")
+                        .or_else(|| notif.params.get("result"))
+                        .map(|v| {
+                            if let Some(s) = v.as_str() {
+                                s.to_string()
+                            } else {
+                                serde_json::to_string_pretty(v).unwrap_or_default()
+                            }
+                        })
+                        .unwrap_or_default();
+                    let is_error = notif
+                        .params
+                        .get("isError")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let _ = event_tx.send(AgentEvent::ToolUseEnd { tool_id: tool_id.clone() });
+                    let _ = event_tx.send(AgentEvent::ToolResult {
+                        tool_id,
+                        tool_name,
+                        content,
+                        is_error,
+                    });
+                }
+                "thinking.delta" | "thinking/delta" => {
+                    let text = notif
+                        .params
+                        .get("delta")
+                        .or_else(|| notif.params.get("text"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if !text.is_empty() {
+                        let _ = event_tx.send(AgentEvent::ThinkingDelta { text });
+                    }
+                }
                 _ => {
                     debug!("Unhandled codex notification: {method}");
                 }

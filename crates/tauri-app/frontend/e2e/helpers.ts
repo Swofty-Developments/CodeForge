@@ -234,6 +234,55 @@ export async function injectMockIPC(page: Page) {
             cost_usd: 0,
           };
 
+        // Onboarding
+        case "check_setup_status":
+          return {
+            complete: true,
+            binaries: [{ name: "claude", installed: true, version: "1.0.0", path: "/usr/bin/claude" }],
+            has_any_binary: true,
+            gh_installed: true,
+            gh_authenticated: true,
+            gh_username: "test-user",
+          };
+        case "complete_setup":
+          return null;
+
+        // GitHub
+        case "gh_auth_status":
+          return { logged_in: true, username: "test-user", scopes: ["repo"] };
+        case "list_prs":
+        case "list_issues":
+          return [];
+        case "is_github_repo":
+          return false;
+        case "get_issue_context":
+        case "get_pr_diff":
+        case "get_repo_info":
+          return null;
+        case "gh_login":
+          return "ok";
+
+        // MCP
+        case "mcp_list_servers":
+          return [];
+        case "mcp_add_server":
+        case "mcp_remove_server":
+          return "ok";
+        case "list_slash_commands":
+          return [{ name: "/help", description: "Show help", source: "built-in" }];
+
+        // Diff
+        case "get_changed_files":
+        case "get_session_diff":
+          return [];
+        case "get_file_diff":
+        case "get_file_content":
+          return "";
+
+        // Naming
+        case "auto_name_thread":
+          return null;
+
         default:
           console.warn(`[mock-ipc] unhandled command: ${cmd}`, args);
           return null;

@@ -1,6 +1,6 @@
 import { createRoot } from "solid-js";
 import { createStore } from "solid-js/store";
-import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload, Attachment } from "../types";
+import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload, Attachment, ContentBlock } from "../types";
 import * as ipc from "../ipc";
 
 export interface PendingApproval {
@@ -188,6 +188,17 @@ function createAppStore() {
     }
 
     try {
+      // Finalize any in-progress assistant message before appending the user message
+      // (handles mid-response steering where user sends while agent is generating)
+      setStore("threadMessages", threadId, (msgs) => {
+        if (!msgs) return msgs;
+        const last = msgs[msgs.length - 1];
+        if (last && last.role === "assistant" && !last.id.startsWith("done-")) {
+          return [...msgs.slice(0, -1), { ...last, id: `done-${crypto.randomUUID()}` }];
+        }
+        return msgs;
+      });
+
       const msgId = await ipc.persistUserMessage(threadId, fullText);
       const userMsg: ChatMessage = { id: msgId, thread_id: threadId, role: "user", content: fullText };
       setStore("threadMessages", threadId, (msgs) => [...(msgs || []), userMsg]);
@@ -230,18 +241,145 @@ function createAppStore() {
 
   const turnStartTimes: Record<string, number> = {};
 
+  /** Get or create the in-progress assistant message for a thread. */
+  function getOrCreateAssistantMsg(threadId: string): ChatMessage {
+    const msgs = store.threadMessages[threadId];
+    if (msgs && msgs.length > 0) {
+      const last = msgs[msgs.length - 1];
+      if (last.role === "assistant" && !last.id.startsWith("done-")) {
+        return last;
+      }
+    }
+    return {
+      id: crypto.randomUUID(),
+      thread_id: threadId,
+      role: "assistant",
+      content: "",
+      blocks: [],
+    };
+  }
+
+  /** Update the in-progress assistant message, appending it if new. */
+  function updateAssistantMsg(threadId: string, updater: (msg: ChatMessage) => ChatMessage) {
+    setStore("threadMessages", threadId, (msgs) => {
+      if (!msgs) msgs = [];
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === "assistant" && !last.id.startsWith("done-")) {
+        return [...msgs.slice(0, -1), updater(last)];
+      }
+      // No active assistant msg — create one
+      const fresh: ChatMessage = {
+        id: crypto.randomUUID(),
+        thread_id: threadId,
+        role: "assistant",
+        content: "",
+        blocks: [],
+      };
+      return [...msgs, updater(fresh)];
+    });
+  }
+
+  /** Append text to the last text block, or create a new one. */
+  function appendTextBlock(blocks: ContentBlock[], text: string): ContentBlock[] {
+    const result = [...blocks];
+    const last = result[result.length - 1];
+    if (last && last.type === "text") {
+      result[result.length - 1] = { ...last, content: last.content + text };
+    } else {
+      result.push({ type: "text", content: text });
+    }
+    return result;
+  }
+
+  /** Flatten blocks to a plain text string for persistence. */
+  function flattenBlocks(blocks: ContentBlock[]): string {
+    return blocks
+      .filter((b) => b.type === "text")
+      .map((b) => b.content)
+      .join("");
+  }
+
   function handleAgentEvent(payload: AgentEventPayload) {
     const { thread_id, event_type } = payload;
 
     switch (event_type) {
       case "content_delta": {
-        setStore("threadMessages", thread_id, (msgs) => {
-          if (!msgs) return [{ id: crypto.randomUUID(), thread_id, role: "assistant" as const, content: payload.text || "" }];
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === "assistant" && !last.id.startsWith("done-")) {
-            return [...msgs.slice(0, -1), { ...last, content: last.content + (payload.text || "") }];
+        updateAssistantMsg(thread_id, (msg) => {
+          const blocks = appendTextBlock(msg.blocks || [], payload.text || "");
+          return { ...msg, content: msg.content + (payload.text || ""), blocks };
+        });
+        break;
+      }
+      case "thinking_delta": {
+        updateAssistantMsg(thread_id, (msg) => {
+          const blocks = [...(msg.blocks || [])];
+          const last = blocks[blocks.length - 1];
+          if (last && last.type === "thinking") {
+            blocks[blocks.length - 1] = { ...last, content: last.content + (payload.text || "") };
+          } else {
+            blocks.push({ type: "thinking", content: payload.text || "" });
           }
-          return [...msgs, { id: crypto.randomUUID(), thread_id, role: "assistant" as const, content: payload.text || "" }];
+          return { ...msg, blocks };
+        });
+        break;
+      }
+      case "tool_use_start": {
+        updateAssistantMsg(thread_id, (msg) => {
+          const blocks = [...(msg.blocks || [])];
+          blocks.push({
+            type: "tool_use",
+            content: "",
+            tool_id: payload.tool_id,
+            tool_name: payload.tool_name,
+            tool_input: "",
+            tool_status: "generating",
+          });
+          return { ...msg, blocks };
+        });
+        break;
+      }
+      case "tool_input_delta": {
+        updateAssistantMsg(thread_id, (msg) => {
+          const blocks = [...(msg.blocks || [])];
+          // Find the tool block by id
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            if (blocks[i].type === "tool_use" && blocks[i].tool_id === payload.tool_id) {
+              blocks[i] = { ...blocks[i], tool_input: (blocks[i].tool_input || "") + (payload.input_json || "") };
+              break;
+            }
+          }
+          return { ...msg, blocks };
+        });
+        break;
+      }
+      case "tool_use_end": {
+        updateAssistantMsg(thread_id, (msg) => {
+          const blocks = [...(msg.blocks || [])];
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            if (blocks[i].type === "tool_use" && blocks[i].tool_id === payload.tool_id) {
+              blocks[i] = { ...blocks[i], tool_status: "running" };
+              break;
+            }
+          }
+          return { ...msg, blocks };
+        });
+        break;
+      }
+      case "tool_result": {
+        updateAssistantMsg(thread_id, (msg) => {
+          const blocks = [...(msg.blocks || [])];
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            if (blocks[i].type === "tool_use" && blocks[i].tool_id === payload.tool_id) {
+              blocks[i] = {
+                ...blocks[i],
+                tool_output: payload.tool_output,
+                tool_status: payload.is_error ? "error" : "completed",
+                tool_error: payload.is_error,
+              };
+              break;
+            }
+          }
+          return { ...msg, blocks };
         });
         break;
       }
@@ -255,19 +393,36 @@ function createAppStore() {
           if (!msgs) return msgs;
           const last = msgs[msgs.length - 1];
           if (last && last.role === "assistant" && !last.id.startsWith("done-")) {
-            return [...msgs.slice(0, -1), { ...last, id: `done-${crypto.randomUUID()}` }];
+            // Mark any still-running tools as completed
+            const blocks = (last.blocks || []).map((b) =>
+              b.type === "tool_use" && (b.tool_status === "running" || b.tool_status === "generating")
+                ? { ...b, tool_status: "completed" as const }
+                : b
+            );
+            return [...msgs.slice(0, -1), { ...last, id: `done-${crypto.randomUUID()}`, blocks, content: last.content || flattenBlocks(blocks) }];
           }
           return msgs;
         });
-        // Auto-name thread after 3+ messages if enabled and not already named
         maybeAutoNameThread(thread_id);
         break;
       case "turn_aborted":
         setStore("sessionStatuses", thread_id, "ready");
-        setStore("threadMessages", thread_id, (msgs) => [
-          ...(msgs || []),
-          { id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Aborted: ${payload.reason}` },
-        ]);
+        setStore("threadMessages", thread_id, (msgs) => {
+          if (!msgs) return [{ id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Aborted: ${payload.reason}` }];
+          // Finalize any in-progress assistant message and mark running tools as error
+          const updated = msgs.map((m) => {
+            if (m.role === "assistant" && !m.id.startsWith("done-")) {
+              const blocks = (m.blocks || []).map((b) =>
+                b.type === "tool_use" && (b.tool_status === "running" || b.tool_status === "generating")
+                  ? { ...b, tool_status: "error" as const }
+                  : b
+              );
+              return { ...m, id: `done-${crypto.randomUUID()}`, blocks };
+            }
+            return m;
+          });
+          return [...updated, { id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Aborted: ${payload.reason}` }];
+        });
         break;
       case "usage_report": {
         const durationMs = turnStartTimes[thread_id] ? Date.now() - turnStartTimes[thread_id] : undefined;

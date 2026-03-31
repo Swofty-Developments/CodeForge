@@ -33,6 +33,16 @@ pub struct AgentEventPayload {
     pub cost_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_error: Option<bool>,
 }
 
 pub fn spawn_event_forwarder(
@@ -164,16 +174,64 @@ pub fn spawn_event_forwarder(
                     event_type: "session_ready".into(),
                     ..default_payload()
                 },
-                AgentEvent::SessionError { message } => AgentEventPayload {
+                AgentEvent::SessionError { message } => {
+                    accumulated_content.clear();
+                    streaming_msg_id = None;
+
+                    AgentEventPayload {
+                        session_id: session_id.to_string(),
+                        thread_id: thread_id.to_string(),
+                        event_type: "session_error".into(),
+                        message: Some(message.clone()),
+                        ..default_payload()
+                    }
+                }
+                AgentEvent::ToolUseStart { tool_id, tool_name } => AgentEventPayload {
                     session_id: session_id.to_string(),
                     thread_id: thread_id.to_string(),
-                    event_type: "session_error".into(),
-                    message: Some(message.clone()),
+                    event_type: "tool_use_start".into(),
+                    tool_id: Some(tool_id.clone()),
+                    tool_name: Some(tool_name.clone()),
+                    ..default_payload()
+                },
+                AgentEvent::ToolInputDelta { tool_id, input_json } => AgentEventPayload {
+                    session_id: session_id.to_string(),
+                    thread_id: thread_id.to_string(),
+                    event_type: "tool_input_delta".into(),
+                    tool_id: Some(tool_id.clone()),
+                    input_json: Some(input_json.clone()),
+                    ..default_payload()
+                },
+                AgentEvent::ToolUseEnd { tool_id } => AgentEventPayload {
+                    session_id: session_id.to_string(),
+                    thread_id: thread_id.to_string(),
+                    event_type: "tool_use_end".into(),
+                    tool_id: Some(tool_id.clone()),
+                    ..default_payload()
+                },
+                AgentEvent::ToolResult { tool_id, tool_name, content, is_error } => AgentEventPayload {
+                    session_id: session_id.to_string(),
+                    thread_id: thread_id.to_string(),
+                    event_type: "tool_result".into(),
+                    tool_id: Some(tool_id.clone()),
+                    tool_name: Some(tool_name.clone()),
+                    tool_output: Some(content.clone()),
+                    is_error: Some(*is_error),
+                    ..default_payload()
+                },
+                AgentEvent::ThinkingDelta { text } => AgentEventPayload {
+                    session_id: session_id.to_string(),
+                    thread_id: thread_id.to_string(),
+                    event_type: "thinking_delta".into(),
+                    text: Some(text.clone()),
                     ..default_payload()
                 },
             };
 
-            tracing::debug!("Emitting agent-event: {} (text: {:?})", payload.event_type, payload.text.as_deref().map(|t| &t[..t.len().min(40)]));
+            tracing::debug!("Emitting agent-event: {} (text: {:?})", payload.event_type, payload.text.as_deref().map(|t| {
+                let end = t.char_indices().nth(40).map(|(i, _)| i).unwrap_or(t.len());
+                &t[..end]
+            }));
             let _ = app.emit("agent-event", &payload);
         }
     });
@@ -194,5 +252,10 @@ fn default_payload() -> AgentEventPayload {
         output_tokens: None,
         cost_usd: None,
         model: None,
+        tool_id: None,
+        tool_name: None,
+        input_json: None,
+        tool_output: None,
+        is_error: None,
     }
 }
