@@ -34,74 +34,104 @@ export function DiffEditor(props: { cwd: string; prNumber?: number | null }) {
   const [error, setError] = createSignal<string | null>(null);
   const [collapsedHunks, setCollapsedHunks] = createSignal<Set<string>>(new Set());
   const [gitPanelOpen, setGitPanelOpen] = createSignal(true);
+  const [diffMode, setDiffMode] = createSignal<"both" | "pr" | "worktree">("both");
+
+  // Separate storage for PR diff and worktree diff
+  const [prFiles, setPrFiles] = createSignal<ChangedFile[]>([]);
+  const [prDiffs, setPrDiffs] = createSignal<FileDiff[]>([]);
+  const [wtFiles, setWtFiles] = createSignal<ChangedFile[]>([]);
+  const [wtDiffs, setWtDiffs] = createSignal<FileDiff[]>([]);
+
+  const hasPr = () => !!props.prNumber;
 
   function close() {
     const tab = appStore.store.activeTab;
     if (tab) setStore("threadDiffOpen", tab, false);
   }
 
-  // Cache diffs per cwd to avoid re-fetching on thread switch
-  const diffCache = new Map<string, { files: any[]; diffs: any[] }>();
-
   async function loadAll() {
     const cwd = props.cwd;
     const prNum = props.prNumber;
     if (!cwd || cwd === ".") {
-      setFiles([]);
-      setDiffs([]);
-      setLoading(false);
-      return;
-    }
-
-    const cacheKey = prNum ? `pr:${prNum}:${cwd}` : cwd;
-
-    // Check cache first
-    const cached = diffCache.get(cacheKey);
-    if (cached) {
-      setFiles(cached.files);
-      setDiffs(cached.diffs);
-      if (cached.files.length > 0) setSelectedFile(cached.files[0].path);
+      setFiles([]); setDiffs([]);
       setLoading(false);
       return;
     }
 
     setLoading(true);
     setError(null);
-    setFiles([]);
-    setDiffs([]);
+    setFiles([]); setDiffs([]);
+    setPrFiles([]); setPrDiffs([]);
+    setWtFiles([]); setWtDiffs([]);
     setSelectedFile(null);
 
     try {
-      let changedFiles: any[];
-      let sessionDiffs: any[];
-
-      if (prNum) {
-        // PR mode: fetch PR diff instead of working directory diff
-        const prDiffRaw = await ipc.getPrDiff(cwd, prNum);
-        // Parse the raw diff into our FileDiff format
-        const parsed = parsePrDiff(prDiffRaw);
-        changedFiles = parsed.files;
-        sessionDiffs = parsed.diffs;
-      } else {
-        [changedFiles, sessionDiffs] = await Promise.all([
-          ipc.getChangedFiles(cwd),
-          ipc.getSessionDiff(cwd),
-        ]);
-      }
-
+      // Always fetch worktree/local changes
+      const [localFiles, localDiffs] = await Promise.all([
+        ipc.getChangedFiles(cwd).catch(() => []),
+        ipc.getSessionDiff(cwd).catch(() => []),
+      ]);
       if (props.cwd === cwd) {
-        setFiles(changedFiles);
-        setDiffs(sessionDiffs);
-        if (changedFiles.length > 0) setSelectedFile(changedFiles[0].path);
-        diffCache.set(cacheKey, { files: changedFiles, diffs: sessionDiffs });
-        setTimeout(() => diffCache.delete(cacheKey), 30000);
+        setWtFiles(localFiles as any);
+        setWtDiffs(localDiffs as any);
       }
+
+      // If PR linked, also fetch PR diff
+      if (prNum) {
+        try {
+          const prDiffRaw = await ipc.getPrDiff(cwd, prNum);
+          const parsed = parsePrDiff(prDiffRaw);
+          if (props.cwd === cwd) {
+            setPrFiles(parsed.files);
+            setPrDiffs(parsed.diffs);
+          }
+        } catch {}
+      }
+
+      // Apply current mode
+      if (props.cwd === cwd) applyMode();
     } catch (e) {
       if (props.cwd === cwd) setError(String(e));
     } finally {
       if (props.cwd === cwd) setLoading(false);
     }
   }
+
+  function applyMode() {
+    const mode = diffMode();
+    let mergedFiles: any[] = [];
+    let mergedDiffs: any[] = [];
+
+    if (mode === "pr" && hasPr()) {
+      mergedFiles = prFiles();
+      mergedDiffs = prDiffs();
+    } else if (mode === "worktree") {
+      mergedFiles = wtFiles();
+      mergedDiffs = wtDiffs();
+    } else {
+      // "both" — merge PR + worktree, deduplicating by path (worktree wins)
+      const fileMap = new Map<string, any>();
+      const diffMap = new Map<string, any>();
+      for (const f of prFiles()) { fileMap.set(f.path, { ...f, source: "pr" }); }
+      for (const d of prDiffs()) { diffMap.set(d.path, d); }
+      for (const f of wtFiles()) { fileMap.set(f.path, { ...f, source: "worktree" }); }
+      for (const d of wtDiffs()) { diffMap.set(d.path, d); }
+      mergedFiles = Array.from(fileMap.values());
+      mergedDiffs = Array.from(diffMap.values());
+    }
+
+    setFiles(mergedFiles);
+    setDiffs(mergedDiffs);
+    if (mergedFiles.length > 0 && !selectedFile()) {
+      setSelectedFile(mergedFiles[0].path);
+    }
+  }
+
+  // Re-apply mode when diffMode changes (without re-fetching)
+  createEffect(() => {
+    const _ = diffMode();
+    if (!loading()) applyMode();
+  });
 
   /** Parse raw unified diff text into ChangedFile[] and FileDiff[] */
   function parsePrDiff(raw: string): { files: any[]; diffs: any[] } {
@@ -197,6 +227,25 @@ export function DiffEditor(props: { cwd: string; prNumber?: number | null }) {
               </span>
             </Show>
           </div>
+          <Show when={hasPr()}>
+            <div class="de-mode-toggle">
+              <button
+                class="de-mode-btn"
+                classList={{ "de-mode-btn--active": diffMode() === "both" }}
+                onClick={() => setDiffMode("both")}
+              >Both</button>
+              <button
+                class="de-mode-btn"
+                classList={{ "de-mode-btn--active": diffMode() === "pr" }}
+                onClick={() => setDiffMode("pr")}
+              >PR</button>
+              <button
+                class="de-mode-btn"
+                classList={{ "de-mode-btn--active": diffMode() === "worktree" }}
+                onClick={() => setDiffMode("worktree")}
+              >Local</button>
+            </div>
+          </Show>
           <div class="de-header-actions">
             <button class="de-icon-btn" onClick={loadAll} title="Refresh">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -389,6 +438,28 @@ const DIFF_STYLES = `
     font-weight: 500;
   }
 
+  .de-mode-toggle {
+    display: flex;
+    gap: 1px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    margin-left: auto;
+  }
+  .de-mode-btn {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: var(--text-tertiary);
+    transition: all 0.1s;
+  }
+  .de-mode-btn:hover { color: var(--text-secondary); }
+  .de-mode-btn--active {
+    background: var(--bg-accent);
+    color: var(--text);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
   .de-header-actions { display: flex; align-items: center; gap: 4px; }
   .de-icon-btn {
     color: var(--text-tertiary);
