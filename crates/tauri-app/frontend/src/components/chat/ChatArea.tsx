@@ -4,7 +4,7 @@ import * as ipc from "../../ipc";
 import { Markdown } from "./Markdown";
 import { ToolUseCard } from "./ToolUseCard";
 import { ThinkingBlock } from "./ThinkingBlock";
-import { PrDashboard } from "../github/PrDashboard";
+import { ThreadSetup } from "./ThreadSetup";
 import { McpPanel } from "../sidebar/McpPanel";
 import { ThemeSelector } from "../settings/ThemeSelector";
 import type { ContentBlock } from "../../types";
@@ -175,24 +175,15 @@ export function ChatArea() {
           </div>
         }
       >
-        {/* Worktree banners — only for git-activated projects */}
-        <Show when={isGitProject()}>
-          <Show when={worktree()}>
-            <div class="worktree-banner">
-              <div class="wt-info">
-                <span class="wt-branch">{worktree()!.branch}</span>
-                <span class="wt-path">{worktree()!.path}</span>
-              </div>
-              <button class="wt-merge-btn" onClick={handleMergeWorktree}>Merge back to main</button>
+        {/* Worktree banner — only shown when a worktree is active and messages exist */}
+        <Show when={isGitProject() && worktree() && messages().length > 0}>
+          <div class="worktree-banner">
+            <div class="wt-info">
+              <span class="wt-branch">{worktree()!.branch}</span>
+              <span class="wt-path">{worktree()!.path}</span>
             </div>
-          </Show>
-
-          <Show when={!worktree() && messages().length === 0 && !isGenerating()}>
-            <div class="worktree-banner subtle">
-              <span class="wt-hint">Working in main branch</span>
-              <button class="wt-create-btn" onClick={handleCreateWorktree}>Create worktree</button>
-            </div>
-          </Show>
+            <button class="wt-merge-btn" onClick={handleMergeWorktree}>Merge back to main</button>
+          </div>
         </Show>
 
         {/* Loading skeleton while messages are being fetched */}
@@ -213,35 +204,38 @@ export function ChatArea() {
         <Show
           when={(messages().length > 0 || isGenerating()) && !isLoadingMessages()}
           fallback={
-            <div class="chat-empty">
-              <p class="new-convo">New conversation</p>
-              <p class="provider-hint">
-                Using {store.selectedProvider === "claude_code" ? "Claude Code" : "Codex"}
-              </p>
-              <div class="suggestion-chips">
-                <button class="suggestion-chip" onClick={() => setSuggestion("Explain this codebase and its architecture")}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>
-                  Explain codebase
-                </button>
-                <button class="suggestion-chip" onClick={() => setSuggestion("Help me fix a bug in ")}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                  Fix a bug
-                </button>
-                <button class="suggestion-chip" onClick={() => setSuggestion("Write tests for ")}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
-                  Write tests
-                </button>
-                <button class="suggestion-chip" onClick={() => setSuggestion("Refactor this code to be cleaner: ")}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
-                  Refactor code
-                </button>
+            <Show when={isGitProject() && activeProject()} fallback={
+              <div class="chat-empty">
+                <p class="new-convo">New conversation</p>
+                <p class="provider-hint">
+                  Using {store.selectedProvider === "claude_code" ? "Claude Code" : "Codex"}
+                </p>
+                <div class="suggestion-chips">
+                  <button class="suggestion-chip" onClick={() => setSuggestion("Explain this codebase and its architecture")}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>
+                    Explain codebase
+                  </button>
+                  <button class="suggestion-chip" onClick={() => setSuggestion("Help me fix a bug in ")}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                    Fix a bug
+                  </button>
+                  <button class="suggestion-chip" onClick={() => setSuggestion("Write tests for ")}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                    Write tests
+                  </button>
+                  <button class="suggestion-chip" onClick={() => setSuggestion("Refactor this code to be cleaner: ")}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
+                    Refactor code
+                  </button>
+                </div>
               </div>
-
-              {/* PR Dashboard for git-activated projects */}
-              <Show when={isGitProject() && activeProject()}>
-                <PrDashboard projectId={activeProject()!.id} repoPath={activeProject()!.path} />
-              </Show>
-            </div>
+            }>
+              <ThreadSetup
+                projectId={activeProject()!.id}
+                repoPath={activeProject()!.path}
+                threadId={store.activeTab!}
+              />
+            </Show>
           }
         >
           <div class="messages-container">

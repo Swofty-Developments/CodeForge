@@ -6,6 +6,7 @@ import type { PullRequest } from "../../ipc";
 interface Props {
   projectId: string;
   repoPath: string;
+  onLinkPr?: (pr: PullRequest) => void;
 }
 
 export function PrDashboard(props: Props) {
@@ -187,12 +188,17 @@ export function PrDashboard(props: Props) {
                     </div>
                   </Show>
                 </div>
-                <button class="prd-thread-btn" onClick={() => linkPrToThread(pr)} disabled={linkingPr() === pr.number} title="Link this PR to the current thread">
+                <button
+                  class="prd-thread-btn"
+                  onClick={() => props.onLinkPr ? props.onLinkPr(pr) : linkPrToThread(pr)}
+                  disabled={linkingPr() === pr.number}
+                  title={props.onLinkPr ? "Select this PR" : "Link this PR to the current thread"}
+                >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
                     <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
                   </svg>
-                  {linkingPr() === pr.number ? "Linking…" : "Link"}
+                  {linkingPr() === pr.number ? "Linking…" : props.onLinkPr ? "Select" : "Link"}
                 </button>
               </div>
             );
