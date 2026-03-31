@@ -50,7 +50,11 @@ export function PrDashboard(props: Props) {
     }
   }
 
+  const [creatingPr, setCreatingPr] = createSignal<number | null>(null);
+
   async function createPrThread(pr: PullRequest) {
+    if (creatingPr() === pr.number) return; // Prevent double-click
+    setCreatingPr(pr.number);
     try {
       // Step 1: Create thread and store PR link in parallel
       const [thread] = await Promise.all([
@@ -96,6 +100,8 @@ export function PrDashboard(props: Props) {
       });
     } catch (e) {
       console.error("Failed to create PR thread:", e);
+    } finally {
+      setCreatingPr(null);
     }
   }
 
@@ -193,7 +199,7 @@ export function PrDashboard(props: Props) {
                     </div>
                   </Show>
                 </div>
-                <button class="prd-thread-btn" onClick={() => createPrThread(pr)} title="Create thread for this PR">
+                <button class="prd-thread-btn" onClick={() => createPrThread(pr)} disabled={creatingPr() === pr.number} title="Create thread for this PR">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                     <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
