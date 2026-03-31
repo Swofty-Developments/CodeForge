@@ -102,10 +102,29 @@ export function ChatArea() {
         { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: msg },
       ]);
     } catch (e) {
-      appStore.setStore("threadMessages", tab, (msgs) => [
-        ...(msgs || []),
-        { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: `Merge failed: ${e}` },
-      ]);
+      // Auto-prompt the AI to help resolve the conflict
+      const errorMsg = String(e);
+      const prompt = `My merge/push just failed with this error:\n\n\`\`\`\n${errorMsg}\n\`\`\`\n\nPlease help me resolve this. Check the git status, identify any conflicts, and fix them.`;
+
+      try {
+        const msgId = await ipc.persistUserMessage(tab, prompt);
+        appStore.setStore("threadMessages", tab, (msgs) => [
+          ...(msgs || []),
+          { id: msgId, thread_id: tab, role: "user" as const, content: prompt },
+        ]);
+
+        const wt = store.worktrees[tab];
+        const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
+
+        appStore.setStore("sessionStatuses", tab, "generating");
+        await ipc.sendMessage(tab, prompt, store.selectedProvider, cwd, store.selectedModel ?? undefined);
+      } catch (sendErr) {
+        // If sending fails too, just show the error
+        appStore.setStore("threadMessages", tab, (msgs) => [
+          ...(msgs || []),
+          { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: `Merge failed: ${errorMsg}` },
+        ]);
+      }
     }
   }
 
