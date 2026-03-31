@@ -50,58 +50,46 @@ export function PrDashboard(props: Props) {
     }
   }
 
-  const [creatingPr, setCreatingPr] = createSignal<number | null>(null);
+  const [linkingPr, setLinkingPr] = createSignal<number | null>(null);
 
-  async function createPrThread(pr: PullRequest) {
-    if (creatingPr() === pr.number) return; // Prevent double-click
-    setCreatingPr(pr.number);
+  async function linkPrToThread(pr: PullRequest) {
+    const threadId = store.activeTab;
+    if (!threadId || linkingPr() === pr.number) return;
+    setLinkingPr(pr.number);
+
     try {
-      // Step 1: Create thread and store PR link in parallel
-      const [thread] = await Promise.all([
-        ipc.createThread(props.projectId, `PR #${pr.number}: ${pr.title}`, store.selectedProvider),
-      ]);
-
-      // Step 2: Switch to the new thread immediately (instant UI update)
-      // Fire setSetting in background — no need to await it
-      ipc.setSetting(`pr:${thread.id}`, String(pr.number)).catch((e) =>
-        console.error("Failed to store PR link:", e)
-      );
-
+      // Rename the current thread to reflect the PR
+      await ipc.renameThread(threadId, `PR #${pr.number}: ${pr.title}`);
       setStore("projects", (projects) =>
-        projects.map((p) =>
-          p.id === props.projectId
-            ? { ...p, threads: [...p.threads, thread], collapsed: false }
-            : p
-        )
+        projects.map((p) => ({
+          ...p,
+          threads: p.threads.map((t) =>
+            t.id === threadId ? { ...t, title: `PR #${pr.number}: ${pr.title}` } : t
+          ),
+        }))
       );
-      setStore("openTabs", (tabs) => [...tabs, thread.id]);
-      setStore("activeTab", thread.id);
 
-      // Show a loading placeholder while the diff fetches
-      const loadingMsgId = `loading-${crypto.randomUUID()}`;
-      setStore("threadMessages", thread.id, [
-        { id: loadingMsgId, thread_id: thread.id, role: "system", content: "Fetching PR diff..." },
+      // Store the PR link
+      ipc.setSetting(`pr:${threadId}`, String(pr.number)).catch(() => {});
+
+      // Update the PR map in the store
+      setStore("projectPrMap", props.projectId, (map) => ({
+        ...(map || {}),
+        [threadId]: pr.number,
+      }));
+
+      // Inject PR context as first message
+      const context = `I'm working on PR #${pr.number}: "${pr.title}" by ${pr.author}\n\nBranch: ${pr.branch} → ${pr.base}\n+${pr.additions} -${pr.deletions} across ${pr.changed_files} files\n${pr.labels.length > 0 ? `Labels: ${pr.labels.join(", ")}\n` : ""}\nHelp me review or continue work on this PR.`;
+
+      const msgId = await ipc.persistUserMessage(threadId, context);
+      setStore("threadMessages", threadId, (msgs) => [
+        ...(msgs || []),
+        { id: msgId, thread_id: threadId, role: "user" as const, content: context },
       ]);
-
-      // Step 3: Fetch diff in the background, then replace the loading message
-      ipc.getPrDiff(props.repoPath, pr.number).then(async (_diff) => {
-        const context = `I'm working on PR #${pr.number}: "${pr.title}" by ${pr.author}\n\nBranch: ${pr.branch} → ${pr.base}\n+${pr.additions} -${pr.deletions} across ${pr.changed_files} files\n${pr.labels.length > 0 ? `Labels: ${pr.labels.join(", ")}\n` : ""}\nHere's the diff summary — help me review or continue work on this PR.`;
-
-        const msgId = await ipc.persistUserMessage(thread.id, context);
-        setStore("threadMessages", thread.id, [
-          { id: msgId, thread_id: thread.id, role: "user", content: context },
-        ]);
-      }).catch((e) => {
-        console.error("Failed to fetch PR diff:", e);
-        // Replace loading message with error
-        setStore("threadMessages", thread.id, [
-          { id: crypto.randomUUID(), thread_id: thread.id, role: "system", content: `Failed to fetch PR diff: ${e}` },
-        ]);
-      });
     } catch (e) {
-      console.error("Failed to create PR thread:", e);
+      console.error("Failed to link PR:", e);
     } finally {
-      setCreatingPr(null);
+      setLinkingPr(null);
     }
   }
 
@@ -199,11 +187,12 @@ export function PrDashboard(props: Props) {
                     </div>
                   </Show>
                 </div>
-                <button class="prd-thread-btn" onClick={() => createPrThread(pr)} disabled={creatingPr() === pr.number} title="Create thread for this PR">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                <button class="prd-thread-btn" onClick={() => linkPrToThread(pr)} disabled={linkingPr() === pr.number} title="Link this PR to the current thread">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
                   </svg>
-                  Thread
+                  {linkingPr() === pr.number ? "Linking…" : "Link"}
                 </button>
               </div>
             );
