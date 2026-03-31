@@ -22,6 +22,8 @@ export function ThreadSetup(props: Props) {
   async function loadBranches() {
     setLoadingBranches(true);
     try {
+      // Fetch first so remote-only branches are available locally
+      await ipc.gitFetch(props.repoPath).catch(() => {});
       const list = await ipc.gitBranches(props.repoPath);
       setBranches(list);
     } catch (e) {
@@ -39,6 +41,8 @@ export function ThreadSetup(props: Props) {
         const thread = store.projects.flatMap((p) => p.threads).find((t) => t.id === props.threadId);
         const wt = await ipc.createWorktree(props.threadId, thread?.title || "worktree", props.repoPath);
         setStore("worktrees", props.threadId, wt);
+        // Fetch so remote-only branches can be checked out
+        await ipc.gitFetch(wt.path).catch(() => {});
         // Checkout the requested branch in the worktree
         if (branchName !== "main" && branchName !== "master") {
           await ipc.gitCheckout(wt.path, branchName);

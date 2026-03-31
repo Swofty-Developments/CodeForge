@@ -280,6 +280,26 @@ export async function injectMockIPC(page: Page) {
         case "list_slash_commands":
           return [{ name: "/help", description: "Show help", source: "built-in" }];
 
+        // Git extended
+        case "git_fetch":
+          return "Fetched successfully";
+        case "git_pull":
+          return "Already up to date.";
+        case "git_push_force":
+          return "Force pushed successfully";
+        case "git_delete_branch":
+          return `Deleted branch ${args.name}`;
+        case "git_merge_branch":
+          return `Merged ${args.branch}`;
+        case "git_stash":
+          return "Saved working directory";
+        case "git_stash_pop":
+          return "Applied stash";
+        case "git_create_pr":
+          return `https://github.com/test/repo/pull/1`;
+        case "git_diff_branches":
+          return [];
+
         // Diff
         case "get_changed_files":
         case "get_session_diff":

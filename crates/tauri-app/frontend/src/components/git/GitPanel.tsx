@@ -17,6 +17,14 @@ export function GitPanel(props: { cwd: string }) {
   const [showNewBranch, setShowNewBranch] = createSignal(false);
   const [pushing, setPushing] = createSignal(false);
   const [committing, setCommitting] = createSignal(false);
+  const [fetching, setFetching] = createSignal(false);
+  const [pulling, setPulling] = createSignal(false);
+  const [stashing, setStashing] = createSignal(false);
+  const [showPrForm, setShowPrForm] = createSignal(false);
+  const [prTitle, setPrTitle] = createSignal("");
+  const [prBody, setPrBody] = createSignal("");
+  const [prBase, setPrBase] = createSignal("main");
+  const [creatingPr, setCreatingPr] = createSignal(false);
 
   function showFeedback(type: "success" | "error", text: string) {
     setFeedback({ type, text });
@@ -138,6 +146,113 @@ export function GitPanel(props: { cwd: string }) {
       showFeedback("error", String(e));
     } finally {
       setPushing(false);
+    }
+  }
+
+  async function handleForcePush() {
+    setPushing(true);
+    try {
+      const result = await ipc.gitPushForce(props.cwd);
+      showFeedback("success", result);
+    } catch (e) {
+      showFeedback("error", String(e));
+    } finally {
+      setPushing(false);
+    }
+  }
+
+  async function handleFetch() {
+    setFetching(true);
+    try {
+      const result = await ipc.gitFetch(props.cwd);
+      showFeedback("success", result || "Fetched successfully");
+      await loadBranches();
+    } catch (e) {
+      showFeedback("error", String(e));
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  async function handlePull() {
+    setPulling(true);
+    try {
+      const result = await ipc.gitPull(props.cwd);
+      showFeedback("success", result || "Pulled successfully");
+      await loadAll();
+    } catch (e) {
+      showFeedback("error", String(e));
+    } finally {
+      setPulling(false);
+    }
+  }
+
+  async function handleDeleteBranch(name: string) {
+    try {
+      const result = await ipc.gitDeleteBranch(props.cwd, name);
+      showFeedback("success", result || `Deleted branch ${name}`);
+      await loadBranches();
+    } catch (e) {
+      showFeedback("error", String(e));
+    }
+  }
+
+  async function handleMergeBranch(branch: string) {
+    try {
+      const result = await ipc.gitMergeBranch(props.cwd, branch);
+      showFeedback("success", result || `Merged ${branch} into ${currentBranch()}`);
+      await loadAll();
+    } catch (e) {
+      showFeedback("error", String(e));
+    }
+  }
+
+  async function handleStash() {
+    setStashing(true);
+    try {
+      const result = await ipc.gitStash(props.cwd);
+      showFeedback("success", result || "Changes stashed");
+      await loadStatus();
+    } catch (e) {
+      showFeedback("error", String(e));
+    } finally {
+      setStashing(false);
+    }
+  }
+
+  async function handleStashPop() {
+    setStashing(true);
+    try {
+      const result = await ipc.gitStashPop(props.cwd);
+      showFeedback("success", result || "Stash popped");
+      await loadStatus();
+    } catch (e) {
+      showFeedback("error", String(e));
+    } finally {
+      setStashing(false);
+    }
+  }
+
+  async function handleCreatePr() {
+    const title = prTitle().trim();
+    const body = prBody().trim();
+    const base = prBase().trim() || "main";
+    const branch = currentBranch();
+    if (!title) {
+      showFeedback("error", "PR title is required");
+      return;
+    }
+    setCreatingPr(true);
+    try {
+      const result = await ipc.gitCreatePr(props.cwd, title, body, branch, base);
+      showFeedback("success", result || "PR created");
+      setShowPrForm(false);
+      setPrTitle("");
+      setPrBody("");
+    } catch (e) {
+      showFeedback("error", String(e));
+    } finally {
+      setCreatingPr(false);
     }
   }
 
@@ -280,6 +395,28 @@ export function GitPanel(props: { cwd: string }) {
                 >
                   {pushing() ? "Pushing..." : "Push"}
                 </button>
+                <button
+                  class="gp-btn gp-btn-warning"
+                  disabled={pushing()}
+                  onClick={handleForcePush}
+                  title="Force push (destructive)"
+                >
+                  Force Push
+                </button>
+                <button
+                  class="gp-btn gp-btn-secondary"
+                  disabled={stashing()}
+                  onClick={handleStash}
+                >
+                  Stash
+                </button>
+                <button
+                  class="gp-btn gp-btn-secondary"
+                  disabled={stashing()}
+                  onClick={handleStashPop}
+                >
+                  Pop Stash
+                </button>
               </div>
             </div>
           </Show>
@@ -290,52 +427,141 @@ export function GitPanel(props: { cwd: string }) {
       <Show when={activeSection() === "branches"}>
         <div class="gp-section">
           <div class="gp-branch-actions">
-            <Show
-              when={showNewBranch()}
-              fallback={
-                <button class="gp-btn gp-btn-secondary gp-btn-sm" onClick={() => setShowNewBranch(true)}>
-                  + New branch
+            <div class="gp-branch-toolbar">
+              <Show
+                when={showNewBranch()}
+                fallback={
+                  <button class="gp-btn gp-btn-secondary gp-btn-sm" onClick={() => setShowNewBranch(true)}>
+                    + New branch
+                  </button>
+                }
+              >
+                <div class="gp-new-branch">
+                  <input
+                    class="gp-commit-input"
+                    type="text"
+                    placeholder="Branch name..."
+                    value={newBranchName()}
+                    onInput={(e) => setNewBranchName(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleNewBranch();
+                      if (e.key === "Escape") setShowNewBranch(false);
+                    }}
+                    autofocus
+                  />
+                  <button class="gp-btn gp-btn-primary gp-btn-sm" onClick={handleNewBranch}>
+                    Create
+                  </button>
+                  <button class="gp-btn gp-btn-secondary gp-btn-sm" onClick={() => setShowNewBranch(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </Show>
+              <div class="gp-branch-sync">
+                <button
+                  class="gp-btn gp-btn-secondary gp-btn-sm"
+                  disabled={fetching()}
+                  onClick={handleFetch}
+                >
+                  {fetching() ? "Fetching..." : "Fetch"}
                 </button>
-              }
-            >
-              <div class="gp-new-branch">
+                <button
+                  class="gp-btn gp-btn-secondary gp-btn-sm"
+                  disabled={pulling()}
+                  onClick={handlePull}
+                >
+                  {pulling() ? "Pulling..." : "Pull"}
+                </button>
+                <Show when={currentBranch() !== "main" && currentBranch() !== "master"}>
+                  <button
+                    class="gp-btn gp-btn-primary gp-btn-sm"
+                    onClick={() => setShowPrForm(!showPrForm())}
+                  >
+                    Create PR
+                  </button>
+                </Show>
+              </div>
+            </div>
+            <Show when={showPrForm()}>
+              <div class="gp-pr-form">
                 <input
                   class="gp-commit-input"
                   type="text"
-                  placeholder="Branch name..."
-                  value={newBranchName()}
-                  onInput={(e) => setNewBranchName(e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleNewBranch();
-                    if (e.key === "Escape") setShowNewBranch(false);
-                  }}
-                  autofocus
+                  placeholder="PR title..."
+                  value={prTitle()}
+                  onInput={(e) => setPrTitle(e.currentTarget.value)}
                 />
-                <button class="gp-btn gp-btn-primary gp-btn-sm" onClick={handleNewBranch}>
-                  Create
-                </button>
-                <button class="gp-btn gp-btn-secondary gp-btn-sm" onClick={() => setShowNewBranch(false)}>
-                  Cancel
-                </button>
+                <input
+                  class="gp-commit-input"
+                  type="text"
+                  placeholder="Description (optional)..."
+                  value={prBody()}
+                  onInput={(e) => setPrBody(e.currentTarget.value)}
+                />
+                <div class="gp-pr-form-row">
+                  <label class="gp-pr-base-label">
+                    Base:
+                    <input
+                      class="gp-commit-input gp-pr-base-input"
+                      type="text"
+                      value={prBase()}
+                      onInput={(e) => setPrBase(e.currentTarget.value)}
+                    />
+                  </label>
+                  <button
+                    class="gp-btn gp-btn-primary gp-btn-sm"
+                    disabled={creatingPr() || !prTitle().trim()}
+                    onClick={handleCreatePr}
+                  >
+                    {creatingPr() ? "Creating..." : "Submit PR"}
+                  </button>
+                  <button
+                    class="gp-btn gp-btn-secondary gp-btn-sm"
+                    onClick={() => setShowPrForm(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </Show>
           </div>
           <div class="gp-branch-list">
             <For each={localBranches()}>
               {(branch) => (
-                <button
-                  class="gp-branch-row"
-                  classList={{ "gp-branch-current": branch.current }}
-                  onClick={() => { if (!branch.current) handleCheckout(branch.name); }}
-                  disabled={branch.current}
-                >
-                  <Show when={branch.current}>
-                    <svg class="gp-check-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
+                <div class="gp-branch-row" classList={{ "gp-branch-current": branch.current }}>
+                  <button
+                    class="gp-branch-row-main"
+                    onClick={() => { if (!branch.current) handleCheckout(branch.name); }}
+                    disabled={branch.current}
+                  >
+                    <Show when={branch.current}>
+                      <svg class="gp-check-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </Show>
+                    <span class="gp-branch-name">{branch.name}</span>
+                  </button>
+                  <Show when={!branch.current}>
+                    <button
+                      class="gp-icon-btn gp-branch-action"
+                      title={`Merge ${branch.name} into ${currentBranch()}`}
+                      onClick={(e) => { e.stopPropagation(); handleMergeBranch(branch.name); }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 009 9" />
+                      </svg>
+                    </button>
+                    <button
+                      class="gp-icon-btn gp-branch-delete"
+                      title={`Delete ${branch.name}`}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteBranch(branch.name); }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
                   </Show>
-                  <span class="gp-branch-name">{branch.name}</span>
-                </button>
+                </div>
               )}
             </For>
           </div>
@@ -602,11 +828,30 @@ const GIT_PANEL_STYLES = `
     font-size: 11px;
   }
 
+  /* Buttons - warning */
+  .gp-btn-warning {
+    background: rgba(255, 180, 80, 0.15);
+    color: #ffb450;
+    border: 1px solid rgba(255, 180, 80, 0.3);
+  }
+  .gp-btn-warning:hover:not(:disabled) {
+    background: rgba(255, 180, 80, 0.25);
+  }
+
   /* Branches */
   .gp-branch-actions {
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+  }
+  .gp-branch-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .gp-branch-sync {
+    display: flex;
+    gap: 6px;
   }
   .gp-new-branch {
     display: flex;
@@ -621,21 +866,49 @@ const GIT_PANEL_STYLES = `
   .gp-branch-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 0;
     width: 100%;
-    padding: 6px 12px;
+    padding: 0 4px 0 0;
     font-size: 12px;
     background: none;
     border: none;
-    cursor: pointer;
     text-align: left;
     color: var(--text);
     transition: background 0.1s;
   }
-  .gp-branch-row:hover:not(:disabled) { background: var(--bg-accent); }
+  .gp-branch-row:hover { background: var(--bg-accent); }
+  .gp-branch-row-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    padding: 6px 12px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    font-size: inherit;
+  }
+  .gp-branch-row-main:disabled { cursor: default; }
   .gp-branch-current {
     color: var(--primary);
-    cursor: default;
+  }
+  .gp-branch-action {
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  .gp-branch-delete {
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  .gp-branch-delete:hover { color: var(--red); }
+  .gp-branch-row:hover .gp-branch-action,
+  .gp-branch-row:hover .gp-branch-delete {
+    opacity: 1;
   }
   .gp-branch-name {
     font-family: var(--font-mono);
@@ -647,6 +920,33 @@ const GIT_PANEL_STYLES = `
   .gp-check-icon {
     color: var(--primary);
     flex-shrink: 0;
+  }
+
+  /* PR form */
+  .gp-pr-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .gp-pr-form-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .gp-pr-base-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    flex: 1;
+  }
+  .gp-pr-base-input {
+    width: 80px;
+    flex: 0 0 auto;
   }
 
   /* Log */

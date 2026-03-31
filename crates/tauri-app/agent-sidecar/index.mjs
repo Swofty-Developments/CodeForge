@@ -55,6 +55,11 @@ let approvalCounter = 0;
 let hasCompletedQuery = false;
 let lastSessionId = null;
 
+// Incremental streaming state — the SDK yields full message snapshots,
+// so we diff against the previous lengths to emit only new characters.
+let lastTextLen = 0;
+let lastThinkingLen = 0;
+
 // ── Stdin reader ─────────────────────────────────────────────────────────────
 
 const rl = createInterface({ input: process.stdin, terminal: false });
@@ -187,6 +192,10 @@ async function handleQuery(cmd) {
   let capturedSessionId = sessionId || null;
   let turnEmitted = false;
 
+  // Reset incremental streaming counters for new query.
+  lastTextLen = 0;
+  lastThinkingLen = 0;
+
   // Emit turn_started so the frontend shows "generating" state
   emit({ type: "turn_started" });
 
@@ -250,6 +259,8 @@ async function handleQuery(cmd) {
 
         hasCompletedQuery = true;
         lastSessionId = capturedSessionId;
+        lastTextLen = 0;
+        lastThinkingLen = 0;
         emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
         turnEmitted = true;
         continue;
@@ -264,11 +275,13 @@ async function handleQuery(cmd) {
         continue;
       }
 
-      // assistant message — extract content blocks
+      // assistant message — extract content blocks (incremental diff)
       if (msgType === "assistant" && message.message?.content) {
         for (const block of message.message.content) {
           if (block.type === "text" && block.text) {
-            emit({ type: "text_delta", text: block.text });
+            const newText = block.text.slice(lastTextLen);
+            if (newText) emit({ type: "text_delta", text: newText });
+            lastTextLen = block.text.length;
           } else if (block.type === "tool_use") {
             emit({
               type: "tool_use_start",
@@ -283,7 +296,9 @@ async function handleQuery(cmd) {
               });
             }
           } else if (block.type === "thinking" && block.thinking) {
-            emit({ type: "thinking_delta", text: block.thinking });
+            const newThinking = block.thinking.slice(lastThinkingLen);
+            if (newThinking) emit({ type: "thinking_delta", text: newThinking });
+            lastThinkingLen = block.thinking.length;
           }
         }
         continue;

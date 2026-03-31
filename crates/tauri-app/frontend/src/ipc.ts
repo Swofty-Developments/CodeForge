@@ -374,6 +374,33 @@ export const gitCommit = (cwd: string, message: string, files: string[]) =>
 export const gitPush = (cwd: string) =>
   invoke<string>("git_push", { cwd });
 
+export const gitPushForce = (cwd: string) =>
+  invoke<string>("git_push_force", { cwd });
+
+export const gitFetch = (cwd: string) =>
+  invoke<string>("git_fetch", { cwd });
+
+export const gitPull = (cwd: string) =>
+  invoke<string>("git_pull", { cwd });
+
+export const gitDeleteBranch = (cwd: string, name: string, force?: boolean) =>
+  invoke<string>("git_delete_branch", { cwd, name, force: force ?? false });
+
+export const gitMergeBranch = (cwd: string, branch: string) =>
+  invoke<string>("git_merge_branch", { cwd, branch });
+
+export const gitStash = (cwd: string, message?: string) =>
+  invoke<string>("git_stash", { cwd, message: message ?? null });
+
+export const gitStashPop = (cwd: string) =>
+  invoke<string>("git_stash_pop", { cwd });
+
+export const gitCreatePr = (cwd: string, title: string, body: string, branch: string, base: string) =>
+  invoke<string>("git_create_pr", { cwd, title, body, branch, base });
+
+export const gitDiffBranches = (cwd: string, branch1: string, branch2: string) =>
+  invoke<any>("git_diff_branches", { cwd, branch1, branch2 });
+
 export const gitStatus = (cwd: string) =>
   invoke<GitStatusEntry[]>("git_status", { cwd });
 
