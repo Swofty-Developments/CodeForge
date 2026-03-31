@@ -103,20 +103,36 @@ impl ClaudeSession {
         permission_mode: Option<&str>,
         session_id: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
-        // Resolve the sidecar script path.  Walk up from `cwd` looking for
-        // the workspace root (identified by a top-level Cargo.toml that
-        // contains `[workspace]`), then join the relative sidecar path.
-        let sidecar_path = find_workspace_root(cwd)
-            .map(|root| root.join(SIDECAR_SCRIPT))
-            .unwrap_or_else(|| {
-                // Fallback: try a few common locations.
-                let candidate = cwd.join(SIDECAR_SCRIPT);
-                if candidate.exists() {
-                    return candidate;
+        // Resolve the sidecar script path relative to the executable, not cwd.
+        // In dev mode the exe is in target/debug/, so we walk up to find the workspace root.
+        // In production the sidecar would be bundled alongside the binary.
+        let sidecar_path = std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                // Walk up from exe path to find workspace root
+                let mut dir = exe.parent()?;
+                for _ in 0..10 {
+                    let candidate = dir.join(SIDECAR_SCRIPT);
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
+                    dir = dir.parent()?;
                 }
-                // Assume we're inside the workspace already.
-                std::path::PathBuf::from(SIDECAR_SCRIPT)
-            });
+                None
+            })
+            .or_else(|| {
+                // Fallback: try from CARGO_MANIFEST_DIR (set at compile time).
+                // This crate is at crates/session/, sidecar is at crates/tauri-app/agent-sidecar/
+                let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+                // Go up to workspace root (crates/session -> crates -> root)
+                let workspace_root = manifest_dir.parent()?.parent()?;
+                let candidate = workspace_root.join(SIDECAR_SCRIPT);
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+                None
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from(SIDECAR_SCRIPT));
 
         debug!("Spawning agent sidecar: node {}", sidecar_path.display());
 
@@ -125,13 +141,27 @@ impl ClaudeSession {
             .current_dir(cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .context("Failed to spawn node agent sidecar")?;
 
         let stdout = child.stdout.take().context("Failed to capture stdout")?;
         let stdin = child.stdin.take().context("Failed to capture stdin")?;
+        let stderr = child.stderr.take();
+
+        // Stderr reader — log sidecar errors
+        if let Some(stderr) = stderr {
+            tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if !line.trim().is_empty() {
+                        tracing::warn!("sidecar stderr: {line}");
+                    }
+                }
+            });
+        }
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
@@ -203,6 +233,9 @@ impl ClaudeSession {
                             }
                         }
                         vec![AgentEvent::SessionReady { claude_session_id: sid }]
+                    }
+                    "turn_started" => {
+                        vec![AgentEvent::TurnStarted { turn_id: "sidecar".to_string() }]
                     }
                     "text_delta" => {
                         let text = obj.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();

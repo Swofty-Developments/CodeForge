@@ -1,13 +1,14 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal, lazy } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 import { Markdown } from "./Markdown";
 import { ToolUseCard } from "./ToolUseCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PrDashboard } from "../github/PrDashboard";
-import { McpPanel } from "../sidebar/McpPanel";
-import { ThemeSelector } from "../settings/ThemeSelector";
 import type { ContentBlock } from "../../types";
+
+const McpPanel = lazy(() => import("../sidebar/McpPanel").then(m => ({ default: m.McpPanel })));
+const ThemeSelector = lazy(() => import("../settings/ThemeSelector").then(m => ({ default: m.ThemeSelector })));
 
 export function ChatArea() {
   const { store, approveRequest, denyRequest } = appStore;
@@ -21,6 +22,11 @@ export function ChatArea() {
   const isGenerating = () => {
     if (!store.activeTab) return false;
     return store.sessionStatuses[store.activeTab] === "generating";
+  };
+
+  const isLoadingMessages = () => {
+    if (!store.activeTab) return false;
+    return !!store.threadMessagesLoading[store.activeTab];
   };
 
   const worktree = () => store.worktrees[store.activeTab || ""] || null;
@@ -190,8 +196,23 @@ export function ChatArea() {
           </Show>
         </Show>
 
+        {/* Loading skeleton while messages are being fetched */}
+        <Show when={isLoadingMessages()}>
+          <div class="messages-loading">
+            <div class="msg-skeleton">
+              <div class="skeleton-line wide" />
+              <div class="skeleton-line" />
+            </div>
+            <div class="msg-skeleton assistant">
+              <div class="skeleton-line wide" />
+              <div class="skeleton-line medium" />
+              <div class="skeleton-line" />
+            </div>
+          </div>
+        </Show>
+
         <Show
-          when={messages().length > 0 || isGenerating()}
+          when={(messages().length > 0 || isGenerating()) && !isLoadingMessages()}
           fallback={
             <div class="chat-empty">
               <p class="new-convo">New conversation</p>
@@ -484,6 +505,7 @@ if (!document.getElementById("chat-styles")) {
       flex: 1;
       overflow-y: auto;
       padding: 16px;
+      animation: fade-in 0.15s ease both;
     }
     .virtual-tab-placeholder {
       flex: 1;
@@ -503,6 +525,7 @@ if (!document.getElementById("chat-styles")) {
       justify-content: center;
       color: var(--text-secondary);
       gap: 8px;
+      animation: fade-in 0.2s ease both;
     }
     .hero-mark {
       margin-bottom: 8px;
@@ -598,9 +621,51 @@ if (!document.getElementById("chat-styles")) {
       display: flex;
       flex-direction: column;
       gap: 20px;
+      content-visibility: auto;
+      contain-intrinsic-size: auto 500px;
+      animation: fade-in 0.15s ease both;
     }
 
-    .msg { width: 100%; }
+    /* ── Loading skeleton ── */
+    .messages-loading {
+      max-width: 768px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .msg-skeleton {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 65%;
+      margin-left: auto;
+    }
+    .msg-skeleton.assistant {
+      margin-left: 0;
+      margin-right: auto;
+      max-width: 80%;
+    }
+    .skeleton-line {
+      height: 12px;
+      background: var(--bg-accent);
+      border-radius: 6px;
+      width: 40%;
+      animation: skeleton-pulse 1.2s ease-in-out infinite;
+    }
+    .skeleton-line.wide { width: 90%; }
+    .skeleton-line.medium { width: 65%; }
+    @keyframes skeleton-pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 0.8; }
+    }
+
+    .msg {
+      width: 100%;
+      animation: fade-slide-up 0.2s ease both;
+    }
 
     /* ── User message ── */
     .msg-user-bubble {

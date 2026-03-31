@@ -42,6 +42,9 @@ export interface AppStore {
   attachments: Attachment[];
   threadTokenUsage: Record<string, ThreadTokenUsage>;
   notificationsEnabled: boolean;
+  threadMessagesLoading: Record<string, boolean>;
+  projectGitStatus: Record<string, "none" | "git" | "github">;
+  projectPrMap: Record<string, Record<string, number>>;
 }
 
 function createAppStore() {
@@ -77,6 +80,9 @@ function createAppStore() {
     attachments: [],
     threadTokenUsage: {},
     notificationsEnabled: true,
+    threadMessagesLoading: {},
+    projectGitStatus: {},
+    projectPrMap: {},
   });
 
   async function loadData() {
@@ -104,42 +110,76 @@ function createAppStore() {
   async function loadThreadMessages(threadId: string) {
     if (store.threadMessages[threadId]) return;
     try {
+      setStore("threadMessagesLoading", threadId, true);
       const msgs = await ipc.getMessagesByThread(threadId);
       setStore("threadMessages", threadId, msgs);
     } catch (e) {
       console.error("Failed to load messages:", e);
+    } finally {
+      setStore("threadMessagesLoading", threadId, false);
     }
   }
 
   async function newThread(projectId?: string) {
-    try {
-      let targetProjectId = projectId;
-      if (!targetProjectId) {
-        const uncat = store.projects.find((p) => p.path === ".");
-        if (!uncat) {
+    // Optimistic: create a placeholder thread instantly in the UI
+    const optimisticId = `opt-${crypto.randomUUID()}`;
+    let targetProjectId = projectId;
+
+    if (!targetProjectId) {
+      const uncat = store.projects.find((p) => p.path === ".");
+      if (uncat) {
+        targetProjectId = uncat.id;
+      } else {
+        // Create uncategorized project — can't be optimistic here
+        try {
           const created = await ipc.createProject("Uncategorized", ".");
           const newProject: Project = { ...created, color: null, collapsed: false, threads: [] };
           setStore("projects", (prev) => [...prev, newProject]);
           targetProjectId = created.id;
-        } else {
-          targetProjectId = uncat.id;
+        } catch (e) {
+          console.error("Failed to create project:", e);
+          return;
         }
       }
+    }
 
-      const count = store.projects.reduce((n, p) => n + p.threads.length, 0);
-      const thread = await ipc.createThread(targetProjectId!, `Thread ${count + 1}`, store.selectedProvider);
+    const count = store.projects.reduce((n, p) => n + p.threads.length, 0);
+    const optimisticThread = {
+      id: optimisticId,
+      project_id: targetProjectId!,
+      title: `Thread ${count + 1}`,
+      color: null,
+    };
 
-      // Update the target project's threads and uncollapse it
+    // Instantly update UI
+    setStore("projects", (projects) =>
+      projects.map((p) =>
+        p.id === targetProjectId
+          ? { ...p, threads: [...p.threads, optimisticThread], collapsed: false }
+          : p
+      )
+    );
+    setStore("openTabs", (tabs) => [...tabs, optimisticId]);
+    setStore("activeTab", optimisticId);
+    setStore("threadMessages", optimisticId, []);
+
+    // Create for real in the background and swap the ID
+    try {
+      const thread = await ipc.createThread(targetProjectId!, optimisticThread.title, store.selectedProvider);
+      // Swap optimistic ID with real ID
       setStore("projects", (projects) =>
-        projects.map((p) =>
-          p.id === targetProjectId
-            ? { ...p, threads: [...p.threads, thread], collapsed: false }
-            : p
-        )
+        projects.map((p) => ({
+          ...p,
+          threads: p.threads.map((t) => t.id === optimisticId ? { ...t, id: thread.id } : t),
+        }))
       );
-      setStore("openTabs", (tabs) => [...tabs, thread.id]);
-      setStore("activeTab", thread.id);
-      setStore("threadMessages", thread.id, []);
+      setStore("openTabs", (tabs) => tabs.map((t) => t === optimisticId ? thread.id : t));
+      if (store.activeTab === optimisticId) setStore("activeTab", thread.id);
+      const msgs = store.threadMessages[optimisticId];
+      if (msgs) {
+        setStore("threadMessages", thread.id, msgs);
+        setStore("threadMessages", optimisticId, undefined as any);
+      }
     } catch (e) {
       console.error("Failed to create thread:", e);
     }
@@ -701,6 +741,43 @@ function createAppStore() {
     }
   }
 
+  async function loadProjectGitStatus(projectId: string, projectPath: string, threads: { id: string }[]) {
+    if (store.projectGitStatus[projectId] !== undefined) return;
+    if (projectPath === ".") return;
+
+    try {
+      const isGh = await ipc.isGithubRepo(projectPath);
+      if (isGh) {
+        setStore("projectGitStatus", projectId, "github");
+      } else {
+        try {
+          await ipc.getChangedFiles(projectPath);
+          setStore("projectGitStatus", projectId, "git");
+        } catch {
+          setStore("projectGitStatus", projectId, "none");
+        }
+      }
+    } catch {
+      setStore("projectGitStatus", projectId, "none");
+    }
+
+    const status = store.projectGitStatus[projectId];
+    if (status && status !== "none" && threads.length > 0) {
+      const map: Record<string, number> = {};
+      try {
+        const keys = threads.map((t) => `pr:${t.id}`);
+        const batch = await ipc.getSettingsBatch(keys);
+        for (const t of threads) {
+          const val = batch[`pr:${t.id}`];
+          if (val) map[t.id] = parseInt(val, 10);
+        }
+      } catch {}
+      if (Object.keys(map).length > 0) {
+        setStore("projectPrMap", projectId, map);
+      }
+    }
+  }
+
   return {
     store,
     setStore,
@@ -720,6 +797,7 @@ function createAppStore() {
     retryLastMessage,
     regenerateResponse,
     requestNotificationPermission,
+    loadProjectGitStatus,
   };
 }
 

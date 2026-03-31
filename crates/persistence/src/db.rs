@@ -13,7 +13,14 @@ impl Database {
     /// Open (or create) a database file at the given path and run migrations.
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA foreign_keys=ON;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA cache_size=-8000;
+             PRAGMA mmap_size=268435456;
+             PRAGMA busy_timeout=5000;",
+        )?;
         run_migrations(&conn)?;
         Ok(Self { conn })
     }

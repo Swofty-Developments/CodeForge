@@ -35,12 +35,17 @@ export function PrDashboard(props: Props) {
 
   async function createPrThread(pr: PullRequest) {
     try {
-      // Create a new thread linked to this PR
-      const thread = await ipc.createThread(props.projectId, `PR #${pr.number}: ${pr.title}`, store.selectedProvider);
-      // Store the PR link
-      await ipc.setSetting(`pr:${thread.id}`, String(pr.number));
+      // Step 1: Create thread and store PR link in parallel
+      const [thread] = await Promise.all([
+        ipc.createThread(props.projectId, `PR #${pr.number}: ${pr.title}`, store.selectedProvider),
+      ]);
 
-      // Update store
+      // Step 2: Switch to the new thread immediately (instant UI update)
+      // Fire setSetting in background — no need to await it
+      ipc.setSetting(`pr:${thread.id}`, String(pr.number)).catch((e) =>
+        console.error("Failed to store PR link:", e)
+      );
+
       setStore("projects", (projects) =>
         projects.map((p) =>
           p.id === props.projectId
@@ -50,16 +55,28 @@ export function PrDashboard(props: Props) {
       );
       setStore("openTabs", (tabs) => [...tabs, thread.id]);
       setStore("activeTab", thread.id);
-      setStore("threadMessages", thread.id, []);
 
-      // Auto-send the PR context as first message
-      const diff = await ipc.getPrDiff(props.repoPath, pr.number);
-      const context = `I'm working on PR #${pr.number}: "${pr.title}" by ${pr.author}\n\nBranch: ${pr.branch} → ${pr.base}\n+${pr.additions} -${pr.deletions} across ${pr.changed_files} files\n${pr.labels.length > 0 ? `Labels: ${pr.labels.join(", ")}\n` : ""}\nHere's the diff summary — help me review or continue work on this PR.`;
-
-      const msgId = await ipc.persistUserMessage(thread.id, context);
+      // Show a loading placeholder while the diff fetches
+      const loadingMsgId = `loading-${crypto.randomUUID()}`;
       setStore("threadMessages", thread.id, [
-        { id: msgId, thread_id: thread.id, role: "user", content: context },
+        { id: loadingMsgId, thread_id: thread.id, role: "system", content: "Fetching PR diff..." },
       ]);
+
+      // Step 3: Fetch diff in the background, then replace the loading message
+      ipc.getPrDiff(props.repoPath, pr.number).then(async (_diff) => {
+        const context = `I'm working on PR #${pr.number}: "${pr.title}" by ${pr.author}\n\nBranch: ${pr.branch} → ${pr.base}\n+${pr.additions} -${pr.deletions} across ${pr.changed_files} files\n${pr.labels.length > 0 ? `Labels: ${pr.labels.join(", ")}\n` : ""}\nHere's the diff summary — help me review or continue work on this PR.`;
+
+        const msgId = await ipc.persistUserMessage(thread.id, context);
+        setStore("threadMessages", thread.id, [
+          { id: msgId, thread_id: thread.id, role: "user", content: context },
+        ]);
+      }).catch((e) => {
+        console.error("Failed to fetch PR diff:", e);
+        // Replace loading message with error
+        setStore("threadMessages", thread.id, [
+          { id: crypto.randomUUID(), thread_id: thread.id, role: "system", content: `Failed to fetch PR diff: ${e}` },
+        ]);
+      });
     } catch (e) {
       console.error("Failed to create PR thread:", e);
     }

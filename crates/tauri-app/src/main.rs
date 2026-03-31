@@ -61,6 +61,7 @@ fn main() {
             commands::sessions::stop_session,
             commands::sessions::respond_to_approval,
             commands::settings::get_setting,
+            commands::settings::get_settings_batch,
             commands::settings::set_setting,
             commands::providers::get_provider_info,
             commands::worktree::create_worktree,

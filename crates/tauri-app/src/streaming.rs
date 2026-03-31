@@ -85,22 +85,26 @@ pub fn spawn_event_forwarder(
                     ..default_payload()
                 },
                 AgentEvent::TurnCompleted { turn_id } => {
-                    // Persist accumulated message
+                    // Persist accumulated message via spawn_blocking to avoid
+                    // holding the std::sync::Mutex across an await point.
                     if let Some(msg_id) = streaming_msg_id.take() {
                         let content = std::mem::take(&mut accumulated_content);
-                        if let Ok(db) = db.lock() {
-                            let db_msg = codeforge_persistence::Message {
-                                id: msg_id,
-                                thread_id,
-                                role: codeforge_persistence::MessageRole::Assistant,
-                                content,
-                                created_at: chrono::Utc::now(),
-                            };
-                            let _ = codeforge_persistence::queries::insert_message(
-                                db.conn(),
-                                &db_msg,
-                            );
-                        }
+                        let db_clone = db.clone();
+                        tokio::task::spawn_blocking(move || {
+                            if let Ok(db) = db_clone.lock() {
+                                let db_msg = codeforge_persistence::Message {
+                                    id: msg_id,
+                                    thread_id,
+                                    role: codeforge_persistence::MessageRole::Assistant,
+                                    content,
+                                    created_at: chrono::Utc::now(),
+                                };
+                                let _ = codeforge_persistence::queries::insert_message(
+                                    db.conn(),
+                                    &db_msg,
+                                );
+                            }
+                        });
                     }
 
                     AgentEventPayload {
@@ -142,24 +146,31 @@ pub fn spawn_event_forwarder(
                     cost_usd,
                     ref model,
                 } => {
-                    // Persist usage to database
-                    if let Ok(db) = db.lock() {
-                        let id = Uuid::new_v4().to_string();
-                        let now = chrono::Utc::now().to_rfc3339();
-                        let _ = codeforge_persistence::queries::insert_usage_log(
-                            db.conn(),
-                            &id,
-                            &thread_id.to_string(),
-                            Some(&session_id.to_string()),
-                            *input_tokens as i64,
-                            *output_tokens as i64,
-                            *cache_read_tokens as i64,
-                            *cache_write_tokens as i64,
-                            *cost_usd,
-                            Some(model),
-                            &now,
-                        );
-                    }
+                    // Persist usage via spawn_blocking
+                    let db_clone = db.clone();
+                    let tid_str = thread_id.to_string();
+                    let sid_str = session_id.to_string();
+                    let it = *input_tokens as i64;
+                    let ot = *output_tokens as i64;
+                    let crt = *cache_read_tokens as i64;
+                    let cwt = *cache_write_tokens as i64;
+                    let cu = *cost_usd;
+                    let m = model.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Ok(db) = db_clone.lock() {
+                            let id = Uuid::new_v4().to_string();
+                            let now = chrono::Utc::now().to_rfc3339();
+                            let _ = codeforge_persistence::queries::insert_usage_log(
+                                db.conn(),
+                                &id,
+                                &tid_str,
+                                Some(&sid_str),
+                                it, ot, crt, cwt, cu,
+                                Some(&m),
+                                &now,
+                            );
+                        }
+                    });
 
                     AgentEventPayload {
                         session_id: session_id.to_string(),
@@ -175,29 +186,33 @@ pub fn spawn_event_forwarder(
                     }
                 }
                 AgentEvent::SessionReady { claude_session_id } => {
-                    // Persist session record with claude_session_id for future --resume
-                    if let Ok(db) = db.lock() {
-                        let db_session = codeforge_persistence::Session {
-                            id: session_id,
-                            thread_id,
-                            provider: codeforge_persistence::Provider::Claude,
-                            status: "ready".to_string(),
-                            approval_mode: None,
-                            pid: None,
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = codeforge_persistence::queries::insert_session(
-                            db.conn(),
-                            &db_session,
-                        );
-                        if let Some(ref csid) = claude_session_id {
-                            let _ = codeforge_persistence::queries::update_session_claude_id(
+                    // Persist session record via spawn_blocking
+                    let db_clone = db.clone();
+                    let csid = claude_session_id.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Ok(db) = db_clone.lock() {
+                            let db_session = codeforge_persistence::Session {
+                                id: session_id,
+                                thread_id,
+                                provider: codeforge_persistence::Provider::Claude,
+                                status: "ready".to_string(),
+                                approval_mode: None,
+                                pid: None,
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = codeforge_persistence::queries::insert_session(
                                 db.conn(),
-                                session_id,
-                                csid,
+                                &db_session,
                             );
+                            if let Some(ref csid) = csid {
+                                let _ = codeforge_persistence::queries::update_session_claude_id(
+                                    db.conn(),
+                                    session_id,
+                                    csid,
+                                );
+                            }
                         }
-                    }
+                    });
 
                     AgentEventPayload {
                         session_id: session_id.to_string(),

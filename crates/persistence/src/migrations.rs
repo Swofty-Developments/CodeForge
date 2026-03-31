@@ -83,5 +83,17 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch("ALTER TABLE sessions ADD COLUMN claude_session_id TEXT;")?;
     }
 
+    // Performance indexes — idempotent via IF NOT EXISTS
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_threads_project_id ON threads(project_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON messages(thread_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_sessions_thread_id ON sessions(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_thread_claude ON sessions(thread_id, claude_session_id);
+        CREATE INDEX IF NOT EXISTS idx_usage_logs_thread_id ON usage_logs(thread_id);
+        ",
+    )?;
+
     Ok(())
 }

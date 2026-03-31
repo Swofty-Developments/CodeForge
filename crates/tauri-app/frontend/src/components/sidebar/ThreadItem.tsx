@@ -167,9 +167,9 @@ if (!document.getElementById("thread-item-styles")) {
       border-radius: 1px;
       background: var(--primary);
     }
-    .thread-item.dragging { opacity: 0.3; }
+    .thread-item.dragging { opacity: 0.3; will-change: transform; }
     .thread-item.can-drag { cursor: grab; }
-    .thread-item.can-drag:active { cursor: grabbing; }
+    .thread-item.can-drag:active { cursor: grabbing; will-change: transform; }
     .thread-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
     .thread-item.active .thread-title { color: var(--text); }
     .thread-right {

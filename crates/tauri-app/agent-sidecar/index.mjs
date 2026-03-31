@@ -136,6 +136,41 @@ async function handleQuery(cmd) {
     options.resume = sessionId;
   }
 
+  // canUseTool callback — sends approval requests to Rust, waits for response
+  options.canUseTool = async (toolName, input) => {
+    const requestId = String(++approvalCounter);
+
+    // AskUserQuestion — forward to frontend
+    if (toolName === "AskUserQuestion") {
+      emit({
+        type: "ask_user_question",
+        requestId,
+        questions: input.questions || [],
+      });
+    } else {
+      // Regular tool approval
+      emit({
+        type: "approval_request",
+        requestId,
+        toolName,
+        input,
+      });
+    }
+
+    // Wait for the response from Rust
+    return new Promise((resolve) => {
+      pendingApprovals.set(requestId, {
+        resolve: (resp) => {
+          if (resp.decision === "allow") {
+            resolve({ behavior: "allow", updatedInput: input });
+          } else {
+            resolve({ behavior: "deny", message: resp.message || "User denied this action" });
+          }
+        },
+      });
+    });
+  };
+
   // Create an AbortController for this query.
   const abort = new AbortController();
   currentAbort = abort;
@@ -144,13 +179,18 @@ async function handleQuery(cmd) {
   let capturedSessionId = sessionId || null;
   let turnEmitted = false;
 
+  // Emit turn_started so the frontend shows "generating" state
+  emit({ type: "turn_started" });
+
   try {
     for await (const message of query({ prompt, options })) {
       // Abort was requested while iterating.
       if (abort.signal.aborted) break;
 
+      const msgType = message.type;
+
       // ── system messages ──
-      if (message.type === "system") {
+      if (msgType === "system") {
         if (message.subtype === "init" && message.session_id) {
           capturedSessionId = message.session_id;
           emit({ type: "session_ready", sessionId: message.session_id });
@@ -159,17 +199,44 @@ async function handleQuery(cmd) {
       }
 
       // ── result message (final) ──
-      if ("result" in message) {
-        // Extract usage if available.
-        if (message.usage) {
+      if (msgType === "result" || "result" in message) {
+        // Extract usage from various possible locations
+        const usage = message.usage || message.modelUsage;
+        const costUsd = message.total_cost_usd ?? message.cost_usd ?? 0;
+        const modelName = message.model ?? model ?? "unknown";
+
+        if (usage) {
+          // SDK may nest usage per-model or flat
+          let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheWrite = 0;
+
+          if (typeof usage === "object" && !Array.isArray(usage)) {
+            // Check if it's a flat usage object or per-model
+            if (usage.input_tokens != null || usage.inputTokens != null) {
+              inputTokens = usage.input_tokens ?? usage.inputTokens ?? 0;
+              outputTokens = usage.output_tokens ?? usage.outputTokens ?? 0;
+              cacheRead = usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0;
+              cacheWrite = usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0;
+            } else {
+              // Per-model usage: { "claude-...": { inputTokens, ... } }
+              for (const [, modelUsage] of Object.entries(usage)) {
+                if (typeof modelUsage === "object") {
+                  inputTokens += modelUsage.inputTokens ?? 0;
+                  outputTokens += modelUsage.outputTokens ?? 0;
+                  cacheRead += modelUsage.cacheReadInputTokens ?? 0;
+                  cacheWrite += modelUsage.cacheCreationInputTokens ?? 0;
+                }
+              }
+            }
+          }
+
           emit({
             type: "usage",
-            inputTokens: message.usage.input_tokens ?? 0,
-            outputTokens: message.usage.output_tokens ?? 0,
-            cacheRead: message.usage.cache_read_input_tokens ?? message.usage.cache_read_tokens ?? 0,
-            cacheWrite: message.usage.cache_creation_input_tokens ?? message.usage.cache_write_tokens ?? 0,
-            costUsd: message.cost_usd ?? message.total_cost_usd ?? 0,
-            model: message.model ?? model ?? "unknown",
+            inputTokens,
+            outputTokens,
+            cacheRead,
+            cacheWrite,
+            costUsd,
+            model: modelName,
           });
         }
 
@@ -181,17 +248,53 @@ async function handleQuery(cmd) {
       // ── streaming content messages ──
       // The SDK yields various message shapes. We normalise them to our protocol.
 
-      const msgType = message.type;
-
       // stream_event wrapping Anthropic API SSE events
       if (msgType === "stream_event" && message.event) {
         handleStreamEvent(message.event);
         continue;
       }
 
-      // assistant message snapshots (full content)
+      // assistant message — extract content blocks
       if (msgType === "assistant" && message.message?.content) {
-        // We prefer stream_event deltas; skip snapshot processing.
+        for (const block of message.message.content) {
+          if (block.type === "text" && block.text) {
+            emit({ type: "text_delta", text: block.text });
+          } else if (block.type === "tool_use") {
+            emit({
+              type: "tool_use_start",
+              toolId: block.id ?? "",
+              toolName: block.name ?? "tool",
+            });
+            if (block.input) {
+              emit({
+                type: "tool_use_input",
+                toolId: block.id ?? "",
+                inputJson: JSON.stringify(block.input),
+              });
+            }
+          } else if (block.type === "thinking" && block.thinking) {
+            emit({ type: "thinking_delta", text: block.thinking });
+          }
+        }
+        continue;
+      }
+
+      // user message — contains tool results
+      if (msgType === "user" && message.message?.content) {
+        for (const block of message.message.content) {
+          if (block.type === "tool_result") {
+            const content = typeof block.content === "string"
+              ? block.content
+              : JSON.stringify(block.content);
+            emit({
+              type: "tool_result",
+              toolId: block.tool_use_id ?? "",
+              toolName: "",
+              content,
+              isError: !!block.is_error,
+            });
+          }
+        }
         continue;
       }
 

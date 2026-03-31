@@ -257,7 +257,7 @@ if (!document.getElementById("tab-bar-styles")) {
       flex-shrink: 0;
       touch-action: none;
     }
-    .tab:active { cursor: grabbing; }
+    .tab:active { cursor: grabbing; will-change: transform; }
     .tab:hover { background: var(--bg-hover); color: var(--text-secondary); }
     .tab.active {
       background: var(--bg-base);
@@ -266,7 +266,7 @@ if (!document.getElementById("tab-bar-styles")) {
       border-bottom: 1px solid var(--bg-base);
       margin-bottom: -1px;
     }
-    .tab.dragging { opacity: 0.4; }
+    .tab.dragging { opacity: 0.4; will-change: transform; }
     .tab-label {
       overflow: hidden;
       text-overflow: ellipsis;

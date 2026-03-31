@@ -1,9 +1,8 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show } from "solid-js";
 import type { Project } from "../../types";
 import { appStore } from "../../stores/app-store";
 import { ThreadItem } from "./ThreadItem";
 import { useSortable } from "@dnd-kit/solid/sortable";
-import * as ipc from "../../ipc";
 
 function SortableThread(props: { thread: any; index: number; isUncategorized: boolean; groupColor: string | null; prNumber?: number; hasWorktree?: boolean }) {
   const sortable = useSortable({
@@ -27,41 +26,18 @@ function SortableThread(props: { thread: any; index: number; isUncategorized: bo
 }
 
 export function ProjectGroup(props: { project: Project }) {
-  const { store, setStore, newThread } = appStore;
+  const { store, setStore, newThread, loadProjectGitStatus } = appStore;
 
   const isUncategorized = () => props.project.path === ".";
 
-  // Git detection — stored as local signals, NOT affecting the <For> loop.
-  // These only affect the header icon and props passed to threads.
-  const [gitStatus, setGitStatus] = createSignal<"none" | "git" | "github">("none");
-  const [prMap, setPrMap] = createSignal<Record<string, number>>({});
+  // Git detection — cached in store to avoid re-fetching on every mount
+  const gitStatus = () => store.projectGitStatus[props.project.id] || "none";
+  const prMap = () => store.projectPrMap[props.project.id] || {};
 
-  // Run git check ONCE via setTimeout to avoid disrupting initial render/click handlers
+  // Load git status once, results cached in store across re-mounts
   if (props.project.path !== ".") {
-    setTimeout(async () => {
-      try {
-        const isGh = await ipc.isGithubRepo(props.project.path);
-        if (isGh) {
-          setGitStatus("github");
-        } else {
-          try {
-            await ipc.getChangedFiles(props.project.path);
-            setGitStatus("git");
-          } catch { /* not a git repo */ }
-        }
-      } catch { /* gh not installed or error */ }
-
-      // Load PR associations if git
-      if (gitStatus() !== "none") {
-        const map: Record<string, number> = {};
-        for (const t of props.project.threads) {
-          try {
-            const val = await ipc.getSetting(`pr:${t.id}`);
-            if (val) map[t.id] = parseInt(val, 10);
-          } catch {}
-        }
-        if (Object.keys(map).length > 0) setPrMap(map);
-      }
+    setTimeout(() => {
+      loadProjectGitStatus(props.project.id, props.project.path, props.project.threads);
     }, 600);
   }
 
@@ -103,7 +79,7 @@ export function ProjectGroup(props: { project: Project }) {
         <button class="project-add" onClick={(e) => { e.stopPropagation(); newThread(props.project.id); }}>+</button>
       </div>
 
-      <Show when={!props.project.collapsed}>
+      <div class="project-threads-wrapper" classList={{ collapsed: !!props.project.collapsed }}>
         <div class="project-threads">
           <For each={props.project.threads}>
             {(thread, idx) => (
@@ -118,7 +94,7 @@ export function ProjectGroup(props: { project: Project }) {
             )}
           </For>
         </div>
-      </Show>
+      </div>
     </div>
   );
 }
@@ -143,12 +119,15 @@ if (!document.getElementById("project-group-styles")) {
       border-radius: var(--radius-sm); transition: background 0.15s;
     }
     .project-add:hover { background: var(--bg-accent); }
-    @keyframes threads-expand {
-      from { opacity: 0; max-height: 0; transform: translateY(-4px); }
-      to { opacity: 1; max-height: 2000px; transform: translateY(0); }
+    .project-threads-wrapper {
+      display: grid;
+      grid-template-rows: 1fr;
+      transition: grid-template-rows 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .project-threads-wrapper.collapsed {
+      grid-template-rows: 0fr;
     }
     .project-threads {
-      animation: threads-expand 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
       overflow: hidden;
     }
   `;

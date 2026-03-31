@@ -311,6 +311,35 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> anyhow::Result<
     Ok(())
 }
 
+pub fn get_settings_batch(
+    conn: &Connection,
+    keys: &[String],
+) -> anyhow::Result<std::collections::HashMap<String, String>> {
+    if keys.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    // Build a parameterized IN clause
+    let placeholders: Vec<String> = (1..=keys.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "SELECT key, value FROM settings WHERE key IN ({})",
+        placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<&dyn rusqlite::types::ToSql> =
+        keys.iter().map(|k| k as &dyn rusqlite::types::ToSql).collect();
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut map = std::collections::HashMap::new();
+    for row in rows {
+        let (key, value) = row?;
+        if let Some(v) = value {
+            map.insert(key, v);
+        }
+    }
+    Ok(map)
+}
+
 pub fn delete_setting(conn: &Connection, key: &str) -> anyhow::Result<()> {
     conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
     Ok(())

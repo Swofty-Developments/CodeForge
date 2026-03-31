@@ -39,20 +39,21 @@ pub async fn send_message(
         };
         let cwd_path = PathBuf::from(&cwd);
 
-        // Resolve permission mode
-        let perm_mode = permission_mode.or_else(|| {
-            state.db.lock().ok().and_then(|db| {
-                codeforge_persistence::queries::get_setting(db.conn(), "permission_mode").ok().flatten()
-            })
-        });
-
-        // Check if there's a previous Claude session we can resume
-        let previous_claude_session_id = if prov == Provider::ClaudeCode {
+        // Batch DB reads: permission_mode + claude_session_id in one lock
+        let (perm_mode, previous_claude_session_id) = {
             let db = state.db.lock().map_err(|e| e.to_string())?;
-            codeforge_persistence::queries::get_latest_claude_session_id(db.conn(), tid)
-                .unwrap_or(None)
-        } else {
-            None
+            let pm = permission_mode.or_else(|| {
+                codeforge_persistence::queries::get_setting(db.conn(), "permission_mode")
+                    .ok()
+                    .flatten()
+            });
+            let csid = if prov == Provider::ClaudeCode {
+                codeforge_persistence::queries::get_latest_claude_session_id(db.conn(), tid)
+                    .unwrap_or(None)
+            } else {
+                None
+            };
+            (pm, csid)
         };
 
         let mut mgr = state.session_manager.lock().await;

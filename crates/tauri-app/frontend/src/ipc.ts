@@ -74,6 +74,9 @@ export const respondToApproval = (
 export const getSetting = (key: string) =>
   invoke<string | null>("get_setting", { key });
 
+export const getSettingsBatch = (keys: string[]) =>
+  invoke<Record<string, string>>("get_settings_batch", { keys });
+
 export const setSetting = (key: string, value: string) =>
   invoke("set_setting", { key, value });
 
