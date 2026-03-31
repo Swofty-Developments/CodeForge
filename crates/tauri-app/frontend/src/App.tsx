@@ -40,6 +40,7 @@ export function App() {
   const [draggingDivider, setDraggingDivider] = createSignal(false);
   const [isVertical, setIsVertical] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
+  let chatPercentRef = 60;
 
   // Whether active thread is in a git-activated project
   const isGitProject = () => {
@@ -102,10 +103,16 @@ export function App() {
       } else {
         pct = ((ev.clientX - rect.left) / rect.width) * 100;
       }
-      setChatPercent(Math.min(Math.max(pct, 25), 80));
+      pct = Math.min(Math.max(pct, 25), 80);
+      // Set CSS custom property directly — bypasses SolidJS reactivity for smooth drag
+      bodyRef.style.setProperty("--chat-pct", `${pct}%`);
+      bodyRef.style.setProperty("--side-pct", `${100 - pct}%`);
+      chatPercentRef = pct;
     };
     const onUp = () => {
       setDraggingDivider(false);
+      // Sync back to signal for persistence
+      setChatPercent(chatPercentRef);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";
@@ -156,16 +163,18 @@ export function App() {
 
   const chatStyle = () => {
     if (!hasSidePane()) return {};
+    const pct = `var(--chat-pct, ${chatPercent()}%)`;
     return isVertical()
-      ? { height: `${chatPercent()}%`, "min-height": "120px" }
-      : { width: `${chatPercent()}%`, "min-width": "200px" };
+      ? { height: pct, "min-height": "120px" }
+      : { width: pct, "min-width": "200px" };
   };
 
   const sideStyle = () => {
     if (!hasSidePane()) return {};
+    const pct = `var(--side-pct, ${100 - chatPercent()}%)`;
     return isVertical()
-      ? { height: `${100 - chatPercent()}%`, "min-height": "120px" }
-      : { width: `${100 - chatPercent()}%`, "min-width": "200px" };
+      ? { height: pct, "min-height": "120px" }
+      : { width: pct, "min-width": "200px" };
   };
 
   return (
@@ -268,6 +277,15 @@ export function App() {
         }
         .main-panel-body.dragging {
           user-select: none;
+          cursor: col-resize;
+        }
+        .main-panel-body.dragging.vertical {
+          cursor: row-resize;
+        }
+        .main-panel-body.dragging .main-panel-chat,
+        .main-panel-body.dragging .main-panel-side {
+          pointer-events: none;
+          will-change: width, height;
         }
         .main-panel-chat {
           display: flex;
