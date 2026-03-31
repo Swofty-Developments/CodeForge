@@ -25,7 +25,7 @@ function dirPath(path: string): string {
   return parts.slice(0, -1).join("/") + "/";
 }
 
-export function DiffEditor(props: { cwd: string }) {
+export function DiffEditor(props: { cwd: string; prNumber?: number | null }) {
   const { setStore } = appStore;
   const [files, setFiles] = createSignal<ChangedFile[]>([]);
   const [diffs, setDiffs] = createSignal<FileDiff[]>([]);
@@ -44,6 +44,7 @@ export function DiffEditor(props: { cwd: string }) {
 
   async function loadAll() {
     const cwd = props.cwd;
+    const prNum = props.prNumber;
     if (!cwd || cwd === ".") {
       setFiles([]);
       setDiffs([]);
@@ -51,8 +52,10 @@ export function DiffEditor(props: { cwd: string }) {
       return;
     }
 
+    const cacheKey = prNum ? `pr:${prNum}:${cwd}` : cwd;
+
     // Check cache first
-    const cached = diffCache.get(cwd);
+    const cached = diffCache.get(cacheKey);
     if (cached) {
       setFiles(cached.files);
       setDiffs(cached.diffs);
@@ -63,24 +66,34 @@ export function DiffEditor(props: { cwd: string }) {
 
     setLoading(true);
     setError(null);
-    // Clear old data immediately for clean transition
     setFiles([]);
     setDiffs([]);
     setSelectedFile(null);
 
     try {
-      const [changedFiles, sessionDiffs] = await Promise.all([
-        ipc.getChangedFiles(cwd),
-        ipc.getSessionDiff(cwd),
-      ]);
-      // Only update if cwd hasn't changed while we were fetching
+      let changedFiles: any[];
+      let sessionDiffs: any[];
+
+      if (prNum) {
+        // PR mode: fetch PR diff instead of working directory diff
+        const prDiffRaw = await ipc.getPrDiff(cwd, prNum);
+        // Parse the raw diff into our FileDiff format
+        const parsed = parsePrDiff(prDiffRaw);
+        changedFiles = parsed.files;
+        sessionDiffs = parsed.diffs;
+      } else {
+        [changedFiles, sessionDiffs] = await Promise.all([
+          ipc.getChangedFiles(cwd),
+          ipc.getSessionDiff(cwd),
+        ]);
+      }
+
       if (props.cwd === cwd) {
         setFiles(changedFiles);
         setDiffs(sessionDiffs);
         if (changedFiles.length > 0) setSelectedFile(changedFiles[0].path);
-        // Cache for 30 seconds
-        diffCache.set(cwd, { files: changedFiles, diffs: sessionDiffs });
-        setTimeout(() => diffCache.delete(cwd), 30000);
+        diffCache.set(cacheKey, { files: changedFiles, diffs: sessionDiffs });
+        setTimeout(() => diffCache.delete(cacheKey), 30000);
       }
     } catch (e) {
       if (props.cwd === cwd) setError(String(e));
@@ -89,9 +102,49 @@ export function DiffEditor(props: { cwd: string }) {
     }
   }
 
-  // Reload when cwd changes (thread switch)
+  /** Parse raw unified diff text into ChangedFile[] and FileDiff[] */
+  function parsePrDiff(raw: string): { files: any[]; diffs: any[] } {
+    const files: any[] = [];
+    const diffs: any[] = [];
+    if (!raw) return { files, diffs };
+
+    const fileSections = raw.split(/^diff --git /m).filter(Boolean);
+    for (const section of fileSections) {
+      const lines = section.split("\n");
+      // Extract file path from "a/path b/path"
+      const headerMatch = lines[0]?.match(/a\/(.+?) b\/(.+)/);
+      const path = headerMatch ? headerMatch[2] : "unknown";
+
+      let insertions = 0, deletions = 0;
+      const hunkLines: any[] = [];
+      let hunkHeader = "";
+
+      for (const line of lines.slice(1)) {
+        if (line.startsWith("@@")) {
+          hunkHeader = line;
+        } else if (line.startsWith("+") && !line.startsWith("+++")) {
+          insertions++;
+          hunkLines.push({ line_type: "add", content: line.slice(1), old_line: null, new_line: null });
+        } else if (line.startsWith("-") && !line.startsWith("---")) {
+          deletions++;
+          hunkLines.push({ line_type: "delete", content: line.slice(1), old_line: null, new_line: null });
+        } else if (!line.startsWith("\\") && !line.startsWith("index") && !line.startsWith("---") && !line.startsWith("+++") && !line.startsWith("new") && !line.startsWith("old") && !line.startsWith("deleted") && !line.startsWith("similarity")) {
+          hunkLines.push({ line_type: "context", content: line.startsWith(" ") ? line.slice(1) : line, old_line: null, new_line: null });
+        }
+      }
+
+      const status = deletions > 0 && insertions > 0 ? "modified" : insertions > 0 ? "added" : "deleted";
+      files.push({ path, status, insertions, deletions });
+      diffs.push({ path, hunks: [{ header: hunkHeader, lines: hunkLines }] });
+    }
+
+    return { files, diffs };
+  }
+
+  // Reload when cwd or prNumber changes (thread switch)
   createEffect(() => {
-    const _ = props.cwd; // track reactive prop
+    const _ = props.cwd;
+    const _pr = props.prNumber;
     loadAll();
   });
 
@@ -130,7 +183,7 @@ export function DiffEditor(props: { cwd: string }) {
             <svg class="de-header-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 3v18" /><path d="M3 12h18" />
             </svg>
-            <h3>Changes</h3>
+            <h3>{props.prNumber ? `PR #${props.prNumber}` : "Changes"}</h3>
             <Show when={!loading() && files().length > 0}>
               <span class="de-stat-summary">
                 <span class="de-stat-files">{files().length} file{files().length !== 1 ? "s" : ""}</span>

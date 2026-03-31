@@ -13,6 +13,23 @@ export function PrDashboard(props: Props) {
   const [prs, setPrs] = createSignal<PullRequest[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [filter, setFilter] = createSignal<"open" | "closed" | "all">("open");
+  const [search, setSearch] = createSignal("");
+  const [visibleCount, setVisibleCount] = createSignal(10);
+
+  const filteredPrs = () => {
+    const q = search().toLowerCase();
+    if (!q) return prs();
+    return prs().filter((pr) =>
+      pr.title.toLowerCase().includes(q) ||
+      pr.author.toLowerCase().includes(q) ||
+      pr.branch.toLowerCase().includes(q) ||
+      String(pr.number).includes(q) ||
+      pr.labels.some((l) => l.toLowerCase().includes(q))
+    );
+  };
+
+  const visiblePrs = () => filteredPrs().slice(0, visibleCount());
+  const hasMore = () => filteredPrs().length > visibleCount();
 
   // Reload when repoPath changes (thread/project switch)
   createEffect(() => {
@@ -125,16 +142,25 @@ export function PrDashboard(props: Props) {
         </button>
       </div>
 
+      <Show when={prs().length > 5}>
+        <input
+          class="prd-search"
+          placeholder="Search PRs by title, author, branch, #number…"
+          value={search()}
+          onInput={(e) => { setSearch(e.currentTarget.value); setVisibleCount(10); }}
+        />
+      </Show>
+
       <Show when={loading()}>
         <div class="prd-loading">Loading pull requests…</div>
       </Show>
 
-      <Show when={!loading() && prs().length === 0}>
-        <div class="prd-empty">No {filter()} pull requests</div>
+      <Show when={!loading() && filteredPrs().length === 0}>
+        <div class="prd-empty">{search() ? `No PRs matching "${search()}"` : `No ${filter()} pull requests`}</div>
       </Show>
 
       <div class="prd-list">
-        <For each={prs()}>
+        <For each={visiblePrs()}>
           {(pr) => {
             const badge = reviewBadge(pr.review_status);
             return (
@@ -177,6 +203,14 @@ export function PrDashboard(props: Props) {
             );
           }}
         </For>
+        <Show when={hasMore()}>
+          <button class="prd-show-more" onClick={() => setVisibleCount((c) => c + 10)}>
+            Show {Math.min(10, filteredPrs().length - visibleCount())} more of {filteredPrs().length} PRs
+          </button>
+        </Show>
+        <Show when={filteredPrs().length > 0}>
+          <div class="prd-count">{filteredPrs().length} PR{filteredPrs().length !== 1 ? "s" : ""}{search() ? ` matching "${search()}"` : ""}</div>
+        </Show>
       </div>
     </div>
   );
@@ -234,6 +268,39 @@ if (!document.getElementById("prd-styles")) {
       transition: color 0.1s, background 0.1s;
     }
     .prd-refresh:hover { color: var(--text-secondary); background: var(--bg-hover); }
+    .prd-search {
+      width: 100%;
+      padding: 7px 10px;
+      font-size: 12px;
+      background: var(--bg-muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: var(--font-body);
+      outline: none;
+      margin-bottom: 10px;
+    }
+    .prd-search:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-glow); }
+    .prd-search::placeholder { color: var(--text-tertiary); }
+    .prd-show-more {
+      width: 100%;
+      padding: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--primary);
+      background: rgba(107, 124, 255, 0.06);
+      border: 1px solid rgba(107, 124, 255, 0.12);
+      border-radius: var(--radius-sm);
+      margin-top: 6px;
+      transition: all 0.12s;
+    }
+    .prd-show-more:hover { background: rgba(107, 124, 255, 0.1); border-color: rgba(107, 124, 255, 0.2); }
+    .prd-count {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      text-align: center;
+      margin-top: 8px;
+    }
     .prd-loading, .prd-empty {
       font-size: 12px;
       color: var(--text-tertiary);

@@ -49,6 +49,16 @@ export function App() {
     return project ? project.path !== "." : false;
   };
 
+  // Check if active thread is linked to a PR
+  const activePrNumber = (): number | null => {
+    const tab = store.activeTab;
+    if (!tab) return null;
+    const project = store.projects.find((p) => p.threads.some((t) => t.id === tab));
+    if (!project) return null;
+    const prMap = store.projectPrMap[project.id];
+    return prMap?.[tab] ?? null;
+  };
+
   // Compute diff cwd reactively based on active thread
   const diffCwd = () => {
     const tab = store.activeTab;
@@ -195,7 +205,7 @@ export function App() {
                     <BrowserPanel threadId={store.activeTab!} />
                   </Show>
                   <Show when={store.diffPanelOpen && diffCwd()}>
-                    <DiffEditor cwd={diffCwd()} />
+                    <DiffEditor cwd={diffCwd()} prNumber={activePrNumber()} />
                   </Show>
                 </div>
               </Show>
