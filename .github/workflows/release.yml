@@ -61,9 +61,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "Setting version to $VERSION"
-          # Update workspace Cargo.toml
           sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
-          # Update each crate's Cargo.toml
           for f in crates/*/Cargo.toml; do
             sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$f" 2>/dev/null || true
           done
@@ -73,56 +71,26 @@ jobs:
         working-directory: crates/tauri-app/frontend
         run: npm ci --ignore-scripts || npm install
 
+      - name: Install agent sidecar dependencies
+        working-directory: crates/tauri-app/agent-sidecar
+        run: npm ci --ignore-scripts || npm install
+
       - name: Build frontend
         working-directory: crates/tauri-app/frontend
         run: npm run build
 
       - name: Build Tauri app
-        working-directory: crates/tauri-app
-        run: npx @tauri-apps/cli build --target ${{ matrix.target }}
+        uses: tauri-apps/tauri-action@v0
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-
-      - name: Upload artifacts (macOS)
-        if: startsWith(matrix.platform, 'macos')
-        uses: actions/upload-artifact@v4
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: CodeForge-${{ matrix.label }}
-          path: |
-            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            target/${{ matrix.target }}/release/bundle/macos/*.app
-
-      - name: Upload artifacts (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
-        with:
-          name: CodeForge-${{ matrix.label }}
-          path: |
-            target/${{ matrix.target }}/release/bundle/deb/*.deb
-            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-
-      - name: Upload artifacts (Windows)
-        if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: CodeForge-${{ matrix.label }}
-          path: |
-            target/${{ matrix.target }}/release/bundle/msi/*.msi
-            target/${{ matrix.target }}/release/bundle/nsis/*.exe
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          generate_release_notes: true
-          files: artifacts/**/*
+          projectPath: crates/tauri-app
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: ""
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true

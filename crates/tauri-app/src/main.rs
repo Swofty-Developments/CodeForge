@@ -38,9 +38,17 @@ fn main() {
         thread_sessions: tokio::sync::Mutex::new(HashMap::new()),
     };
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_process::init());
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .manage(tauri_state)
         .invoke_handler(tauri::generate_handler![
             commands::projects::get_all_projects,

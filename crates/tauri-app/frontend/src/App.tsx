@@ -16,6 +16,7 @@ import { ThemeSelector } from "./components/settings/ThemeSelector";
 import { SplitView } from "./components/shared/SplitView";
 import { BrowserPanel } from "./components/browser/BrowserPanel";
 import { DiffEditor } from "./components/diff/DiffEditor";
+import { UpdateChecker } from "./components/shared/UpdateChecker";
 import * as ipc from "./ipc";
 
 export function App() {
@@ -277,6 +278,8 @@ export function App() {
       <Show when={showWelcome()}>
         <WelcomeScreen onDismiss={() => setShowWelcome(false)} />
       </Show>
+
+      <UpdateChecker />
 
       <style>{`
         .error-boundary {
