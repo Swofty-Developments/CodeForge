@@ -3,10 +3,15 @@
 //! Provides the data structures for plugin manifests, lifecycle hooks,
 //! MCP server configuration, skill definitions, and marketplace interaction.
 
+pub mod api;
+pub mod config;
 pub mod hook;
+pub mod loader;
 pub mod marketplace;
 pub mod mcp;
 pub mod manifest;
+pub mod registry;
+pub mod sandbox;
 pub mod skill;
 
 pub use hook::{Hook, HookContext, HookHandler, HookResult};

@@ -3,13 +3,21 @@
 //! Provides types and traits for interacting with git repositories,
 //! branches, commits, diffs, worktrees, remotes, and merge conflicts.
 
+pub mod blame;
 pub mod branch;
 pub mod commit;
+pub mod config;
 pub mod conflict;
 pub mod diff;
 pub mod error;
+pub mod hook;
+pub mod ignore;
+pub mod log;
 pub mod remote;
 pub mod repository;
+pub mod stash;
+pub mod submodule;
+pub mod tag;
 pub mod worktree;
 
 pub use branch::{Branch, BranchManager};

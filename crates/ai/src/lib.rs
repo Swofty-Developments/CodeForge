@@ -4,10 +4,16 @@
 //! backends, managing conversation messages, tool definitions, context
 //! windows, cost tracking, and streaming responses.
 
+pub mod agent;
+pub mod cache;
 pub mod context;
 pub mod cost;
+pub mod eval;
 pub mod message;
+pub mod prompt;
+pub mod retry;
 pub mod streaming;
+pub mod token;
 pub mod tool;
 
 // The provider module uses trait_variant which requires the crate.

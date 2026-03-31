@@ -4,10 +4,16 @@
 //! all CodeForge components — configuration, error handling, event types,
 //! model definitions, and workspace management.
 
+pub mod color;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod id;
+pub mod keyboard;
+pub mod layout;
 pub mod model;
+pub mod time;
+pub mod version;
 pub mod workspace;
 
 pub use config::CodeForgeConfig;
