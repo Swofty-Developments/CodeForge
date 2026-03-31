@@ -51,6 +51,10 @@ let currentAbort = null;
 // Counter for generating unique approval request IDs.
 let approvalCounter = 0;
 
+// Track whether we've completed at least one query (for continue support).
+let hasCompletedQuery = false;
+let lastSessionId = null;
+
 // ── Stdin reader ─────────────────────────────────────────────────────────────
 
 const rl = createInterface({ input: process.stdin, terminal: false });
@@ -131,9 +135,13 @@ async function handleQuery(cmd) {
 
   if (model) options.model = model;
 
-  // Resume support: pass the previous session ID.
-  if (sessionId) {
+  // Session continuity:
+  // - If we have a sessionId from a previous app launch, resume it
+  // - If we already completed a query in this sidecar process, continue it
+  if (sessionId && !hasCompletedQuery) {
     options.resume = sessionId;
+  } else if (hasCompletedQuery) {
+    options.continue = true;
   }
 
   // canUseTool callback — sends approval requests to Rust, waits for response
@@ -240,6 +248,8 @@ async function handleQuery(cmd) {
           });
         }
 
+        hasCompletedQuery = true;
+        lastSessionId = capturedSessionId;
         emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
         turnEmitted = true;
         continue;
@@ -316,6 +326,8 @@ async function handleQuery(cmd) {
 
     // Make sure we always emit turn_completed so the Rust side knows we're done.
     if (!turnEmitted) {
+      hasCompletedQuery = true;
+      lastSessionId = capturedSessionId;
       emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
     }
   }
