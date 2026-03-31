@@ -63,12 +63,9 @@ jobs:
         working-directory: crates/tauri-app/frontend
         run: npm run build
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli
-
       - name: Build Tauri app
         working-directory: crates/tauri-app
-        run: cargo tauri build --target ${{ matrix.target }}
+        run: npx @tauri-apps/cli build --target ${{ matrix.target }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
 
