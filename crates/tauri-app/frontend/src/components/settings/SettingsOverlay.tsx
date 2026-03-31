@@ -2,27 +2,17 @@ import { createSignal, onMount, For } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 
-const PERMISSION_MODES = [
-  { value: "auto", label: "Auto", description: "AI decides when to ask (recommended)" },
-  { value: "acceptEdits", label: "Accept Edits", description: "Auto-approve file operations" },
-  { value: "bypassPermissions", label: "Bypass All", description: "Auto-approve everything" },
-  { value: "plan", label: "Plan Mode", description: "Only plans, doesn't execute" },
-  { value: "default", label: "Default", description: "Ask for everything (requires TTY, may hang)" },
-] as const;
 
 export function SettingsOverlay() {
   const { store, setStore } = appStore;
   const [claudePath, setClaudePath] = createSignal("claude");
   const [codexPath, setCodexPath] = createSignal("codex");
-  const [permissionMode, setPermissionMode] = createSignal("bypassPermissions");
 
   onMount(async () => {
     const cp = await ipc.getSetting("claude_path");
     const cx = await ipc.getSetting("codex_path");
-    const pm = await ipc.getSetting("permission_mode");
     if (cp) setClaudePath(cp);
     if (cx) setCodexPath(cx);
-    if (pm) setPermissionMode(pm);
   });
 
   function close() {
@@ -59,27 +49,6 @@ export function SettingsOverlay() {
           />
         </div>
 
-        <div class="settings-section">
-          <label>Permission Mode</label>
-          <div class="settings-perm-list">
-            <For each={PERMISSION_MODES}>
-              {(mode) => (
-                <button
-                  class="settings-perm-option"
-                  classList={{ "settings-perm-option--active": permissionMode() === mode.value }}
-                  onClick={() => {
-                    setPermissionMode(mode.value);
-                    ipc.setSetting("permission_mode", mode.value);
-                  }}
-                >
-                  <span class="settings-perm-label">{mode.label}</span>
-                  <span class="settings-perm-desc">{mode.description}</span>
-                </button>
-              )}
-            </For>
-          </div>
-          <span class="settings-hint">Takes effect on next session.</span>
-        </div>
 
         <div class="settings-section">
           <label>Auto-name Threads</label>
@@ -147,38 +116,6 @@ export function SettingsOverlay() {
           width: 100%;
           font-family: var(--font-mono);
           font-size: 12px;
-        }
-        .settings-perm-list {
-          display: flex;
-          flex-direction: column;
-          gap: 3px;
-          background: var(--bg-muted);
-          border-radius: var(--radius-md);
-          padding: 3px;
-        }
-        .settings-perm-option {
-          display: flex;
-          flex-direction: column;
-          gap: 1px;
-          padding: 7px 10px;
-          border-radius: var(--radius-sm);
-          text-align: left;
-          transition: background 0.1s;
-        }
-        .settings-perm-option:hover { background: var(--bg-hover); }
-        .settings-perm-option--active {
-          background: var(--bg-accent);
-          box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-        }
-        .settings-perm-label {
-          font-size: 12px;
-          font-weight: 600;
-          color: var(--text);
-        }
-        .settings-perm-option--active .settings-perm-label { color: var(--primary); }
-        .settings-perm-desc {
-          font-size: 10px;
-          color: var(--text-tertiary);
         }
         .settings-hint {
           display: block;
