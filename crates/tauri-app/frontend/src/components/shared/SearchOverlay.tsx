@@ -10,7 +10,7 @@ interface GroupedResults {
   messages: SearchResult[];
 }
 
-export function SearchOverlay() {
+export function SearchOverlay(props?: { inline?: boolean }) {
   const { store, setStore } = appStore;
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<SearchResult[]>([]);
@@ -102,10 +102,8 @@ export function SearchOverlay() {
     );
   }
 
-  return (
-    <Show when={store.searchOpen}>
-      <div class="search-backdrop" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-        <div class="search-panel">
+  const searchContent = (
+        <div class={props?.inline ? "search-panel-inline" : "search-panel"}>
           <div class="search-input-row">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -161,6 +159,14 @@ export function SearchOverlay() {
             </Show>
           </div>
         </div>
+  );
+
+  if (props?.inline) return searchContent;
+
+  return (
+    <Show when={store.searchOpen}>
+      <div class="search-backdrop" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+        {searchContent}
       </div>
     </Show>
   );
@@ -170,6 +176,12 @@ if (!document.getElementById("search-overlay-styles")) {
   const style = document.createElement("style");
   style.id = "search-overlay-styles";
   style.textContent = `
+    .search-panel-inline {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 24px;
+      width: 100%;
+    }
     .search-backdrop {
       position: fixed;
       inset: 0;

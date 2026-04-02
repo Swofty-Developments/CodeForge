@@ -155,7 +155,7 @@ export function App() {
     }
     if (mod && e.shiftKey && key === "f") {
       e.preventDefault();
-      setStore("searchOpen", !store.searchOpen);
+      appStore.openVirtualTab("__search__");
     }
     if (mod && key === "\\") {
       e.preventDefault();

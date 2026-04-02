@@ -73,6 +73,7 @@ function SortableTab(props: { tabId: string; index: number }) {
       <span class="tab-label">{
         props.tabId === "__mcp__" ? "MCP Servers" :
         props.tabId === "__themes__" ? "Themes" :
+        props.tabId === "__search__" ? "Search" :
         props.tabId === "__settings__" ? "Settings" :
         thread()?.title || "..."
       }</span>

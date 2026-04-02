@@ -7,6 +7,7 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { ThreadSetup } from "./ThreadSetup";
 import { McpPanel } from "../sidebar/McpPanel";
 import { ThemeSelector } from "../settings/ThemeSelector";
+import { SearchOverlay } from "../shared/SearchOverlay";
 import type { ContentBlock } from "../../types";
 
 export function ChatArea() {
@@ -161,6 +162,11 @@ export function ChatArea() {
       <Show when={store.activeTab === "__themes__"}>
         <div class="virtual-tab-content">
           <ThemeSelector inline />
+        </div>
+      </Show>
+      <Show when={store.activeTab === "__search__"}>
+        <div class="virtual-tab-content">
+          <SearchOverlay inline />
         </div>
       </Show>
 
