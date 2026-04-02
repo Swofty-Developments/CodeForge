@@ -231,6 +231,12 @@ async function handleQuery(cmd) {
           }
           const confirmedModel = message.model || model || null;
           emit({ type: "session_ready", sessionId: message.session_id, model: confirmedModel });
+
+          // Emit available slash commands from the init message
+          const slashCmds = message.slash_commands || message.skills || [];
+          if (slashCmds.length > 0) {
+            emit({ type: "slash_commands", commands: slashCmds });
+          }
         }
         continue;
       }

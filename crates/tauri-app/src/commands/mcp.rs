@@ -261,30 +261,39 @@ fn parse_mcp_list(output: &str) -> Vec<McpServer> {
 /// Parse `claude plugin list` output to extract skill-based slash commands.
 fn parse_plugin_skills(output: &str) -> Vec<SlashCommand> {
     let mut commands = Vec::new();
+    let mut current_name = String::new();
+    let mut current_enabled = true;
 
     for line in output.lines() {
-        let line = line.trim();
-        // Look for lines like "- skill-name@marketplace (enabled)"
-        if line.starts_with('-') || line.starts_with('•') {
-            let clean = line.trim_start_matches(['-', '•', ' '].as_ref()).trim();
-            if let Some((name_part, _)) = clean.split_once('@') {
-                let name = name_part.trim();
+        let trimmed = line.trim();
+
+        // Entry header: "❯ name@source"
+        if trimmed.starts_with('❯') || trimmed.starts_with('>') {
+            // Save previous
+            if !current_name.is_empty() && current_enabled {
+                // Extract skill name (before @)
+                let skill_name = current_name.split('@').next().unwrap_or(&current_name);
                 commands.push(SlashCommand {
-                    name: format!("/{name}"),
-                    description: format!("Plugin skill: {name}"),
+                    name: format!("/{skill_name}"),
+                    description: format!("Plugin: {}", current_name),
                     source: "plugin".to_string(),
                 });
-            } else if let Some((name_part, _)) = clean.split_once(' ') {
-                let name = name_part.trim();
-                if !name.is_empty() {
-                    commands.push(SlashCommand {
-                        name: format!("/{name}"),
-                        description: "Plugin skill".to_string(),
-                        source: "plugin".to_string(),
-                    });
-                }
             }
+            current_name = trimmed.trim_start_matches('❯').trim_start_matches('>').trim().to_string();
+            current_enabled = true;
+        } else if trimmed.starts_with("Status:") {
+            current_enabled = trimmed.contains("enabled") || trimmed.contains("✔");
         }
+    }
+
+    // Last entry
+    if !current_name.is_empty() && current_enabled {
+        let skill_name = current_name.split('@').next().unwrap_or(&current_name);
+        commands.push(SlashCommand {
+            name: format!("/{skill_name}"),
+            description: format!("Plugin: {}", current_name),
+            source: "plugin".to_string(),
+        });
     }
 
     commands

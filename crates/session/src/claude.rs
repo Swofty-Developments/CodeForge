@@ -269,6 +269,11 @@ impl ClaudeSession {
                         }
                         vec![AgentEvent::SessionReady { claude_session_id: sid, model: confirmed_model }]
                     }
+                    "slash_commands" => {
+                        // Slash commands from the SDK init — we just log them,
+                        // the frontend loads them separately via list_slash_commands
+                        vec![]
+                    }
                     "turn_started" => {
                         vec![AgentEvent::TurnStarted { turn_id: "sidecar".to_string() }]
                     }
