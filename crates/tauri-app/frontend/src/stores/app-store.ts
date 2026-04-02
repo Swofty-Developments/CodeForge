@@ -60,6 +60,7 @@ export interface AppStore {
   projectPrMap: Record<string, Record<string, number>>;
   activeModel: string | null;
   unreadTabs: Record<string, boolean>;
+  availableSlashCommands: string[];
   recentlyClosedTabs: string[];
   keyboardHelpOpen: boolean;
 }
@@ -103,6 +104,7 @@ function createAppStore() {
     projectPrMap: {},
     activeModel: null,
     unreadTabs: {},
+    availableSlashCommands: [],
     recentlyClosedTabs: [],
     keyboardHelpOpen: false,
   });
@@ -721,12 +723,17 @@ function createAppStore() {
         }
         break;
       case "session_error": {
+        // Check if this is a slash_commands update (smuggled via session_error)
+        if (payload.message?.startsWith("slash_commands:")) {
+          const cmdList = payload.message.slice("slash_commands:".length).split(",").filter(Boolean);
+          setStore("availableSlashCommands", cmdList);
+          break;
+        }
         setStore("sessionStatuses", thread_id, "error");
         setStore("threadMessages", thread_id, (msgs) => [
           ...(msgs || []),
           { id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Error: ${payload.message}` },
         ]);
-        // Always notify on errors
         const errTitle = getThreadTitle(thread_id);
         sendNotification(`${errTitle} - Error`, payload.message || "Session error");
         break;

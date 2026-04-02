@@ -76,16 +76,32 @@ export function Composer() {
   const [slashFilter, setSlashFilter] = createSignal("");
   const [slashIndex, setSlashIndex] = createSignal(0);
 
-  // Load slash commands (and reload when provider changes)
+  // Load slash commands from IPC + merge SDK init commands from store
   createEffect(() => {
     const p = store.selectedProvider;
     ipc.listSlashCommands(p).then(setSlashCommands).catch(() => setSlashCommands([]));
   });
 
+  const allSlashCommands = () => {
+    const ipcCmds = slashCommands();
+    const sdkCmds = store.availableSlashCommands || [];
+    // Merge SDK commands that aren't already in the IPC list
+    const existing = new Set(ipcCmds.map((c) => c.name));
+    const merged = [...ipcCmds];
+    for (const cmd of sdkCmds) {
+      const name = cmd.startsWith("/") ? cmd : `/${cmd}`;
+      if (!existing.has(name)) {
+        merged.push({ name, description: `Skill: ${cmd}`, source: "sdk" });
+      }
+    }
+    return merged;
+  };
+
   const filteredSlash = () => {
     const q = slashFilter().toLowerCase();
-    if (!q) return slashCommands().slice(0, 12);
-    return slashCommands().filter((c) => c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)).slice(0, 12);
+    const cmds = allSlashCommands();
+    if (!q) return cmds.slice(0, 15);
+    return cmds.filter((c) => c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)).slice(0, 15);
   };
 
   function handleSlashSelect(cmd: SlashCommand) {

@@ -270,9 +270,20 @@ impl ClaudeSession {
                         vec![AgentEvent::SessionReady { claude_session_id: sid, model: confirmed_model }]
                     }
                     "slash_commands" => {
-                        // Slash commands from the SDK init — we just log them,
-                        // the frontend loads them separately via list_slash_commands
-                        vec![]
+                        // Forward slash commands from SDK init to frontend
+                        if let Some(cmds) = obj.get("commands").and_then(|c| c.as_array()) {
+                            let cmd_list: Vec<String> = cmds.iter()
+                                .filter_map(|c| c.as_str().map(String::from))
+                                .collect();
+                            let description = cmd_list.join(",");
+                            // Abuse SessionError to send the command list to the frontend
+                            // The frontend will detect the "slash_commands:" prefix
+                            vec![AgentEvent::SessionError {
+                                message: format!("slash_commands:{description}"),
+                            }]
+                        } else {
+                            vec![]
+                        }
                     }
                     "turn_started" => {
                         vec![AgentEvent::TurnStarted { turn_id: "sidecar".to_string() }]
