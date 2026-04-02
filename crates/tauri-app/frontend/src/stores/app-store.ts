@@ -357,18 +357,30 @@ function createAppStore() {
     const mappings: Record<string, string> = {
       "/commit": "Create a git commit with a descriptive message for the current changes",
       "/review-pr": "Review the current pull request",
-      "/compact": "Summarize the conversation so far",
+      "/review": "Review the current pull request or code changes",
+      "/compact": "Summarize the conversation so far to save context",
       "/help": "Show what you can help with",
       "/fix": "Fix the issues in the current code",
       "/test": "Run the tests and fix any failures",
       "/lint": "Run the linter and fix any issues",
       "/refactor": "Refactor the current code for better readability and maintainability",
+      "/cost": "Show current token usage and cost for this session",
+      "/pr-comments": "Review and respond to PR comments",
+      "/release-notes": "Generate release notes for recent changes",
+      "/security-review": "Perform a security review of the codebase",
+      "/simplify": "Review changed code for reuse, quality, and efficiency, then fix any issues",
     };
     const mapped = mappings[cmdName];
     if (mapped) {
       return cmdArgs ? `${mapped}: ${cmdArgs}` : mapped;
     }
-    return input;
+    // For unknown commands, convert the skill name to a natural language instruction
+    // e.g. "/frontend-design build a landing page" → "Use the frontend-design skill to: build a landing page"
+    const skillName = cmdName.slice(1); // remove leading /
+    if (cmdArgs) {
+      return `Use the ${skillName} skill/approach to: ${cmdArgs}`;
+    }
+    return `Execute the ${skillName} skill/command`;
   }
 
   async function sendUserMessage() {
