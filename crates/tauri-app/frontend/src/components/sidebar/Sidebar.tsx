@@ -61,6 +61,39 @@ export function Sidebar() {
           </div>
         </div>
 
+        <div class="sidebar-dock">
+          <button class="dock-btn" onClick={() => appStore.openVirtualTab("__mcp__")} title="MCP Servers">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><circle cx="6" cy="6" r="1" fill="currentColor" /><circle cx="6" cy="18" r="1" fill="currentColor" />
+            </svg>
+            <span>MCP</span>
+          </button>
+          <button class="dock-btn" onClick={() => appStore.openVirtualTab("__themes__")} title="Themes">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="13.5" cy="6.5" r="2.5" /><circle cx="17.5" cy="10.5" r="2.5" /><circle cx="8.5" cy="7.5" r="2.5" /><circle cx="6.5" cy="12.5" r="2.5" /><path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-1.5 4-3 4h-1.7c-.8 0-1.3.8-.9 1.5.6 1.1 1 2.2 1 3.5 0 1.5-.5 2-1.4 2z" />
+            </svg>
+            <span>Themes</span>
+          </button>
+          <button class="dock-btn" onClick={() => appStore.openVirtualTab("__search__")} title="Search (Cmd+Shift+F)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <span>Search</span>
+          </button>
+          <button class="dock-btn" onClick={() => appStore.openVirtualTab("__skills__")} title="Skills & Plugins">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+            </svg>
+            <span>Skills</span>
+          </button>
+          <button class="dock-btn" onClick={() => setStore("usageDashboardOpen", true)} title="Usage (Cmd+Shift+U)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+            <span>Usage</span>
+          </button>
+        </div>
+
         <div class="sidebar-content">
           <DragDropProvider
             onDragEnd={(event) => {
@@ -115,38 +148,6 @@ export function Sidebar() {
         </div>
 
         <div class="sidebar-footer">
-          <div class="sidebar-dock">
-            <button class="dock-btn" onClick={() => appStore.openVirtualTab("__mcp__")} title="MCP Servers">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><circle cx="6" cy="6" r="1" fill="currentColor" /><circle cx="6" cy="18" r="1" fill="currentColor" />
-              </svg>
-              <span>MCP</span>
-            </button>
-            <button class="dock-btn" onClick={() => appStore.openVirtualTab("__themes__")} title="Themes">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="13.5" cy="6.5" r="2.5" /><circle cx="17.5" cy="10.5" r="2.5" /><circle cx="8.5" cy="7.5" r="2.5" /><circle cx="6.5" cy="12.5" r="2.5" /><path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-1.5 4-3 4h-1.7c-.8 0-1.3.8-.9 1.5.6 1.1 1 2.2 1 3.5 0 1.5-.5 2-1.4 2z" />
-              </svg>
-              <span>Themes</span>
-            </button>
-            <button class="dock-btn" onClick={() => appStore.openVirtualTab("__search__")} title="Search (Cmd+Shift+F)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <span>Search</span>
-            </button>
-            <button class="dock-btn" onClick={() => appStore.openVirtualTab("__skills__")} title="Skills & Plugins">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
-              </svg>
-              <span>Skills</span>
-            </button>
-            <button class="dock-btn" onClick={() => setStore("usageDashboardOpen", true)} title="Usage (Cmd+Shift+U)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-                <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
-              </svg>
-              <span>Usage</span>
-            </button>
-          </div>
           <button class="new-thread-btn" onClick={() => newThread()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -264,9 +265,11 @@ export function Sidebar() {
         .sidebar-dock {
           display: flex;
           justify-content: space-between;
-          padding: 4px 2px;
+          padding: 4px 6px;
+          margin: 0 8px;
           background: var(--bg-muted);
           border-radius: var(--radius-md);
+          flex-shrink: 0;
         }
         .dock-btn {
           display: flex;
