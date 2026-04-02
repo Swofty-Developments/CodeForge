@@ -210,6 +210,31 @@ function createAppStore() {
     }
   }
 
+  async function addProject() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, title: "Select a project folder" });
+      if (!selected) return;
+      const path = selected as string;
+
+      // Check if project already exists for this path
+      const existing = store.projects.find((p) => p.path === path);
+      if (existing) {
+        // Just create a new thread in the existing project
+        await newThread(existing.id);
+        return;
+      }
+
+      const dirName = path.split("/").pop() || path;
+      const created = await ipc.createProject(dirName, path);
+      const newProject: Project = { ...created, color: null, collapsed: false, threads: [] };
+      setStore("projects", (prev) => [...prev, newProject]);
+      await newThread(created.id);
+    } catch (e) {
+      console.error("Failed to add project:", e);
+    }
+  }
+
   async function newThread(projectId?: string) {
     // Optimistic: create a placeholder thread instantly in the UI
     const optimisticId = `opt-${crypto.randomUUID()}`;
@@ -925,6 +950,7 @@ function createAppStore() {
     loadData,
     loadThreadMessages,
     newThread,
+    addProject,
     selectThread,
     openVirtualTab,
     closeTab,

@@ -27,3 +27,5 @@ Thumbs.db
 .codeforge/
 playwright-report/
 test-results/
+crates/tauri-app/agent-sidecar/package-lock.json
+crates/tauri-app/agent-sidecar/node_modules/
