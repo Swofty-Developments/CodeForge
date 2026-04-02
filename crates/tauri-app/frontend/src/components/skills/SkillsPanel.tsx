@@ -181,6 +181,9 @@ export function SkillsPanel() {
                       <Show when={skill.source}>
                         <span class="sk-item-source">@{skill.source}</span>
                       </Show>
+                      <Show when={skill.version && skill.version !== "unknown"}>
+                        <span class="sk-item-version">v{skill.version}</span>
+                      </Show>
                     </div>
                     <div class="sk-item-actions">
                       <button
@@ -242,7 +245,10 @@ export function SkillsPanel() {
             <For each={marketplaces()}>
               {(mp) => (
                 <div class="sk-mp-item">
-                  <span class="sk-mp-url">{mp.url}</span>
+                  <span class="sk-mp-name">{mp.name}</span>
+                  <Show when={mp.source}>
+                    <span class="sk-mp-url">{mp.source}</span>
+                  </Show>
                 </div>
               )}
             </For>

@@ -6,11 +6,13 @@ pub struct SkillInfo {
     pub name: String,
     pub source: String,
     pub enabled: bool,
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MarketplaceSource {
-    pub url: String,
+    pub name: String,
+    pub source: String,
 }
 
 /// List installed plugins/skills for a given provider.
@@ -159,95 +161,122 @@ pub async fn add_marketplace(provider: String, source: String) -> Result<String,
     }
 }
 
-/// Parse `claude plugin list` output into structured skill info.
+/// Parse `claude plugin list` output.
+///
+/// Format:
+/// ```text
+/// Installed plugins:
+///
+///   ❯ frontend-design@claude-plugins-official
+///     Version: unknown
+///     Scope: user
+///     Status: ✔ enabled
+///
+///   ❯ rust-analyzer-lsp@claude-plugins-official
+///     Version: 1.0.0
+///     Scope: user
+///     Status: ✔ enabled
+/// ```
 fn parse_skills_list(output: &str) -> Vec<SkillInfo> {
     let mut skills = Vec::new();
+    let mut current_name = String::new();
+    let mut current_source = String::new();
+    let mut current_enabled = true;
+    let mut current_version = String::new();
+    let mut in_entry = false;
 
     for line in output.lines() {
-        let line = line.trim();
-        if line.is_empty()
-            || line.starts_with("Plugin")
-            || line.starts_with("---")
-            || line.starts_with("No ")
-            || line.starts_with("Installed")
-        {
-            continue;
-        }
+        let trimmed = line.trim();
 
-        // Lines typically look like:
-        // "- skill-name@marketplace (enabled)"
-        // "- skill-name (disabled)"
-        // "  skill-name   marketplace-source   enabled"
-        let clean = line.trim_start_matches(['-', '*', ' '].as_ref()).trim();
-        if clean.is_empty() {
-            continue;
-        }
-
-        let enabled = !clean.contains("disabled");
-
-        if let Some((name_part, rest)) = clean.split_once('@') {
-            let name = name_part.trim().to_string();
-            let source = rest
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .trim_end_matches(')')
-                .to_string();
-            skills.push(SkillInfo {
-                name,
-                source,
-                enabled,
-            });
-        } else if let Some((name_part, _)) = clean.split_once(char::is_whitespace) {
-            let name = name_part.trim().to_string();
-            if !name.is_empty() && !name.starts_with('(') {
+        // Entry header: "❯ name@source" or "❯ name"
+        if trimmed.starts_with('❯') || trimmed.starts_with('>') {
+            // Save previous entry
+            if in_entry && !current_name.is_empty() {
                 skills.push(SkillInfo {
-                    name,
-                    source: String::new(),
-                    enabled,
+                    name: current_name.clone(),
+                    source: current_source.clone(),
+                    enabled: current_enabled,
+                    version: if current_version.is_empty() { None } else { Some(current_version.clone()) },
                 });
             }
-        } else {
-            // Single word — just a name
-            let name = clean
-                .trim_end_matches("(enabled)")
-                .trim_end_matches("(disabled)")
-                .trim()
-                .to_string();
-            if !name.is_empty() {
-                skills.push(SkillInfo {
-                    name,
-                    source: String::new(),
-                    enabled,
-                });
+
+            let entry = trimmed.trim_start_matches('❯').trim_start_matches('>').trim();
+            if let Some((name, source)) = entry.split_once('@') {
+                current_name = name.trim().to_string();
+                current_source = source.trim().to_string();
+            } else {
+                current_name = entry.to_string();
+                current_source = String::new();
+            }
+            current_enabled = true;
+            current_version = String::new();
+            in_entry = true;
+        } else if in_entry {
+            if let Some(val) = trimmed.strip_prefix("Status:") {
+                let val = val.trim();
+                current_enabled = val.contains("enabled") || val.contains("✔");
+            } else if let Some(val) = trimmed.strip_prefix("Version:") {
+                current_version = val.trim().to_string();
             }
         }
+    }
+
+    // Don't forget the last entry
+    if in_entry && !current_name.is_empty() {
+        skills.push(SkillInfo {
+            name: current_name,
+            source: current_source,
+            enabled: current_enabled,
+            version: if current_version.is_empty() { None } else { Some(current_version) },
+        });
     }
 
     skills
 }
 
 /// Parse `claude plugin marketplace list` output.
+///
+/// Format:
+/// ```text
+/// Configured marketplaces:
+///
+///   ❯ claude-plugins-official
+///     Source: GitHub (anthropics/claude-plugins-official)
+///
+///   ❯ rust-skills
+///     Source: GitHub (actionbook/rust-skills)
+/// ```
 fn parse_marketplaces(output: &str) -> Vec<MarketplaceSource> {
     let mut sources = Vec::new();
+    let mut current_name = String::new();
+    let mut current_source = String::new();
+    let mut in_entry = false;
 
     for line in output.lines() {
-        let line = line.trim();
-        if line.is_empty()
-            || line.starts_with("Marketplace")
-            || line.starts_with("---")
-            || line.starts_with("No ")
-            || line.starts_with("Configured")
-        {
-            continue;
-        }
+        let trimmed = line.trim();
 
-        let clean = line.trim_start_matches(['-', '*', ' '].as_ref()).trim();
-        if !clean.is_empty() {
-            sources.push(MarketplaceSource {
-                url: clean.to_string(),
-            });
+        if trimmed.starts_with('❯') || trimmed.starts_with('>') {
+            if in_entry && !current_name.is_empty() {
+                sources.push(MarketplaceSource {
+                    name: current_name.clone(),
+                    source: current_source.clone(),
+                });
+            }
+            current_name = trimmed.trim_start_matches('❯').trim_start_matches('>').trim().to_string();
+            current_source = String::new();
+            in_entry = true;
+        } else if in_entry {
+            if let Some(val) = trimmed.strip_prefix("Source:") {
+                current_source = val.trim().to_string();
+            }
         }
+    }
+
+    if in_entry && !current_name.is_empty() {
+        sources.push(MarketplaceSource {
+            name: current_name,
+            source: current_source,
+        });
     }
 
     sources

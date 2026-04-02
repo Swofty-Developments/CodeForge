@@ -443,10 +443,12 @@ export interface SkillInfo {
   name: string;
   source: string;
   enabled: boolean;
+  version: string | null;
 }
 
 export interface MarketplaceSource {
-  url: string;
+  name: string;
+  source: string;
 }
 
 export const listSkills = (provider: string) =>
