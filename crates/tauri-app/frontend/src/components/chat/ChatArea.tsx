@@ -10,7 +10,7 @@ import { ThemeSelector } from "../settings/ThemeSelector";
 import type { ContentBlock } from "../../types";
 
 export function ChatArea() {
-  const { store, approveRequest, denyRequest } = appStore;
+  const { store, approveRequest, denyRequest, addProject, newThread } = appStore;
   let scrollRef: HTMLDivElement | undefined;
 
   const messages = () => {
@@ -169,29 +169,76 @@ export function ChatArea() {
       <Show
         when={store.activeTab}
         fallback={
-          <div class="chat-empty">
-            <div class="hero-mark">
-              <svg width="40" height="40" viewBox="0 0 56 56" fill="none">
-                <path d="M12 10L6 28L12 46" stroke="url(#hg1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M44 10L50 28L44 46" stroke="url(#hg1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M33 8L23 48" stroke="url(#hg2)" stroke-width="2" stroke-linecap="round" />
-                <defs>
-                  <linearGradient id="hg1" x1="6" y1="10" x2="50" y2="46" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="var(--primary)" /><stop offset="1" stop-color="var(--purple)" />
-                  </linearGradient>
-                  <linearGradient id="hg2" x1="23" y1="48" x2="33" y2="8" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="var(--primary)" /><stop offset="1" stop-color="var(--pink)" />
-                  </linearGradient>
-                </defs>
-              </svg>
+          <Show when={store.projects.filter((p) => p.path !== ".").length > 0} fallback={
+            <div class="chat-empty">
+              <div class="onboarding-card">
+                <div class="onboarding-icon">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="url(#og1)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                    <line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" />
+                    <defs>
+                      <linearGradient id="og1" x1="2" y1="3" x2="22" y2="21" gradientUnits="userSpaceOnUse">
+                        <stop stop-color="var(--primary)" /><stop offset="1" stop-color="var(--purple)" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </div>
+                <h2 class="onboarding-title">Add your first project</h2>
+                <p class="onboarding-desc">Point CodeForge to a project folder to get started</p>
+                <button class="onboarding-btn" onClick={() => addProject()}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                    <line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" />
+                  </svg>
+                  Choose a folder
+                </button>
+                <button class="onboarding-link" onClick={() => newThread()}>
+                  Or start without a project
+                </button>
+              </div>
+              <div class="shortcut-hints" style={{ "margin-top": "24px" }}>
+                <span class="kbd-hint"><kbd>&#8984;K</kbd> Command palette</span>
+                <span class="kbd-hint"><kbd>&#8984;N</kbd> New thread</span>
+              </div>
             </div>
-            <h2 class="hero-title">CodeForge</h2>
-            <p class="hero-subtitle">Select or create a thread to start</p>
-            <div class="shortcut-hints">
-              <span class="kbd-hint"><kbd>&#8984;K</kbd> Command palette</span>
-              <span class="kbd-hint"><kbd>&#8984;N</kbd> New thread</span>
+          }>
+            <div class="chat-empty">
+              <div class="hero-mark">
+                <svg width="40" height="40" viewBox="0 0 56 56" fill="none">
+                  <path d="M12 10L6 28L12 46" stroke="url(#hg1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M44 10L50 28L44 46" stroke="url(#hg1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M33 8L23 48" stroke="url(#hg2)" stroke-width="2" stroke-linecap="round" />
+                  <defs>
+                    <linearGradient id="hg1" x1="6" y1="10" x2="50" y2="46" gradientUnits="userSpaceOnUse">
+                      <stop stop-color="var(--primary)" /><stop offset="1" stop-color="var(--purple)" />
+                    </linearGradient>
+                    <linearGradient id="hg2" x1="23" y1="48" x2="33" y2="8" gradientUnits="userSpaceOnUse">
+                      <stop stop-color="var(--primary)" /><stop offset="1" stop-color="var(--pink)" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </div>
+              <h2 class="hero-title">CodeForge</h2>
+              <p class="hero-subtitle">Select a thread from the sidebar, or create a new one</p>
+              <div class="hero-quick-actions">
+                <For each={store.projects.filter((p) => p.path !== ".").slice(0, 3)}>
+                  {(project) => (
+                    <button class="hero-quick-btn" onClick={() => newThread(project.id)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      New Thread in {project.name}
+                    </button>
+                  )}
+                </For>
+              </div>
+              <div class="shortcut-hints">
+                <span class="kbd-hint"><kbd>&#8984;K</kbd> Command palette</span>
+                <span class="kbd-hint"><kbd>&#8984;N</kbd> New thread</span>
+                <span class="kbd-hint"><kbd>&#8984;O</kbd> Add project</span>
+              </div>
             </div>
-          </div>
+          </Show>
         }
       >
         {/* Worktree banner — only shown when a worktree is active and messages exist */}
@@ -286,6 +333,59 @@ export function ChatArea() {
               )}
             </For>
 
+            {/* Context-aware suggestion chips for freshly-setup threads */}
+            <Show when={messages().length === 1 && !isGenerating() && isGitProject()}>
+              {(() => {
+                const proj = activeProject();
+                const tab = store.activeTab;
+                const isPrThread = proj && tab && store.projectPrMap[proj.id]?.[tab];
+                return (
+                  <div class="suggestion-chips" style="padding: 8px 0 16px;">
+                    <Show when={isPrThread}>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Review this PR and identify any issues, bugs, or improvements")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 012 2v7" /><line x1="6" y1="9" x2="6" y2="21" /></svg>
+                        Review this PR
+                      </button>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Summarize all changes in this PR")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+                        Summarize changes
+                      </button>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Check this PR for potential bugs, security issues, or performance problems")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                        Check for issues
+                      </button>
+                    </Show>
+                    <Show when={!isPrThread}>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Review my uncommitted changes and suggest improvements")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                        Review my changes
+                      </button>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Help me commit my current changes with a good commit message")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                        Help me commit
+                      </button>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Explain this codebase and its architecture")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>
+                        Explain codebase
+                      </button>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Find potential bugs or issues in this codebase")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                        Find bugs
+                      </button>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Write tests for ")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                        Write tests
+                      </button>
+                      <button class="suggestion-chip" onClick={() => setSuggestion("Refactor this code to be cleaner: ")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
+                        Refactor
+                      </button>
+                    </Show>
+                  </div>
+                );
+              })()}
+            </Show>
+
             <For each={store.pendingApprovals.filter((a) => a.threadId === store.activeTab)}>
               {(approval) => {
                 const toolName = () => approval.description.split(":")[0]?.trim() || "tool";
@@ -294,6 +394,7 @@ export function ChatArea() {
                   // Set permission mode to bypass and approve ALL pending
                   ipc.setSetting("permission_mode", "bypassPermissions").catch(() => {});
                   appStore.setStore("autoAcceptEnabled", true);
+                  appStore.persistState();
                   // Approve all pending approvals for this thread
                   const pending = [...store.pendingApprovals.filter((a) => a.threadId === approval.threadId)];
                   for (const a of pending) {
@@ -610,6 +711,103 @@ if (!document.getElementById("chat-styles")) {
       color: var(--text-secondary);
       line-height: 1.4;
     }
+
+    /* ── Onboarding card (no projects) ── */
+    .onboarding-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 40px 48px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      animation: cmdSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes cmdSlideIn {
+      from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .onboarding-icon {
+      margin-bottom: 4px;
+      opacity: 0.9;
+    }
+    .onboarding-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--text) 30%, var(--primary) 70%, var(--purple) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .onboarding-desc {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      margin-bottom: 8px;
+    }
+    .onboarding-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 28px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      background: var(--primary);
+      border-radius: var(--radius-md);
+      transition: filter 0.15s, transform 0.1s;
+      margin-top: 4px;
+    }
+    .onboarding-btn:hover { filter: brightness(1.15); }
+    .onboarding-btn:active { transform: scale(0.97); }
+    .onboarding-link {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 6px 12px;
+      transition: color 0.15s;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .onboarding-link:hover { color: var(--text-secondary); }
+
+    /* ── Hero quick actions (projects exist, no tab selected) ── */
+    .hero-quick-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 8px;
+      width: 100%;
+      max-width: 280px;
+    }
+    .hero-quick-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      transition: all 0.15s ease;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+    }
+    .hero-quick-btn svg { color: var(--primary); flex-shrink: 0; }
+    .hero-quick-btn:hover {
+      background: rgba(107, 124, 255, 0.08);
+      border-color: var(--primary);
+      color: var(--text);
+    }
+
     .chat-empty .new-convo {
       font-size: 18px;
       font-weight: 600;

@@ -5,7 +5,7 @@ import { ProjectGroup } from "./ProjectGroup";
 import * as ipc from "../../ipc";
 
 export function Sidebar() {
-  const { store, setStore, newThread } = appStore;
+  const { store, setStore, newThread, addProject } = appStore;
 
   let sidebarRef: HTMLDivElement | undefined;
   let dragging = false;
@@ -23,6 +23,7 @@ export function Sidebar() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";
+      appStore.persistState();
     };
     document.body.style.cursor = "col-resize";
     window.addEventListener("mousemove", onMove);
@@ -140,6 +141,13 @@ export function Sidebar() {
               Usage
             </button>
           </div>
+          <button class="add-project-btn" onClick={() => addProject()}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              <line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" />
+            </svg>
+            Add Project
+          </button>
           <button class="new-thread-btn" onClick={() => newThread()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -210,6 +218,24 @@ export function Sidebar() {
           display: flex;
           flex-direction: column;
           gap: 6px;
+        }
+        .add-project-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: 100%;
+          padding: 8px 12px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #fff;
+          background: var(--primary);
+          border-radius: var(--radius-sm);
+          transition: all 0.15s ease;
+        }
+        .add-project-btn svg { color: #fff; flex-shrink: 0; }
+        .add-project-btn:hover {
+          filter: brightness(1.15);
         }
         .new-thread-btn {
           display: flex;

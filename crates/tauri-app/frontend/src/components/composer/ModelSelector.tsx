@@ -40,6 +40,7 @@ export function ModelSelector() {
     setStore("selectedModel", value);
     setOpen(false);
     setCustomInput("");
+    appStore.persistState();
   }
 
   function submitCustom() {
@@ -48,6 +49,7 @@ export function ModelSelector() {
       setStore("selectedModel", v);
       setOpen(false);
       setCustomInput("");
+      appStore.persistState();
     }
   }
 
@@ -73,7 +75,7 @@ export function ModelSelector() {
 
   return (
     <div class="model-selector" ref={dropdownRef}>
-      <button class="meta-pill" onClick={toggle}>
+      <button class="meta-pill" onClick={toggle} title="Change the AI model for this session">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
           <path d="M2 17l10 5 10-5" />

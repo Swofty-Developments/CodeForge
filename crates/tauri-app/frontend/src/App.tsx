@@ -17,10 +17,13 @@ import { SplitView } from "./components/shared/SplitView";
 import { BrowserPanel } from "./components/browser/BrowserPanel";
 import { DiffEditor } from "./components/diff/DiffEditor";
 import { UpdateChecker } from "./components/shared/UpdateChecker";
+import { KeyboardHelp } from "./components/shared/KeyboardHelp";
+import { Breadcrumb } from "./components/chat/Breadcrumb";
+import { StatusBar } from "./components/shared/StatusBar";
 import * as ipc from "./ipc";
 
 export function App() {
-  const { store, setStore } = appStore;
+  const { store, setStore, closeTab, selectThread, newThread, sendUserMessage, reopenLastClosedTab } = appStore;
   const [showWelcome, setShowWelcome] = createSignal(true);
   const [showSetup, setShowSetup] = createSignal(false);
 
@@ -134,6 +137,18 @@ export function App() {
   function handleKeyDown(e: KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
     const key = e.key.toLowerCase();
+
+    // Escape: close overlays in priority order
+    if (key === "escape") {
+      if (store.keyboardHelpOpen) { e.preventDefault(); setStore("keyboardHelpOpen", false); return; }
+      if (store.commandPaletteOpen) { e.preventDefault(); setStore("commandPaletteOpen", false); return; }
+      if (store.searchOpen) { e.preventDefault(); setStore("searchOpen", false); return; }
+      if (store.usageDashboardOpen) { e.preventDefault(); setStore("usageDashboardOpen", false); return; }
+      if (store.settingsOpen) { e.preventDefault(); setStore("settingsOpen", false); return; }
+      if (store.themeOpen) { e.preventDefault(); setStore("themeOpen", false); return; }
+      if (store.providerPickerOpen) { e.preventDefault(); setStore("providerPickerOpen", false); return; }
+    }
+
     if (mod && key === "k" && !e.shiftKey) {
       e.preventDefault();
       setStore("commandPaletteOpen", !store.commandPaletteOpen);
@@ -164,6 +179,73 @@ export function App() {
     if (mod && e.shiftKey && key === "d") {
       e.preventDefault();
       if (store.activeTab) setStore("threadDiffOpen", store.activeTab, !store.threadDiffOpen[store.activeTab]);
+    }
+
+    // Cmd+W: Close current tab
+    if (mod && key === "w" && !e.shiftKey) {
+      e.preventDefault();
+      if (store.activeTab) closeTab(store.activeTab);
+    }
+
+    // Cmd+T: New thread
+    if (mod && key === "t" && !e.shiftKey) {
+      e.preventDefault();
+      newThread();
+    }
+
+    // Cmd+N: New thread (alias)
+    if (mod && key === "n" && !e.shiftKey) {
+      e.preventDefault();
+      newThread();
+    }
+
+    // Cmd+Shift+T: Reopen last closed tab
+    if (mod && e.shiftKey && key === "t") {
+      e.preventDefault();
+      reopenLastClosedTab();
+    }
+
+    // Cmd+1 through Cmd+9: Switch to tab by position
+    if (mod && !e.shiftKey && key >= "1" && key <= "9") {
+      e.preventDefault();
+      const idx = key === "9" ? store.openTabs.length - 1 : parseInt(key) - 1;
+      const tabId = store.openTabs[idx];
+      if (tabId) selectThread(tabId);
+    }
+
+    // Cmd+Enter: Force send message (even mid-generation)
+    if (mod && key === "enter") {
+      e.preventDefault();
+      sendUserMessage();
+    }
+
+    // Cmd+.: Stop/interrupt generation
+    if (mod && key === ".") {
+      e.preventDefault();
+      if (store.activeTab) {
+        const status = store.sessionStatuses[store.activeTab];
+        if (status === "generating" || status === "interrupting") {
+          if (status === "interrupting") {
+            ipc.stopSession(store.activeTab).catch(() => {});
+            setStore("sessionStatuses", store.activeTab, "ready");
+          } else {
+            setStore("sessionStatuses", store.activeTab, "interrupting");
+            ipc.interruptSession(store.activeTab).catch(() => {});
+          }
+        }
+      }
+    }
+
+    // Cmd+,: Settings
+    if (mod && key === ",") {
+      e.preventDefault();
+      setStore("settingsOpen", !store.settingsOpen);
+    }
+
+    // Cmd+? (Cmd+Shift+/): Keyboard help
+    if (mod && e.shiftKey && (key === "/" || key === "?")) {
+      e.preventDefault();
+      setStore("keyboardHelpOpen", !store.keyboardHelpOpen);
     }
   }
 
@@ -210,6 +292,7 @@ export function App() {
         fallback={
           <div class="main-panel">
             <TabBar />
+            <Breadcrumb />
             <div
               ref={bodyRef}
               class="main-panel-body"
@@ -221,6 +304,7 @@ export function App() {
               <div class="main-panel-chat" style={hasSidePane() ? chatStyle() : { flex: "1" }}>
                 <ChatArea />
                 <Composer />
+                <StatusBar />
               </div>
 
               <Show when={hasSidePane()}>
@@ -273,6 +357,10 @@ export function App() {
 
       <Show when={store.themeOpen}>
         <ThemeSelector />
+      </Show>
+
+      <Show when={store.keyboardHelpOpen}>
+        <KeyboardHelp />
       </Show>
 
       <Show when={showWelcome()}>

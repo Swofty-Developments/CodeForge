@@ -3,6 +3,18 @@ import { createStore } from "solid-js/store";
 import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload, Attachment, ContentBlock, ThreadTokenUsage } from "../types";
 import * as ipc from "../ipc";
 
+export interface WindowState {
+  openTabs: string[];
+  activeTab: string | null;
+  sidebarWidth: number;
+  selectedProvider: string;
+  selectedModel: string | null;
+  autoAcceptEnabled: boolean;
+}
+
+const WINDOW_STATE_KEY = "window_state";
+const PERSIST_DEBOUNCE_MS = 500;
+
 export interface PendingApproval {
   sessionId: string;
   requestId: string;
@@ -47,6 +59,9 @@ export interface AppStore {
   projectGitStatus: Record<string, "none" | "git" | "github">;
   projectPrMap: Record<string, Record<string, number>>;
   activeModel: string | null;
+  unreadTabs: Record<string, boolean>;
+  recentlyClosedTabs: string[];
+  keyboardHelpOpen: boolean;
 }
 
 function createAppStore() {
@@ -87,7 +102,75 @@ function createAppStore() {
     projectGitStatus: {},
     projectPrMap: {},
     activeModel: null,
+    unreadTabs: {},
+    recentlyClosedTabs: [],
+    keyboardHelpOpen: false,
   });
+
+  // ── Window state persistence (debounced) ──────────────────────────
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function persistState() {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      const state: WindowState = {
+        openTabs: store.openTabs.filter((t) => !t.startsWith("opt-")),
+        activeTab: store.activeTab?.startsWith("opt-") ? null : store.activeTab,
+        sidebarWidth: store.sidebarWidth,
+        selectedProvider: store.selectedProvider,
+        selectedModel: store.selectedModel,
+        autoAcceptEnabled: store.autoAcceptEnabled,
+      };
+      ipc.setSetting(WINDOW_STATE_KEY, JSON.stringify(state)).catch((e) =>
+        console.error("Failed to persist window state:", e)
+      );
+    }, PERSIST_DEBOUNCE_MS);
+  }
+
+  async function restoreState() {
+    try {
+      const raw = await ipc.getSetting(WINDOW_STATE_KEY);
+      if (!raw) return;
+      const state: Partial<WindowState> = JSON.parse(raw);
+
+      if (state.sidebarWidth != null && state.sidebarWidth >= 150 && state.sidebarWidth <= 600) {
+        setStore("sidebarWidth", state.sidebarWidth);
+      }
+      if (state.selectedProvider) {
+        setStore("selectedProvider", state.selectedProvider);
+      }
+      if (state.selectedModel !== undefined) {
+        setStore("selectedModel", state.selectedModel);
+      }
+      if (state.autoAcceptEnabled != null) {
+        setStore("autoAcceptEnabled", state.autoAcceptEnabled);
+      }
+
+      // Restore tabs — only keep IDs that correspond to existing threads or virtual tabs
+      if (state.openTabs && state.openTabs.length > 0) {
+        const allThreadIds = new Set(
+          store.projects.flatMap((p) => p.threads.map((t) => t.id))
+        );
+        const validTabs = state.openTabs.filter(
+          (id) => id.startsWith("__") || allThreadIds.has(id)
+        );
+        if (validTabs.length > 0) {
+          setStore("openTabs", validTabs);
+          const activeValid = state.activeTab && validTabs.includes(state.activeTab);
+          setStore("activeTab", activeValid ? state.activeTab! : validTabs[validTabs.length - 1]);
+
+          // Load messages for restored thread tabs
+          for (const tabId of validTabs) {
+            if (!tabId.startsWith("__")) {
+              loadThreadMessages(tabId);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to restore window state:", e);
+    }
+  }
 
   async function loadData() {
     try {
@@ -106,6 +189,9 @@ function createAppStore() {
       }
 
       setStore("projects", projects);
+
+      // Restore persisted window state after projects are loaded
+      await restoreState();
     } catch (e) {
       console.error("Failed to load data:", e);
     }
@@ -184,6 +270,7 @@ function createAppStore() {
         setStore("threadMessages", thread.id, msgs);
         setStore("threadMessages", optimisticId, undefined as any);
       }
+      persistState();
     } catch (e) {
       console.error("Failed to create thread:", e);
     }
@@ -199,6 +286,7 @@ function createAppStore() {
       setStore("openTabs", (tabs) => [...tabs, id]);
     }
     setStore("activeTab", id);
+    persistState();
   }
 
   function selectThread(id: string) {
@@ -206,9 +294,11 @@ function createAppStore() {
       setStore("openTabs", (tabs) => [...tabs, id]);
     }
     setStore("activeTab", id);
+    setStore("unreadTabs", id, false);
     if (!id.startsWith("__")) {
       loadThreadMessages(id);
     }
+    persistState();
   }
 
   function closeTab(id: string) {
@@ -217,6 +307,7 @@ function createAppStore() {
     if (store.activeTab === id) {
       setStore("activeTab", remaining.length > 0 ? remaining[remaining.length - 1] : null);
     }
+    persistState();
   }
 
   function reorderTabs(fromId: string, toIdx: number) {
@@ -228,6 +319,7 @@ function createAppStore() {
       arr.splice(toIdx, 0, fromId);
       return arr;
     });
+    persistState();
   }
 
   /** Map slash commands to natural language prompts the agent can act on. */
@@ -421,6 +513,9 @@ function createAppStore() {
           const blocks = appendTextBlock(msg.blocks || [], payload.text || "");
           return { ...msg, content: msg.content + (payload.text || ""), blocks };
         });
+        if (thread_id !== store.activeTab) {
+          setStore("unreadTabs", thread_id, true);
+        }
         break;
       }
       case "thinking_delta": {
@@ -519,6 +614,10 @@ function createAppStore() {
           }
           return msgs;
         });
+        // Mark unread for background threads
+        if (thread_id !== store.activeTab) {
+          setStore("unreadTabs", thread_id, true);
+        }
         // Notify for background threads (not the active tab)
         if (thread_id !== store.activeTab) {
           const title = getThreadTitle(thread_id);
@@ -840,6 +939,7 @@ function createAppStore() {
     regenerateResponse,
     requestNotificationPermission,
     loadProjectGitStatus,
+    persistState,
   };
 }
 

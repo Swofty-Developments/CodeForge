@@ -346,6 +346,7 @@ export function Composer() {
             <button
               class="meta-pill"
               onClick={() => setStore("providerPickerOpen", true)}
+              title="Switch between Claude Code and Codex"
             >
               {providerLabel()}
               <span class="provider-dot" style={{ background: "var(--green)" }} />
@@ -359,15 +360,16 @@ export function Composer() {
                 const next = !store.autoAcceptEnabled;
                 appStore.setStore("autoAcceptEnabled", next);
                 ipc.setSetting("permission_mode", next ? "bypassPermissions" : "default").catch(() => {});
+                appStore.persistState();
               }}
-              title={store.autoAcceptEnabled ? "Auto-accepting all tools (click to require approval)" : "Requiring approval (click to auto-accept)"}
+              title={store.autoAcceptEnabled ? "Toggle auto-accept for tool permissions — currently auto-accepting all tools (click to require approval)" : "Toggle auto-accept for tool permissions — currently requiring approval (click to auto-accept)"}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
               {store.autoAcceptEnabled ? "Auto" : "Ask"}
             </button>
-            <button class="meta-pill subtle" onClick={pickFolder}>
+            <button class="meta-pill subtle" onClick={pickFolder} title="Set the working directory for this thread">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
               </svg>

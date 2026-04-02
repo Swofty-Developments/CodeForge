@@ -33,6 +33,7 @@ export function SettingsOverlay() {
 
         <div class="settings-section">
           <label>Claude Binary</label>
+          <span class="settings-section-desc">Override the default binary locations for AI providers</span>
           <input
             value={claudePath()}
             onInput={(e) => setClaudePath(e.currentTarget.value)}
@@ -52,6 +53,7 @@ export function SettingsOverlay() {
 
         <div class="settings-section">
           <label>Auto-name Threads</label>
+          <span class="settings-section-desc">Automatically rename threads based on conversation content</span>
           <div class="settings-toggle-row">
             <span class="settings-toggle-desc">Automatically generate thread names after 3 messages</span>
             <button
@@ -66,6 +68,7 @@ export function SettingsOverlay() {
 
         <div class="settings-section">
           <label>Desktop Notifications</label>
+          <span class="settings-section-desc">Get notified when background threads complete</span>
           <div class="settings-toggle-row">
             <span class="settings-toggle-desc">Notify when background threads complete or encounter errors</span>
             <button
@@ -116,6 +119,13 @@ export function SettingsOverlay() {
           width: 100%;
           font-family: var(--font-mono);
           font-size: 12px;
+        }
+        .settings-section-desc {
+          display: block;
+          font-size: 11px;
+          color: var(--text-tertiary);
+          margin-bottom: 6px;
+          line-height: 1.4;
         }
         .settings-hint {
           display: block;

@@ -71,7 +71,23 @@ export function ContextMenu() {
     close();
   }
 
+  function handleOpenInFinder() {
+    const m = menu();
+    if (!m || m.type !== "project") return;
+    const project = store.projects.find((p) => p.id === m.id);
+    if (project && project.path !== ".") {
+      ipc.openInFileManager(project.path);
+    }
+    close();
+  }
+
   const isProject = () => menu()?.type === "project";
+  const isRealProject = () => {
+    const m = menu();
+    if (!m || m.type !== "project") return false;
+    const project = store.projects.find((p) => p.id === m.id);
+    return project && project.path !== ".";
+  };
 
   return (
     <Show when={menu()}>
@@ -93,6 +109,15 @@ export function ContextMenu() {
             </svg>
             Delete
           </button>
+
+          <Show when={isRealProject()}>
+            <button class="ctx-item" onClick={handleOpenInFinder}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              </svg>
+              Open in Finder
+            </button>
+          </Show>
 
           <Show when={isProject()}>
             <div class="ctx-divider" />

@@ -6,7 +6,7 @@ import { appStore } from "../../stores/app-store";
 import { browserClose } from "../../ipc";
 
 function SortableTab(props: { tabId: string; index: number }) {
-  const { store, setStore, closeTab } = appStore;
+  const { store, setStore, closeTab, selectThread } = appStore;
 
   const thread = () =>
     store.projects.flatMap((p) => p.threads).find((t) => t.id === props.tabId);
@@ -20,10 +20,34 @@ function SortableTab(props: { tabId: string; index: number }) {
     return project?.color || null;
   };
 
+  const statusDotColor = () => {
+    if (props.tabId.startsWith("__")) return null;
+    const status = store.sessionStatuses[props.tabId];
+    if (status === "ready") return "var(--green)";
+    if (status === "generating" || status === "starting") return "var(--sky)";
+    if (status === "error") return "var(--red)";
+    return null;
+  };
+
+  const isGenerating = () => {
+    const status = store.sessionStatuses[props.tabId];
+    return status === "generating" || status === "starting";
+  };
+
+  const isUnread = () => !isActive() && !!store.unreadTabs[props.tabId];
+
   const sortable = useSortable({
     get id() { return props.tabId; },
     get index() { return props.index; },
   });
+
+  function handleClick() {
+    if (props.tabId.startsWith("__")) {
+      setStore("activeTab", props.tabId);
+    } else {
+      selectThread(props.tabId);
+    }
+  }
 
   return (
     <div
@@ -32,16 +56,29 @@ function SortableTab(props: { tabId: string; index: number }) {
       classList={{
         active: isActive(),
         dragging: typeof sortable.isDragging === 'function' ? sortable.isDragging() : !!sortable.isDragging,
+        unread: isUnread(),
       }}
       style={color() ? { "border-bottom": `2px solid ${color()}` } : {}}
-      onClick={() => setStore("activeTab", props.tabId)}
+      onClick={handleClick}
     >
+      <Show when={statusDotColor()}>
+        {(dotColor) => (
+          <span
+            class="tab-status-dot"
+            classList={{ pulsing: isGenerating() }}
+            style={{ background: dotColor() }}
+          />
+        )}
+      </Show>
       <span class="tab-label">{
         props.tabId === "__mcp__" ? "MCP Servers" :
         props.tabId === "__themes__" ? "Themes" :
         props.tabId === "__settings__" ? "Settings" :
         thread()?.title || "..."
       }</span>
+      <Show when={isUnread()}>
+        <span class="tab-unread-dot" />
+      </Show>
       <button
         class="tab-close"
         onClick={(e) => { e.stopPropagation(); closeTab(props.tabId); }}
@@ -286,6 +323,31 @@ if (!document.getElementById("tab-bar-styles")) {
     .tab-close:hover {
       background: var(--bg-accent);
       color: var(--text);
+    }
+    .tab-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .tab-status-dot.pulsing {
+      animation: tab-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes tab-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    .tab-unread-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--primary);
+      flex-shrink: 0;
+    }
+    .tab.unread .tab-label {
+      color: var(--text);
+      font-weight: 600;
     }
   `;
   document.head.appendChild(s);

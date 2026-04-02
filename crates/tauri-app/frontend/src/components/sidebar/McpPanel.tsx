@@ -111,7 +111,20 @@ export function McpPanel() {
           <div class="mcp-loading">Loading…</div>
         </Show>
         <Show when={!loading() && servers().length === 0}>
-          <div class="mcp-empty">No servers configured</div>
+          <div class="mcp-empty-state">
+            <svg class="mcp-empty-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><circle cx="6" cy="6" r="1" fill="currentColor" /><circle cx="6" cy="18" r="1" fill="currentColor" />
+            </svg>
+            <span class="mcp-empty-title">No MCP Servers</span>
+            <p class="mcp-empty-desc">MCP (Model Context Protocol) servers extend Claude's capabilities with custom tools, databases, APIs, and more.</p>
+            <button class="mcp-empty-add" onClick={() => setAdding(true)}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Add a server to get started
+            </button>
+            <span class="mcp-empty-hint">Common servers: Puppeteer, PostgreSQL, GitHub, Slack</span>
+          </div>
         </Show>
         <For each={servers()}>
           {(server) => (
@@ -270,10 +283,54 @@ if (!document.getElementById("mcp-styles")) {
       flex-direction: column;
       gap: 2px;
     }
-    .mcp-loading, .mcp-empty {
+    .mcp-loading {
       font-size: 11px;
       color: var(--text-tertiary);
       padding: 6px 0;
+    }
+    .mcp-empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 24px 12px;
+      gap: 8px;
+    }
+    .mcp-empty-icon {
+      color: var(--text-tertiary);
+      opacity: 0.5;
+      margin-bottom: 4px;
+    }
+    .mcp-empty-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .mcp-empty-desc {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      line-height: 1.5;
+      max-width: 360px;
+    }
+    .mcp-empty-add {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: white;
+      background: var(--primary);
+      border-radius: var(--radius-sm);
+      transition: filter 0.12s;
+    }
+    .mcp-empty-add:hover { filter: brightness(1.1); }
+    .mcp-empty-hint {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      opacity: 0.7;
+      margin-top: 2px;
     }
     .mcp-server {
       display: flex;

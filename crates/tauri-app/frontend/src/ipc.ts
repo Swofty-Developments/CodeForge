@@ -460,6 +460,10 @@ export const deleteCustomTheme = (id: string) =>
 export const exportTheme = (id: string) =>
   invoke<string>("export_theme", { id });
 
+// Filesystem
+export const openInFileManager = (path: string) =>
+  invoke("open_in_file_manager", { path });
+
 // Events
 export const listenAgentEvent = (callback: (payload: AgentEventPayload) => void) =>
   listen<AgentEventPayload>("agent-event", (e) => callback(e.payload));

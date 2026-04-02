@@ -20,6 +20,7 @@ export function ProviderPicker() {
   function select(id: string) {
     setStore("selectedProvider", id);
     setStore("providerPickerOpen", false);
+    appStore.persistState();
   }
 
   function close() {

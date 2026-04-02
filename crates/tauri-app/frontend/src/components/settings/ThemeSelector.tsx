@@ -95,10 +95,19 @@ export function ThemeSelector(props?: { inline?: boolean }) {
     }
   }
 
+  const activeThemeName = () => {
+    const t = themes().find((th) => th.id === activeId());
+    return t ? t.name : "Obsidian Forge";
+  };
+
   const content = (
     <>
       <div class="theme-selector-header">
-        <h2 class="theme-selector-title">Themes</h2>
+        <div>
+          <h2 class="theme-selector-title">Themes</h2>
+          <p class="theme-selector-desc">Choose a theme or import a custom one</p>
+          <span class="theme-selector-active">Active: {activeThemeName()}</span>
+        </div>
         <div class="theme-header-actions">
           <button class="theme-import-btn" onClick={handleImport} title="Import theme">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -252,6 +261,18 @@ if (!document.getElementById("theme-selector-styles")) {
       font-weight: 700;
       color: var(--text);
       letter-spacing: -0.3px;
+    }
+    .theme-selector-desc {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+    .theme-selector-active {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--primary);
+      margin-top: 2px;
+      display: inline-block;
     }
     .theme-header-actions {
       display: flex;

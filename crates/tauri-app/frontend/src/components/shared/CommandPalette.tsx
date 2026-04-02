@@ -5,11 +5,12 @@ interface PaletteAction {
   id: string;
   label: string;
   category: "Thread" | "Action" | "Setting";
+  shortcut?: string;
   onSelect: () => void;
 }
 
 export function CommandPalette() {
-  const { store, setStore, newThread, selectThread } = appStore;
+  const { store, setStore, newThread, addProject, selectThread } = appStore;
   const [query, setQuery] = createSignal("");
   const [selectedIndex, setSelectedIndex] = createSignal(0);
   let inputRef: HTMLInputElement | undefined;
@@ -45,11 +46,20 @@ export function CommandPalette() {
     }
 
     items.push(
-      { id: "new-thread", label: "New Thread", category: "Action", onSelect: () => { newThread(); close(); } },
-      { id: "settings", label: "Settings", category: "Setting", onSelect: () => { setStore("settingsOpen", true); close(); } },
-      { id: "provider-claude", label: "Switch to Claude Code", category: "Setting", onSelect: () => { setStore("selectedProvider", "claude_code"); close(); } },
-      { id: "provider-codex", label: "Switch to Codex", category: "Setting", onSelect: () => { setStore("selectedProvider", "codex"); close(); } },
-      { id: "browser", label: "Toggle Browser Inspector", category: "Action", onSelect: () => {
+      { id: "add-project", label: "Add Project", category: "Action", onSelect: () => { close(); addProject(); } },
+      { id: "new-thread", label: "New Thread", category: "Action", shortcut: "\u2318T", onSelect: () => { newThread(); close(); } },
+      { id: "settings", label: "Settings", category: "Setting", shortcut: "\u2318,", onSelect: () => { setStore("settingsOpen", true); close(); } },
+      { id: "search", label: "Search", category: "Action", shortcut: "\u2318\u21e7F", onSelect: () => { setStore("searchOpen", true); close(); } },
+      { id: "usage", label: "Usage Dashboard", category: "Action", shortcut: "\u2318\u21e7U", onSelect: () => { setStore("usageDashboardOpen", true); close(); } },
+      { id: "diff", label: "Toggle Diff Viewer", category: "Action", shortcut: "\u2318\u21e7D", onSelect: () => {
+        const tab = store.activeTab;
+        if (tab) setStore("threadDiffOpen", tab, !store.threadDiffOpen[tab]);
+        close();
+      } },
+      { id: "keyboard-help", label: "Keyboard Shortcuts", category: "Action", shortcut: "\u2318?", onSelect: () => { setStore("keyboardHelpOpen", true); close(); } },
+      { id: "provider-claude", label: "Switch to Claude Code", category: "Setting", onSelect: () => { setStore("selectedProvider", "claude_code"); appStore.persistState(); close(); } },
+      { id: "provider-codex", label: "Switch to Codex", category: "Setting", onSelect: () => { setStore("selectedProvider", "codex"); appStore.persistState(); close(); } },
+      { id: "browser", label: "Toggle Browser Inspector", category: "Action", shortcut: "\u2318\u21e7B", onSelect: () => {
         const tab = store.activeTab;
         if (tab) setStore("threadBrowserOpen", tab, !store.threadBrowserOpen[tab]);
         close();
@@ -114,8 +124,11 @@ export function CommandPalette() {
                 onClick={() => item.onSelect()}
               >
                 <span class="cmd-palette-item-label">{item.label}</span>
-                <span class={`cmd-palette-item-category cat-${item.category.toLowerCase()}`}>
-                  {item.category}
+                <span class="cmd-palette-item-right">
+                  {item.shortcut && <kbd class="cmd-palette-shortcut">{item.shortcut}</kbd>}
+                  <span class={`cmd-palette-item-category cat-${item.category.toLowerCase()}`}>
+                    {item.category}
+                  </span>
                 </span>
               </div>
             )}
@@ -218,6 +231,22 @@ export function CommandPalette() {
           font-size: 13px;
         }
         .cmd-palette-item.selected .cmd-palette-item-label { color: var(--text); }
+        .cmd-palette-item-right {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+        .cmd-palette-shortcut {
+          font-size: 11px;
+          font-family: var(--font-body);
+          color: var(--text-tertiary);
+          background: var(--bg-base);
+          border: 1px solid var(--border);
+          border-radius: 4px;
+          padding: 1px 6px;
+          white-space: nowrap;
+        }
         .cmd-palette-item-category {
           font-size: 10px;
           padding: 2px 8px;

@@ -132,6 +132,7 @@ fn main() {
             commands::themes::import_theme,
             commands::themes::delete_custom_theme,
             commands::themes::export_theme,
+            commands::filesystem::open_in_file_manager,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

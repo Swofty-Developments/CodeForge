@@ -1,5 +1,6 @@
 pub mod browser;
 pub mod diff;
+pub mod filesystem;
 pub mod git;
 pub mod github;
 pub mod mcp;

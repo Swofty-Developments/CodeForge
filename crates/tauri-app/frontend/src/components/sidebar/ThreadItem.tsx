@@ -1,4 +1,4 @@
-import { Show } from "solid-js";
+import { Show, createSignal } from "solid-js";
 import type { Thread } from "../../types";
 import { appStore } from "../../stores/app-store";
 
@@ -15,6 +15,35 @@ export function ThreadItem(props: {
 
   const isActive = () => store.activeTab === props.thread.id;
   const isRenaming = () => store.renamingThread?.id === props.thread.id;
+  const [showTooltip, setShowTooltip] = createSignal(false);
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const projectName = () => {
+    const project = store.projects.find((p) => p.threads.some((t) => t.id === props.thread.id));
+    return project?.name || "";
+  };
+
+  const worktreeBranch = () => {
+    const wt = store.worktrees[props.thread.id];
+    return wt?.active ? wt.branch : null;
+  };
+
+  const lastMessagePreview = () => {
+    const msgs = store.threadMessages[props.thread.id];
+    if (!msgs || msgs.length === 0) return null;
+    const last = msgs[msgs.length - 1];
+    const text = last.content?.slice(0, 50);
+    return text ? (text.length >= 50 ? text + "..." : text) : null;
+  };
+
+  function handleMouseEnter() {
+    hoverTimer = setTimeout(() => setShowTooltip(true), 400);
+  }
+
+  function handleMouseLeave() {
+    clearTimeout(hoverTimer);
+    setShowTooltip(false);
+  }
 
   function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
@@ -73,6 +102,8 @@ export function ThreadItem(props: {
         onClick={() => selectThread(props.thread.id)}
         onContextMenu={handleContextMenu}
         onDblClick={() => setStore("renamingThread", { id: props.thread.id, text: props.thread.title })}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
       >
         <span
           class="thread-title"
@@ -130,6 +161,32 @@ export function ThreadItem(props: {
             </Show>
           </div>
         </div>
+        <Show when={showTooltip()}>
+          <div class="thread-tooltip">
+            <div class="thread-tooltip-title">{props.thread.title}</div>
+            <Show when={projectName()}>
+              <div class="thread-tooltip-row">
+                <span class="thread-tooltip-label">Project</span>
+                <span>{projectName()}</span>
+              </div>
+            </Show>
+            <Show when={worktreeBranch()}>
+              <div class="thread-tooltip-row">
+                <span class="thread-tooltip-label">Branch</span>
+                <span>{worktreeBranch()}</span>
+              </div>
+            </Show>
+            <Show when={props.prNumber}>
+              <div class="thread-tooltip-row">
+                <span class="thread-tooltip-label">PR</span>
+                <span>#{props.prNumber}</span>
+              </div>
+            </Show>
+            <Show when={lastMessagePreview()}>
+              <div class="thread-tooltip-preview">{lastMessagePreview()}</div>
+            </Show>
+          </div>
+        </Show>
       </div>
     </Show>
   );
@@ -218,6 +275,54 @@ if (!document.getElementById("thread-item-styles")) {
     }
     .thread-rename { padding: 2px 12px; margin: 1px 0; }
     .thread-rename input { width: 100%; font-size: 13px; }
+    .thread-tooltip {
+      position: absolute;
+      left: calc(100% + 8px);
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm, 6px);
+      padding: 8px 10px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      z-index: 200;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      min-width: 160px;
+      max-width: 240px;
+      pointer-events: none;
+      animation: threadTooltipIn 0.12s ease-out;
+    }
+    @keyframes threadTooltipIn {
+      from { opacity: 0; transform: translateY(-50%) translateX(-4px); }
+      to { opacity: 1; transform: translateY(-50%) translateX(0); }
+    }
+    .thread-tooltip-title {
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    .thread-tooltip-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 1px 0;
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+    .thread-tooltip-label {
+      color: var(--text-tertiary);
+    }
+    .thread-tooltip-preview {
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--text-tertiary);
+      font-style: italic;
+      word-break: break-word;
+    }
   `;
   document.head.appendChild(s);
 }
