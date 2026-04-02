@@ -134,6 +134,12 @@ export function Sidebar() {
               </svg>
               Search
             </button>
+            <button class="sidebar-action" onClick={() => appStore.openVirtualTab("__skills__")} title="Skills & Plugins">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+              </svg>
+              Skills
+            </button>
             <button class="sidebar-action" onClick={() => setStore("usageDashboardOpen", true)} title="Usage (Cmd+Shift+U)">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                 <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />

@@ -10,6 +10,7 @@ pub mod projects;
 pub mod providers;
 pub mod search;
 pub mod sessions;
+pub mod skills;
 pub mod settings;
 pub mod threads;
 pub mod usage;

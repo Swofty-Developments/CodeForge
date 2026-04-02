@@ -75,6 +75,7 @@ function SortableTab(props: { tabId: string; index: number }) {
         props.tabId === "__themes__" ? "Themes" :
         props.tabId === "__search__" ? "Search" :
         props.tabId === "__settings__" ? "Settings" :
+        props.tabId === "__skills__" ? "Skills" :
         thread()?.title || "..."
       }</span>
       <Show when={isUnread()}>

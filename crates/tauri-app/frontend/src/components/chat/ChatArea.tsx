@@ -8,6 +8,7 @@ import { ThreadSetup } from "./ThreadSetup";
 import { McpPanel } from "../sidebar/McpPanel";
 import { ThemeSelector } from "../settings/ThemeSelector";
 import { SearchOverlay } from "../shared/SearchOverlay";
+import { SkillsPanel } from "../skills/SkillsPanel";
 import type { ContentBlock } from "../../types";
 
 export function ChatArea() {
@@ -167,6 +168,11 @@ export function ChatArea() {
       <Show when={store.activeTab === "__search__"}>
         <div class="virtual-tab-content">
           <SearchOverlay inline />
+        </div>
+      </Show>
+      <Show when={store.activeTab === "__skills__"}>
+        <div class="virtual-tab-content">
+          <SkillsPanel />
         </div>
       </Show>
 

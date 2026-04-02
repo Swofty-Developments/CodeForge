@@ -438,6 +438,38 @@ export const mcpRemoveServer = (provider: string, name: string, scope: string) =
 export const listSlashCommands = (provider: string) =>
   invoke<SlashCommand[]>("list_slash_commands", { provider });
 
+// Skills / Plugins
+export interface SkillInfo {
+  name: string;
+  source: string;
+  enabled: boolean;
+}
+
+export interface MarketplaceSource {
+  url: string;
+}
+
+export const listSkills = (provider: string) =>
+  invoke<SkillInfo[]>("list_skills", { provider });
+
+export const installSkill = (provider: string, name: string) =>
+  invoke<string>("install_skill", { provider, name });
+
+export const uninstallSkill = (provider: string, name: string) =>
+  invoke<string>("uninstall_skill", { provider, name });
+
+export const enableSkill = (provider: string, name: string) =>
+  invoke<string>("enable_skill", { provider, name });
+
+export const disableSkill = (provider: string, name: string) =>
+  invoke<string>("disable_skill", { provider, name });
+
+export const listMarketplaces = (provider: string) =>
+  invoke<MarketplaceSource[]>("list_marketplaces", { provider });
+
+export const addMarketplace = (provider: string, source: string) =>
+  invoke<string>("add_marketplace", { provider, source });
+
 // Themes
 export interface ThemeData {
   id: string;
