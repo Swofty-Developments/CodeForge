@@ -427,6 +427,20 @@ if (!document.getElementById("skills-panel-styles")) {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .sk-item-version {
+      font-size: 9px;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+      background: var(--bg-accent);
+      padding: 1px 5px;
+      border-radius: var(--radius-pill);
+      white-space: nowrap;
+    }
+    .sk-mp-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+    }
     .sk-item-actions {
       display: flex;
       align-items: center;
