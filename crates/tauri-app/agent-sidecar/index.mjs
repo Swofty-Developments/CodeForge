@@ -201,7 +201,21 @@ async function handleQuery(cmd) {
   emit({ type: "turn_started" });
 
   try {
-    for await (const message of query({ prompt, options })) {
+    let queryIter;
+    try {
+      queryIter = query({ prompt, options });
+    } catch (resumeErr) {
+      // Resume failed (session not found on disk) — retry without resume
+      if (options.resume) {
+        emit({ type: "error", message: "Session not found, starting fresh" });
+        delete options.resume;
+        delete options.continue;
+        queryIter = query({ prompt, options });
+      } else {
+        throw resumeErr;
+      }
+    }
+    for await (const message of queryIter) {
       // Abort was requested while iterating.
       if (abort.signal.aborted) break;
 
@@ -339,6 +353,37 @@ async function handleQuery(cmd) {
   } catch (err) {
     if (abort.signal.aborted) {
       // Intentional abort — not an error.
+    } else if (options.resume && String(err?.message ?? "").includes("conversation")) {
+      // Session resume failed (session file not found) — retry without resume
+      emit({ type: "error", message: "Previous session not found, starting fresh" });
+      delete options.resume;
+      delete options.continue;
+      try {
+        for await (const message of query({ prompt, options })) {
+          if (abort.signal.aborted) break;
+          // Re-process messages with the same handler logic
+          const msgType = message.type;
+          if (msgType === "system" && message.subtype === "init") {
+            capturedSessionId = message.session_id;
+            emit({ type: "session_ready", sessionId: message.session_id, model: message.model || model || null });
+          } else if (msgType === "assistant" && message.message?.content) {
+            for (const block of message.message.content) {
+              if (block.type === "text" && block.text) {
+                const newText = block.text.slice(lastTextLen);
+                if (newText) emit({ type: "text_delta", text: newText });
+                lastTextLen = block.text.length;
+              }
+            }
+          } else if (msgType === "result" || "result" in message) {
+            hasCompletedQuery = true;
+            lastSessionId = capturedSessionId;
+            emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
+            turnEmitted = true;
+          }
+        }
+      } catch (retryErr) {
+        emit({ type: "error", message: String(retryErr?.message ?? retryErr) });
+      }
     } else {
       emit({ type: "error", message: String(err?.message ?? err) });
     }
