@@ -77,7 +77,7 @@ export function StatusBar() {
   const sessionStatus = createMemo(() => {
     const tab = store.activeTab;
     if (!tab) return "idle";
-    return store.sessionStatuses[tab] || "idle";
+    return store.runStates[tab] || "idle";
   });
 
   const statusLabel = createMemo(() => {

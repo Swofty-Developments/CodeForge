@@ -39,7 +39,7 @@ export function ThreadSetup(props: Props) {
     try {
       if (createWorktree) {
         const thread = store.projects.flatMap((p) => p.threads).find((t) => t.id === props.threadId);
-        const wt = await ipc.createWorktree(props.threadId, thread?.title || "worktree", props.repoPath);
+        const wt = await ipc.createWorktree(props.threadId, thread?.title || "worktree", props.repoPath, props.projectId);
         setStore("worktrees", props.threadId, wt);
         // Fetch so remote-only branches can be checked out
         await ipc.gitFetch(wt.path).catch(() => {});
@@ -90,8 +90,7 @@ export function ThreadSetup(props: Props) {
         }))
       );
 
-      // Store PR link
-      ipc.setSetting(`pr:${props.threadId}`, String(pr.number)).catch(() => {});
+      // Store PR link in local state (persisted via worktrees table on backend)
       setStore("projectPrMap", props.projectId, (map) => ({
         ...(map || {}),
         [props.threadId]: pr.number,
@@ -99,7 +98,7 @@ export function ThreadSetup(props: Props) {
 
       // Create worktree on the PR branch
       try {
-        const wt = await ipc.createWorktree(props.threadId, title, props.repoPath);
+        const wt = await ipc.createWorktree(props.threadId, title, props.repoPath, props.projectId);
         setStore("worktrees", props.threadId, wt);
         // Checkout the PR branch
         await ipc.gitCheckout(wt.path, pr.branch);

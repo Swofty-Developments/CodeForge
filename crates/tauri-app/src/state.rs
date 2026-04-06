@@ -13,4 +13,6 @@ pub struct TauriState {
     pub session_manager: tokio::sync::Mutex<SessionManager>,
     /// Maps persistence ThreadId -> session manager SessionId.
     pub thread_sessions: tokio::sync::Mutex<HashMap<codeforge_persistence::ThreadId, MgrSessionId>>,
+    /// Per-worktree locks to prevent concurrent git operations on the same worktree.
+    pub worktree_locks: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }

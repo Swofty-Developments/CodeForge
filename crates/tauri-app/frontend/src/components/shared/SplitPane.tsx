@@ -17,7 +17,7 @@ export function SplitPane(props: { threadId: string }) {
   const messages = () => store.threadMessages[props.threadId] || [];
 
   const isGenerating = () =>
-    store.sessionStatuses[props.threadId] === "generating";
+    store.runStates[props.threadId] === "generating";
 
   const threadTitle = () => {
     const thread = store.projects
@@ -71,7 +71,7 @@ export function SplitPane(props: { threadId: string }) {
             ? project.path
             : ".";
 
-      setStore("sessionStatuses", threadId, "generating");
+      setStore("runStates", threadId, "generating");
       await ipc.sendMessage(
         threadId,
         content,
@@ -89,7 +89,7 @@ export function SplitPane(props: { threadId: string }) {
         ...(msgs || []),
         errMsg,
       ]);
-      setStore("sessionStatuses", threadId, "error");
+      setStore("runStates", threadId, "error");
     }
   }
 

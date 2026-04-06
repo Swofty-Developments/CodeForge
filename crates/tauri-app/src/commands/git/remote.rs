@@ -235,15 +235,45 @@ pub async fn git_pull_branch(
         return Err("Could not determine remote branch".into());
     }
 
-    let output = Command::new("git")
-        .args(["pull", "origin", &remote_branch])
+    // Try fast-forward first (safest). If that fails, fall back to rebase.
+    let ff = Command::new("git")
+        .args(["pull", "--ff-only", "origin", &remote_branch])
         .current_dir(&cwd)
         .output()
         .await
         .map_err(|e| format!("Failed to run git pull: {e}"))?;
 
-    if !output.status.success() {
-        return Err(format!("git pull failed: {}", String::from_utf8_lossy(&output.stderr)));
+    if ff.status.success() {
+        return Ok(String::from_utf8_lossy(&ff.stdout).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+
+    // Fast-forward failed — check if it's because of divergent branches
+    let ff_err = String::from_utf8_lossy(&ff.stderr);
+    if ff_err.contains("Not possible to fast-forward") || ff_err.contains("divergent") {
+        // Try rebase
+        let rebase = Command::new("git")
+            .args(["pull", "--rebase", "origin", &remote_branch])
+            .current_dir(&cwd)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run git pull --rebase: {e}"))?;
+
+        if rebase.status.success() {
+            return Ok(format!("{} (rebased onto remote)", String::from_utf8_lossy(&rebase.stdout).trim()));
+        }
+
+        // Rebase also failed — abort and return a helpful error
+        let _ = Command::new("git")
+            .args(["rebase", "--abort"])
+            .current_dir(&cwd)
+            .output()
+            .await;
+
+        return Err(format!(
+            "Branch has diverged from remote and rebase failed. You may need to resolve conflicts manually.\n\n{}",
+            String::from_utf8_lossy(&rebase.stderr)
+        ));
+    }
+
+    Err(format!("git pull failed: {}", ff_err))
 }

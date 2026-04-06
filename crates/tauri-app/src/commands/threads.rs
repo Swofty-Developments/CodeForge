@@ -139,3 +139,66 @@ pub fn persist_user_message(
         .map_err(|e| e.to_string())?;
     Ok(msg_id.to_string())
 }
+
+/// Fork a thread from a specific message, copying messages up to that point.
+#[tauri::command]
+pub fn fork_thread(
+    state: State<'_, TauriState>,
+    thread_id: String,
+    message_id: String,
+    new_title: String,
+) -> Result<crate::commands::projects::ThreadResponse, String> {
+    let db = state.db.lock().map_err(|e| format!("{e}"))?;
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
+    let mid = message_id.parse::<MessageId>().map_err(|e| e.to_string())?;
+
+    // Get source thread to find its project
+    let source = codeforge_persistence::queries::get_thread_by_id(db.conn(), tid)
+        .map_err(|e| e.to_string())?
+        .ok_or("Source thread not found")?;
+
+    // Create new thread
+    let new_id = ThreadId::new();
+    let now = chrono::Utc::now();
+    let new_thread = codeforge_persistence::Thread {
+        id: new_id,
+        project_id: source.project_id,
+        title: new_title.clone(),
+        color: source.color.clone(),
+        created_at: now,
+        updated_at: now,
+    };
+    codeforge_persistence::queries::insert_thread(db.conn(), &new_thread)
+        .map_err(|e| e.to_string())?;
+
+    // Get the cutoff timestamp from the reference message
+    let cutoff: String = db.conn()
+        .query_row(
+            "SELECT created_at FROM messages WHERE id = ?1 AND thread_id = ?2",
+            rusqlite::params![mid.to_string(), tid.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Message not found: {e}"))?;
+
+    // Copy messages up to and including the reference message
+    let copy_count = db.conn()
+        .execute(
+            "INSERT INTO messages (id, thread_id, role, content, created_at)
+             SELECT lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+                    ?1, role, content, created_at
+             FROM messages
+             WHERE thread_id = ?2 AND created_at <= ?3
+             ORDER BY created_at ASC",
+            rusqlite::params![new_id.to_string(), tid.to_string(), cutoff],
+        )
+        .map_err(|e| format!("Failed to copy messages: {e}"))?;
+
+    tracing::debug!("Forked thread {tid} -> {new_id}: copied {copy_count} messages");
+
+    Ok(crate::commands::projects::ThreadResponse {
+        id: new_id.to_string(),
+        project_id: source.project_id.to_string(),
+        title: new_title,
+        color: source.color,
+    })
+}

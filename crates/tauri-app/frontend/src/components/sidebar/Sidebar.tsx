@@ -114,19 +114,17 @@ export function Sidebar() {
                 );
                 if (srcProject && srcProject.path === "." && targetProjectId !== srcProject.id) {
                   ipc.moveThreadToProject(threadId, targetProjectId);
-                  setStore("projects", (projects) => {
-                    const thread = projects
-                      .flatMap((p) => p.threads)
-                      .find((t) => t.id === threadId);
-                    if (!thread) return projects;
-                    return projects.map((p) => ({
-                      ...p,
-                      threads:
-                        p.id === targetProjectId
-                          ? [...p.threads.filter((t) => t.id !== threadId), thread]
-                          : p.threads.filter((t) => t.id !== threadId),
-                    }));
-                  });
+                  const srcIdx = store.projects.findIndex((p) => p.id === srcProject.id);
+                  const destIdx = store.projects.findIndex((p) => p.id === targetProjectId);
+                  const thread = srcProject.threads.find((t) => t.id === threadId);
+                  if (thread && srcIdx !== -1 && destIdx !== -1) {
+                    setStore("projects", srcIdx, "threads", (threads: any[]) =>
+                      threads.filter((t) => t.id !== threadId)
+                    );
+                    setStore("projects", destIdx, "threads", (threads: any[]) =>
+                      [...threads, thread]
+                    );
+                  }
                 }
               }
             }}

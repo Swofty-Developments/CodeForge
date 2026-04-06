@@ -123,7 +123,7 @@ export function CommandPalette() {
             );
 
             // Checkout the PR branch into a worktree
-            const wt = await ipc.checkoutPrIntoWorktree(threadId, pr.number, project.path);
+            const wt = await ipc.checkoutPrIntoWorktree(threadId, pr.number, project.path, project.id);
             setStore("worktrees", threadId, wt);
             setStore("projectPrMap", project.id, threadId, pr.number);
           } catch (e) {

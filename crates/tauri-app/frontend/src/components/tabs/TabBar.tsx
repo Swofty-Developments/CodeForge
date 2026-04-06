@@ -23,7 +23,7 @@ function SortableTab(props: { tabId: string; index: number }) {
 
   const statusDotColor = () => {
     if (props.tabId.startsWith("__")) return null;
-    const status = store.sessionStatuses[props.tabId];
+    const status = store.runStates[props.tabId];
     if (status === "ready") return "var(--green)";
     if (status === "generating" || status === "starting") return "var(--sky)";
     if (status === "error") return "var(--red)";
@@ -31,7 +31,7 @@ function SortableTab(props: { tabId: string; index: number }) {
   };
 
   const isGenerating = () => {
-    const status = store.sessionStatuses[props.tabId];
+    const status = store.runStates[props.tabId];
     return status === "generating" || status === "starting";
   };
 
@@ -41,7 +41,7 @@ function SortableTab(props: { tabId: string; index: number }) {
   const [justCompleted, setJustCompleted] = createSignal(false);
   let prevStatus: string | undefined;
   createEffect(on(
-    () => store.sessionStatuses[props.tabId],
+    () => store.runStates[props.tabId],
     (status) => {
       if (prevStatus === "generating" && status === "ready" && !isActive()) {
         setJustCompleted(true);

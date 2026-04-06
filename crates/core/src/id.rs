@@ -155,6 +155,11 @@ typed_id!(
     ToolCallId
 );
 
+typed_id!(
+    /// Unique identifier for a git worktree.
+    WorktreeId
+);
+
 /// Helper to generate a batch of IDs of the same type.
 pub fn generate_ids<T: From<Uuid>>(count: usize) -> Vec<T> {
     (0..count).map(|_| T::from(Uuid::new_v4())).collect()

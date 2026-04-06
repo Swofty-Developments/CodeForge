@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use codeforge_core::id::{MessageId, ProjectId, SessionId, ThreadId};
+use codeforge_core::id::{MessageId, ProjectId, SessionId, ThreadId, WorktreeId};
 use rusqlite::{params, Connection};
 
 use crate::models::*;
@@ -464,6 +464,212 @@ pub fn get_usage_for_thread(conn: &Connection, thread_id: &str) -> anyhow::Resul
 }
 
 // ---------------------------------------------------------------------------
+// Turn Checkpoints
+// ---------------------------------------------------------------------------
+
+pub fn insert_turn_checkpoint(
+    conn: &Connection,
+    id: &str,
+    thread_id: &str,
+    turn_id: &str,
+    commit_sha: &str,
+    created_at: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO turn_checkpoints (id, thread_id, turn_id, commit_sha, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, thread_id, turn_id, commit_sha, created_at],
+    )?;
+    Ok(())
+}
+
+pub fn get_turn_checkpoints(
+    conn: &Connection,
+    thread_id: &str,
+) -> anyhow::Result<Vec<(String, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT turn_id, commit_sha, created_at FROM turn_checkpoints WHERE thread_id = ?1 ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map(params![thread_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    rows.map(|r| r.map_err(Into::into)).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Worktrees
+// ---------------------------------------------------------------------------
+
+const WORKTREE_COLS: &str = "id, thread_id, project_id, branch, path, pr_number, status, created_at, updated_at, pr_state, pr_merge_commit, last_seen_comment_count, pr_url";
+
+fn map_worktree_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorktreeRow> {
+    Ok(WorktreeRow {
+        id: row.get(0)?,
+        thread_id: row.get(1)?,
+        project_id: row.get(2)?,
+        branch: row.get(3)?,
+        path: row.get(4)?,
+        pr_number: row.get(5)?,
+        status: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        pr_state: row.get(9)?,
+        pr_merge_commit: row.get(10)?,
+        last_seen_comment_count: row.get(11)?,
+        pr_url: row.get(12)?,
+    })
+}
+
+pub fn insert_worktree(conn: &Connection, worktree: &Worktree) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO worktrees (id, thread_id, project_id, branch, path, pr_number, status, created_at, updated_at, pr_state, pr_merge_commit, last_seen_comment_count, pr_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            worktree.id.to_string(),
+            worktree.thread_id.to_string(),
+            worktree.project_id.to_string(),
+            worktree.branch,
+            worktree.path,
+            worktree.pr_number,
+            worktree.status.as_str(),
+            worktree.created_at.to_rfc3339(),
+            worktree.updated_at.to_rfc3339(),
+            worktree.pr_state.as_ref().map(|s| s.as_str()),
+            worktree.pr_merge_commit,
+            worktree.last_seen_comment_count,
+            worktree.pr_url,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Returns the most recent ACTIVE worktree for a thread.
+/// Use this for operations that should only work on editable worktrees
+/// (merge/push/undo/sync).
+pub fn get_active_worktree_by_thread(conn: &Connection, thread_id: ThreadId) -> anyhow::Result<Option<Worktree>> {
+    let sql = format!("SELECT {WORKTREE_COLS} FROM worktrees WHERE thread_id = ?1 AND status = 'active' ORDER BY created_at DESC LIMIT 1");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query_map(params![thread_id.to_string()], map_worktree_row)?;
+    match rows.next() {
+        Some(r) => Ok(Some(r?.into_worktree()?)),
+        None => Ok(None),
+    }
+}
+
+/// Returns the most recent worktree for a thread, regardless of status.
+/// Use this for display / state restoration. Use `get_active_worktree_by_thread`
+/// for operations that should only work on active worktrees.
+pub fn get_worktree_by_thread(conn: &Connection, thread_id: ThreadId) -> anyhow::Result<Option<Worktree>> {
+    let sql = format!("SELECT {WORKTREE_COLS} FROM worktrees WHERE thread_id = ?1 ORDER BY created_at DESC LIMIT 1");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query_map(params![thread_id.to_string()], map_worktree_row)?;
+    match rows.next() {
+        Some(r) => Ok(Some(r?.into_worktree()?)),
+        None => Ok(None),
+    }
+}
+
+pub fn get_worktrees_by_project(conn: &Connection, project_id: ProjectId) -> anyhow::Result<Vec<Worktree>> {
+    let sql = format!("SELECT {WORKTREE_COLS} FROM worktrees WHERE project_id = ?1 ORDER BY created_at DESC");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![project_id.to_string()], map_worktree_row)?;
+    rows.map(|r| r.map_err(Into::into).and_then(|r| r.into_worktree()))
+        .collect()
+}
+
+pub fn get_all_active_worktrees(conn: &Connection) -> anyhow::Result<Vec<Worktree>> {
+    let sql = format!("SELECT {WORKTREE_COLS} FROM worktrees WHERE status = 'active'");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], map_worktree_row)?;
+    rows.map(|r| r.map_err(Into::into).and_then(|r| r.into_worktree()))
+        .collect()
+}
+
+pub fn update_worktree_status(conn: &Connection, id: WorktreeId, status: WorktreeStatus) -> anyhow::Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE worktrees SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        params![status.as_str(), now, id.to_string()],
+    )?;
+    Ok(())
+}
+
+pub fn update_worktree_pr(conn: &Connection, thread_id: ThreadId, pr_number: u32) -> anyhow::Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE worktrees SET pr_number = ?1, updated_at = ?2 WHERE thread_id = ?3 AND status = 'active'",
+        params![pr_number, now, thread_id.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Update the cached GitHub PR state + merge commit for a worktree.
+/// Called by the PR poller as it reconciles GitHub state.
+pub fn update_worktree_pr_state(
+    conn: &Connection,
+    id: WorktreeId,
+    pr_state: PrGhState,
+    merge_commit: Option<&str>,
+    pr_url: Option<&str>,
+) -> anyhow::Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE worktrees SET pr_state = ?1, pr_merge_commit = ?2, pr_url = COALESCE(?3, pr_url), updated_at = ?4 WHERE id = ?5",
+        params![pr_state.as_str(), merge_commit, pr_url, now, id.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Persist the number of PR comments the poller has seen so far.
+/// This is the high-water mark used to compute deltas between polls across
+/// app restarts.
+pub fn update_worktree_comment_count(
+    conn: &Connection,
+    id: WorktreeId,
+    count: u32,
+) -> anyhow::Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE worktrees SET last_seen_comment_count = ?1, updated_at = ?2 WHERE id = ?3",
+        params![count, now, id.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Clear PR linkage on a worktree. Used when the PR is deleted/transferred on
+/// GitHub and the worktree should revert to "branch only, no PR".
+pub fn clear_worktree_pr(conn: &Connection, id: WorktreeId) -> anyhow::Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE worktrees SET pr_number = NULL, pr_state = NULL, pr_merge_commit = NULL, pr_url = NULL, last_seen_comment_count = 0, updated_at = ?1 WHERE id = ?2",
+        params![now, id.to_string()],
+    )?;
+    Ok(())
+}
+
+pub fn find_thread_for_pr_number(conn: &Connection, pr_number: u32) -> anyhow::Result<Option<ThreadId>> {
+    let mut stmt = conn.prepare(
+        "SELECT thread_id FROM worktrees WHERE pr_number = ?1 AND status = 'active' LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map(params![pr_number], |row| row.get::<_, String>(0))?;
+    match rows.next() {
+        Some(r) => {
+            let id_str = r?;
+            Ok(Some(id_str.parse().map_err(|e: codeforge_core::id::IdParseError| anyhow::anyhow!(e))?))
+        }
+        None => Ok(None),
+    }
+}
+
+pub fn delete_worktree(conn: &Connection, id: WorktreeId) -> anyhow::Result<()> {
+    conn.execute("DELETE FROM worktrees WHERE id = ?1", params![id.to_string()])?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Internal row types for mapping from SQLite text columns
 // ---------------------------------------------------------------------------
 
@@ -549,6 +755,46 @@ impl SessionRow {
             pid: self.pid,
             claude_session_id: self.claude_session_id,
             created_at: DateTime::parse_from_rfc3339(&self.created_at)?.with_timezone(&Utc),
+        })
+    }
+}
+
+struct WorktreeRow {
+    id: String,
+    thread_id: String,
+    project_id: String,
+    branch: String,
+    path: String,
+    pr_number: Option<u32>,
+    status: String,
+    created_at: String,
+    updated_at: String,
+    pr_state: Option<String>,
+    pr_merge_commit: Option<String>,
+    last_seen_comment_count: u32,
+    pr_url: Option<String>,
+}
+
+impl WorktreeRow {
+    fn into_worktree(self) -> anyhow::Result<Worktree> {
+        let pr_state = match self.pr_state.as_deref() {
+            Some(s) => Some(s.parse::<PrGhState>().map_err(|e| anyhow::anyhow!(e))?),
+            None => None,
+        };
+        Ok(Worktree {
+            id: self.id.parse().map_err(|e: codeforge_core::id::IdParseError| anyhow::anyhow!(e))?,
+            thread_id: self.thread_id.parse().map_err(|e: codeforge_core::id::IdParseError| anyhow::anyhow!(e))?,
+            project_id: self.project_id.parse().map_err(|e: codeforge_core::id::IdParseError| anyhow::anyhow!(e))?,
+            branch: self.branch,
+            path: self.path,
+            pr_number: self.pr_number,
+            status: self.status.parse::<WorktreeStatus>().map_err(|e| anyhow::anyhow!(e))?,
+            created_at: DateTime::parse_from_rfc3339(&self.created_at)?.with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&self.updated_at)?.with_timezone(&Utc),
+            pr_state,
+            pr_merge_commit: self.pr_merge_commit,
+            last_seen_comment_count: self.last_seen_comment_count,
+            pr_url: self.pr_url,
         })
     }
 }

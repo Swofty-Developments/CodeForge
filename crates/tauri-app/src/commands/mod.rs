@@ -1,3 +1,4 @@
+pub mod blame;
 pub mod browser;
 pub mod diff;
 pub mod filesystem;

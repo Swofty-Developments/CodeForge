@@ -41,7 +41,7 @@ export function ProjectGroup(props: { project: Project }) {
   const collapsedSummary = createMemo(() => {
     const threads = props.project.threads;
     const generating = threads.filter(
-      (t) => store.sessionStatuses[t.id] === "generating" || store.sessionStatuses[t.id] === "starting"
+      (t) => store.runStates[t.id] === "generating" || store.runStates[t.id] === "starting"
     ).length;
     if (generating > 0) return `${threads.length} threads · ${generating} active`;
     return `${threads.length} thread${threads.length !== 1 ? "s" : ""}`;

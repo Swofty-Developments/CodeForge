@@ -1,6 +1,6 @@
 import { createRoot } from "solid-js";
 import { createStore } from "solid-js/store";
-import type { Project, Thread, ChatMessage, SessionStatus, AgentEventPayload, Attachment, ContentBlock, ThreadTokenUsage } from "../types";
+import type { Project, Thread, ChatMessage, RunState, LifecycleState, AgentEventPayload, Attachment, ContentBlock, ThreadTokenUsage } from "../types";
 import * as ipc from "../ipc";
 
 export interface WindowState {
@@ -31,7 +31,18 @@ export interface AppStore {
   composerText: string;
   selectedProvider: string;
   threadMessages: Record<string, ChatMessage[]>;
-  sessionStatuses: Record<string, SessionStatus>;
+  /**
+   * Agent run state per thread (idle/generating/error/...). Orthogonal to
+   * `lifecycleStates`. Never contains PR-lifecycle values.
+   */
+  runStates: Record<string, RunState>;
+  /**
+   * Lifecycle state per thread — the worktree / PR relationship. The
+   * backend's `get_pr_status` reconciler is the single source of truth;
+   * `pollPrStatuses` stores whatever it returns here verbatim. Also hydrated
+   * on cold start from the worktree row's cached fields.
+   */
+  lifecycleStates: Record<string, LifecycleState>;
   pendingApprovals: PendingApproval[];
   contextMenu: { type: "thread" | "project"; id: string; x: number; y: number } | null;
   renamingThread: { id: string; text: string } | null;
@@ -64,6 +75,8 @@ export interface AppStore {
   recentlyClosedTabs: string[];
   keyboardHelpOpen: boolean;
   threadPrStatus: Record<string, import("../ipc").PrStatus>;
+  worktreeHealth: Record<string, string>;  // thread_id -> "healthy" | "missing" | "orphaned" | "detached_head"
+  turnCheckpoints: Record<string, Record<string, string>>;  // thread_id -> { turn_id: commit_sha }
 }
 
 function createAppStore() {
@@ -76,7 +89,8 @@ function createAppStore() {
     composerText: "",
     selectedProvider: "claude_code",
     threadMessages: {},
-    sessionStatuses: {},
+    runStates: {},
+    lifecycleStates: {},
     pendingApprovals: [],
     contextMenu: null,
     renamingThread: null,
@@ -109,6 +123,8 @@ function createAppStore() {
     recentlyClosedTabs: [],
     keyboardHelpOpen: false,
     threadPrStatus: {},
+    worktreeHealth: {},
+    turnCheckpoints: {},
   });
 
   // ── Window state persistence (debounced) ──────────────────────────
@@ -445,7 +461,7 @@ function createAppStore() {
             // It's a git repo — create worktree
             const thread = project.threads.find((t) => t.id === threadId);
             if (thread) {
-              const newWt = await ipc.createWorktree(threadId, thread.title, project.path);
+              const newWt = await ipc.createWorktree(threadId, thread.title, project.path, project.id);
               setStore("worktrees", threadId, newWt);
               wt = newWt;
             }
@@ -483,7 +499,7 @@ function createAppStore() {
         sendText = ctx + "\n\n" + text;
       }
 
-      setStore("sessionStatuses", threadId, "generating");
+      setStore("runStates", threadId, "generating");
       await ipc.sendMessage(threadId, sendText, store.selectedProvider, cwd, store.selectedModel ?? undefined);
     } catch (e) {
       const errMsg: ChatMessage = {
@@ -493,7 +509,7 @@ function createAppStore() {
         content: `Error: ${e}`,
       };
       setStore("threadMessages", threadId, (msgs) => [...(msgs || []), errMsg]);
-      setStore("sessionStatuses", threadId, "error");
+      setStore("runStates", threadId, "error");
     }
   }
 
@@ -696,10 +712,10 @@ function createAppStore() {
       }
       case "turn_started":
         turnStartTimes[thread_id] = Date.now();
-        setStore("sessionStatuses", thread_id, "generating");
+        setStore("runStates", thread_id, "generating");
         break;
       case "turn_completed": {
-        setStore("sessionStatuses", thread_id, "ready");
+        setStore("runStates", thread_id, "ready");
         setStore("threadMessages", thread_id, (msgs) => {
           if (!msgs) return msgs;
           const last = msgs[msgs.length - 1];
@@ -730,7 +746,7 @@ function createAppStore() {
         break;
       }
       case "turn_aborted":
-        setStore("sessionStatuses", thread_id, "ready");
+        setStore("runStates", thread_id, "ready");
         setStore("threadMessages", thread_id, (msgs) => {
           if (!msgs) return [{ id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Aborted: ${payload.reason}` }];
           // Finalize any in-progress assistant message and mark running tools as error
@@ -787,8 +803,8 @@ function createAppStore() {
       case "session_ready":
         // Don't reset to "ready" if we're mid-generation —
         // session_ready fires when the sidecar initializes but before the response
-        if (store.sessionStatuses[thread_id] !== "generating") {
-          setStore("sessionStatuses", thread_id, "ready");
+        if (store.runStates[thread_id] !== "generating") {
+          setStore("runStates", thread_id, "ready");
         }
         // Capture the confirmed model from the SDK
         if (payload.model) {
@@ -802,7 +818,7 @@ function createAppStore() {
           setStore("availableSlashCommands", cmdList);
           break;
         }
-        setStore("sessionStatuses", thread_id, "error");
+        setStore("runStates", thread_id, "error");
         setStore("threadMessages", thread_id, (msgs) => [
           ...(msgs || []),
           { id: crypto.randomUUID(), thread_id, role: "system" as const, content: `Error: ${payload.message}` },
@@ -923,7 +939,7 @@ function createAppStore() {
     const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
 
     try {
-      setStore("sessionStatuses", threadId, "generating");
+      setStore("runStates", threadId, "generating");
       await ipc.sendMessage(threadId, userText, store.selectedProvider, cwd, store.selectedModel ?? undefined);
     } catch (e) {
       const errMsg: ChatMessage = {
@@ -933,7 +949,7 @@ function createAppStore() {
         content: `Error: ${e}`,
       };
       setStore("threadMessages", threadId, (m) => [...(m || []), errMsg]);
-      setStore("sessionStatuses", threadId, "error");
+      setStore("runStates", threadId, "error");
     }
   }
 
@@ -973,7 +989,7 @@ function createAppStore() {
     const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
 
     try {
-      setStore("sessionStatuses", threadId, "generating");
+      setStore("runStates", threadId, "generating");
       await ipc.sendMessage(threadId, userText, store.selectedProvider, cwd, store.selectedModel ?? undefined);
     } catch (e) {
       const errMsg: ChatMessage = {
@@ -983,7 +999,7 @@ function createAppStore() {
         content: `Error: ${e}`,
       };
       setStore("threadMessages", threadId, (m) => [...(m || []), errMsg]);
-      setStore("sessionStatuses", threadId, "error");
+      setStore("runStates", threadId, "error");
     }
   }
 
@@ -1002,11 +1018,20 @@ function createAppStore() {
     if (status && status !== "none" && threads.length > 0) {
       const map: Record<string, number> = {};
       try {
-        const keys = threads.map((t) => `pr:${t.id}`);
-        const batch = await ipc.getSettingsBatch(keys);
+        // Load worktree info (including PR numbers + status) from the worktrees table.
+        // The DB is the source of truth — status field tells us active/merged/closed/deleted/orphaned.
+        // We derive a full `LifecycleState` from the cached worktree row so the
+        // UI is correct on first paint, before the poller runs.
         for (const t of threads) {
-          const val = batch[`pr:${t.id}`];
-          if (val) map[t.id] = parseInt(val, 10);
+          const wt = await ipc.getWorktree(t.id);
+          if (wt) {
+            setStore("worktrees", t.id, wt);
+            if (wt.pr_number) {
+              map[t.id] = wt.pr_number;
+            }
+            const lifecycle = deriveLifecycleFromWorktree(wt);
+            setStore("lifecycleStates", t.id, lifecycle);
+          }
         }
       } catch {}
       if (Object.keys(map).length > 0) {
@@ -1015,54 +1040,144 @@ function createAppStore() {
     }
   }
 
-  // Track last seen comment count per thread to detect new ones
-  const lastSeenComments: Record<string, number> = {};
+  /**
+   * Derive an initial `LifecycleState` from a worktree row's cached fields.
+   * Used for cold-start hydration — no GitHub round-trip. The poller will
+   * overwrite this with a fresher value on the next tick.
+   */
+  function deriveLifecycleFromWorktree(wt: import("../ipc").WorktreeInfo): import("../types").LifecycleState {
+    const mkSnap = (state: string): import("../types").PrSnapshot => ({
+      number: wt.pr_number ?? 0,
+      url: wt.pr_url ?? "",
+      state,
+    });
+    switch (wt.status) {
+      case "merged":
+        return { kind: "pr_merged", pr: mkSnap("merged"), merge_commit: wt.pr_merge_commit ?? "" };
+      case "closed":
+        return { kind: "pr_closed", pr: mkSnap("closed") };
+      case "orphaned":
+        return { kind: "worktree_orphaned", branch: wt.branch, path: wt.path };
+      case "deleted":
+        return { kind: "working" };
+      case "active":
+      default:
+        if (wt.pr_number) {
+          const snap = mkSnap(wt.pr_state ?? "open");
+          return { kind: "pr_open", pr: snap, ci: "none", review: "none", unread_comments: 0 };
+        }
+        return { kind: "working" };
+    }
+  }
 
-  /** Poll CI/review status for all threads with linked PRs */
+  /**
+   * Poll GitHub for PR status across all threads. Skips locked lifecycles
+   * (merged/closed/orphaned) to avoid wasted API calls. Parallelizes within
+   * a project via `Promise.allSettled`. Uses the backend reconciler
+   * (`ipc.getPrStatus`) as the single source of truth — everything it
+   * returns is stored verbatim on the thread's lifecycle, and transition
+   * flags (`reopen_detected`, `revert_detected`, `pr_missing`) trigger
+   * one-shot event messages in the chat scroll.
+   */
   async function pollPrStatuses() {
     for (const project of store.projects) {
       if (project.path === ".") continue;
-      const prMap = store.projectPrMap[project.id];
-      if (!prMap) continue;
-      for (const threadId of Object.keys(prMap)) {
-        try {
-          const status = await ipc.getPrStatus(threadId, project.path);
-          if (status) {
-            setStore("threadPrStatus", threadId, status);
 
-            // Check for new review comments and inject into thread
-            const prevCount = lastSeenComments[threadId] ?? 0;
-            if (status.comment_count > prevCount && prevCount > 0) {
-              // Fetch new comments
-              const comments = await ipc.getPrReviewComments(threadId, project.path);
-              if (comments.length > 0) {
-                // Only show the newest comments we haven't seen
-                const newComments = comments.slice(-Math.max(status.comment_count - prevCount, 1));
-                for (const c of newComments) {
-                  if (!c.body?.trim()) continue;
-                  const content = `**PR Review from @${c.author}** (${c.state}):\n\n${c.body}`;
-                  setStore("threadMessages", threadId, (msgs) => [
-                    ...(msgs || []),
-                    { id: `pr-${crypto.randomUUID()}`, thread_id: threadId, role: "system" as const, content },
-                  ]);
-                }
-                // Mark thread as unread if not active
-                if (store.activeTab !== threadId) {
-                  setStore("unreadTabs", threadId, true);
-                }
-              }
+      // Source of truth is the worktree record, not the projectPrMap mirror.
+      const threadIds: string[] = [];
+      for (const thread of project.threads) {
+        const wt = store.worktrees[thread.id];
+        if (!wt || !wt.pr_number) continue;
+        // Skip terminal / unreachable lifecycles
+        const lc = store.lifecycleStates[thread.id];
+        if (lc?.kind === "pr_merged" || lc?.kind === "pr_closed") continue;
+        if (wt.status === "deleted" || wt.status === "orphaned") continue;
+        threadIds.push(thread.id);
+      }
+      if (threadIds.length === 0) continue;
+
+      // Parallelize within the project
+      const results = await Promise.allSettled(
+        threadIds.map((tid) => ipc.getPrStatus(tid, project.path).then((s) => ({ tid, s })))
+      );
+
+      for (const r of results) {
+        if (r.status !== "fulfilled") continue;
+        const { tid: threadId, s: status } = r.value;
+        if (!status) continue;
+
+        setStore("threadPrStatus", threadId, status);
+        // Store the lifecycle verbatim — backend is the single source of truth.
+        setStore("lifecycleStates", threadId, status.lifecycle);
+
+        // ── One-shot transition events ──
+        // The backend persists the new worktree status; we just surface
+        // human-readable events in the chat scroll when things change.
+        if (status.pr_missing) {
+          pushSystemEvent(threadId, "warn",
+            `PR #${status.pr_number} no longer exists on GitHub. Link cleared.`);
+          // Reset worktree mirror to match the cleared DB state
+          setStore("worktrees", threadId, (wt: any) =>
+            wt ? { ...wt, pr_number: null, pr_state: null, pr_merge_commit: null, pr_url: null } : wt);
+        } else if (status.reopen_detected) {
+          pushSystemEvent(threadId, "info",
+            `PR #${status.pr_number} was reopened — thread is editable again.`);
+          setStore("worktrees", threadId, (wt: any) =>
+            wt ? { ...wt, status: "active", active: true, pr_state: "open" } : wt);
+        } else if (status.revert_detected) {
+          pushSystemEvent(threadId, "warn",
+            `PR #${status.pr_number}'s merge commit is no longer reachable on the base branch — it looks reverted. You can continue working in this thread.`);
+        } else if (status.previous_status === "active" && status.lifecycle.kind === "pr_merged") {
+          pushSystemEvent(threadId, "info",
+            `PR #${status.pr_number} was merged on GitHub. This thread is now read-only.`);
+          setStore("worktrees", threadId, (wt: any) =>
+            wt ? { ...wt, status: "merged", active: false } : wt);
+        } else if (status.previous_status === "active" && status.lifecycle.kind === "pr_closed") {
+          pushSystemEvent(threadId, "warn",
+            `PR #${status.pr_number} was closed without merging. This thread is now read-only.`);
+          setStore("worktrees", threadId, (wt: any) =>
+            wt ? { ...wt, status: "closed", active: false } : wt);
+        }
+
+        // New review comments ≥ 1 since last poll
+        if (status.new_comment_count > 0) {
+          // Fetch only the new ones and append them as review-kind messages.
+          try {
+            const all = await ipc.getPrReviewComments(threadId, project.path);
+            const toShow = all.slice(-status.new_comment_count);
+            for (const c of toShow) {
+              if (!c.body?.trim()) continue;
+              pushSystemEvent(threadId, "review",
+                `**@${c.author}** (${c.state}):\n\n${c.body}`);
             }
-            lastSeenComments[threadId] = status.comment_count;
-          }
-        } catch {
-          // Silently ignore — PR status is best-effort
+            if (store.activeTab !== threadId && toShow.length > 0) {
+              setStore("unreadTabs", threadId, true);
+            }
+          } catch {}
         }
       }
     }
   }
 
-  // PR status polling — lazy, only starts after first loadData completes
-  // (avoid calling IPC before store is ready)
+  /** Append a typed system event to the thread's chat scroll. */
+  function pushSystemEvent(
+    threadId: string,
+    kind: "info" | "warn" | "error" | "review",
+    content: string,
+  ) {
+    setStore("threadMessages", threadId, (msgs) => [
+      ...(msgs || []),
+      {
+        id: `sys-${crypto.randomUUID()}`,
+        thread_id: threadId,
+        role: "system" as const,
+        content,
+        system_kind: kind,
+      } as any,
+    ]);
+  }
+
+  // PR status polling runs from App.tsx on a 60s interval.
 
   return {
     store,

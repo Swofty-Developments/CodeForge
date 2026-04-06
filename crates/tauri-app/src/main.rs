@@ -36,6 +36,7 @@ fn main() {
         db: Arc::new(std::sync::Mutex::new(db)),
         session_manager: tokio::sync::Mutex::new(SessionManager::new()),
         thread_sessions: tokio::sync::Mutex::new(HashMap::new()),
+        worktree_locks: tokio::sync::Mutex::new(HashMap::new()),
     };
 
     let mut builder = tauri::Builder::default()
@@ -64,10 +65,13 @@ fn main() {
             commands::threads::move_thread_to_project,
             commands::threads::persist_user_message,
             commands::threads::delete_messages_after,
+            commands::threads::fork_thread,
             commands::sessions::send_message,
             commands::sessions::interrupt_session,
             commands::sessions::stop_session,
             commands::sessions::respond_to_approval,
+            commands::sessions::get_sessions_by_thread,
+            commands::sessions::get_turn_checkpoints,
             commands::settings::get_setting,
             commands::settings::get_settings_batch,
             commands::settings::set_setting,
@@ -81,6 +85,18 @@ fn main() {
             commands::worktree::list_open_prs,
             commands::worktree::find_thread_for_pr,
             commands::worktree::checkout_pr_into_worktree,
+            commands::worktree::link_pr_to_thread,
+            commands::worktree::validate_worktrees,
+            commands::worktree::repair_worktree,
+            commands::worktree::cleanup_worktrees,
+            commands::worktree::get_conflict_files,
+            commands::worktree::get_conflict_markers,
+            commands::worktree::resolve_conflict,
+            commands::worktree::finalize_merge,
+            commands::worktree::abort_merge,
+            commands::worktree::undo_to_commit,
+            commands::worktree::get_head_commit,
+            commands::worktree::check_worktree_sync_status,
             commands::search::search_messages,
             commands::usage::get_usage_summary,
             commands::usage::get_thread_usage,
@@ -88,6 +104,9 @@ fn main() {
             commands::diff::get_session_diff,
             commands::diff::get_file_diff,
             commands::diff::get_file_content,
+            commands::diff::get_turn_diff,
+            commands::diff::get_turn_changed_files,
+            commands::blame::get_file_blame,
             commands::naming::auto_name_thread,
             commands::browser::browser_navigate,
             commands::browser::browser_click,
@@ -150,6 +169,7 @@ fn main() {
             commands::themes::delete_custom_theme,
             commands::themes::export_theme,
             commands::filesystem::open_in_file_manager,
+            commands::filesystem::open_external_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

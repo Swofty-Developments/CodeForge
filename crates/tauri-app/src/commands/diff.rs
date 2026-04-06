@@ -307,3 +307,55 @@ pub fn get_file_content(cwd: String, file_path: String, version: String) -> Resu
         _ => Err(format!("Unknown version: {version}. Use 'HEAD' or 'working'.")),
     }
 }
+
+/// Get diff between a base commit and current HEAD (per-turn diff).
+#[tauri::command]
+pub fn get_turn_diff(cwd: String, base_commit: String) -> Result<Vec<FileDiff>, String> {
+    let output = Command::new("git")
+        .args(["diff", &base_commit, "HEAD"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git diff: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!("git diff failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_unified_diff(&raw))
+}
+
+/// Get changed files between a base commit and HEAD with stats.
+#[tauri::command]
+pub fn get_turn_changed_files(cwd: String, base_commit: String) -> Result<Vec<ChangedFile>, String> {
+    let output = Command::new("git")
+        .args(["diff", "--numstat", &base_commit, "HEAD"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("{e}"))?;
+
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut files = Vec::new();
+
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 3 {
+            let ins = parts[0].parse::<u32>().unwrap_or(0);
+            let del = parts[1].parse::<u32>().unwrap_or(0);
+            let path = parts[2].to_string();
+            let is_binary = parts[0] == "-" && parts[1] == "-";
+            files.push(ChangedFile {
+                status: if is_binary { "binary".to_string() } else { "modified".to_string() },
+                path,
+                insertions: ins,
+                deletions: del,
+            });
+        }
+    }
+
+    Ok(files)
+}

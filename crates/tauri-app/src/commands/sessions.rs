@@ -159,3 +159,43 @@ pub async fn respond_to_approval(
     mgr.respond_to_approval(sid, &request_id, approve)
         .map_err(|e| format!("{e:#}"))
 }
+
+#[derive(serde::Serialize)]
+pub struct SessionInfo {
+    pub id: String,
+    pub thread_id: String,
+    pub provider: String,
+    pub status: String,
+    pub claude_session_id: Option<String>,
+    pub created_at: String,
+}
+
+#[tauri::command]
+pub fn get_sessions_by_thread(
+    state: State<'_, TauriState>,
+    thread_id: String,
+) -> Result<Vec<SessionInfo>, String> {
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| format!("{e}"))?;
+    let sessions = codeforge_persistence::queries::get_sessions_by_thread(db.conn(), tid)
+        .map_err(|e| e.to_string())?;
+
+    Ok(sessions.into_iter().map(|s| SessionInfo {
+        id: s.id.to_string(),
+        thread_id: s.thread_id.to_string(),
+        provider: s.provider.as_str().to_string(),
+        status: s.status,
+        claude_session_id: s.claude_session_id,
+        created_at: s.created_at.to_rfc3339(),
+    }).collect())
+}
+
+#[tauri::command]
+pub fn get_turn_checkpoints(
+    state: State<'_, TauriState>,
+    thread_id: String,
+) -> Result<Vec<(String, String, String)>, String> {
+    let db = state.db.lock().map_err(|e| format!("{e}"))?;
+    codeforge_persistence::queries::get_turn_checkpoints(db.conn(), &thread_id)
+        .map_err(|e| e.to_string())
+}

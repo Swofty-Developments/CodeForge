@@ -5,11 +5,38 @@ import { Markdown } from "./Markdown";
 import { ToolUseCard, ToolUseStack } from "./ToolUseCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThreadSetup } from "./ThreadSetup";
+import { LifecycleBanner } from "./LifecycleBanner";
 import { McpPanel } from "../sidebar/McpPanel";
 import { ThemeSelector } from "../settings/ThemeSelector";
 import { SearchOverlay } from "../shared/SearchOverlay";
 import { SkillsPanel } from "../skills/SkillsPanel";
 import type { ContentBlock } from "../../types";
+
+// Split text into alternating text/link parts for clickable URL rendering
+function linkifyParts(text: string): Array<{ type: "text" | "link"; value: string }> {
+  const urlRegex = /(https?:\/\/[^\s<>"'`]+)/g;
+  const parts: Array<{ type: "text" | "link"; value: string }> = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = urlRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: "text", value: text.slice(lastIndex, match.index) });
+    }
+    // Trim trailing punctuation that's unlikely to be part of the URL
+    let url = match[0];
+    const trailing = url.match(/[.,;:!?)\]}>]+$/);
+    if (trailing) {
+      url = url.slice(0, url.length - trailing[0].length);
+    }
+    parts.push({ type: "link", value: url });
+    lastIndex = match.index + url.length;
+  }
+  if (lastIndex < text.length) {
+    parts.push({ type: "text", value: text.slice(lastIndex) });
+  }
+  if (parts.length === 0) parts.push({ type: "text", value: text });
+  return parts;
+}
 
 export function ChatArea() {
   const { store, approveRequest, denyRequest, addProject, newThread } = appStore;
@@ -22,7 +49,7 @@ export function ChatArea() {
 
   const isGenerating = () => {
     if (!store.activeTab) return false;
-    return store.sessionStatuses[store.activeTab] === "generating";
+    return store.runStates[store.activeTab] === "generating";
   };
 
   const isLoadingMessages = () => {
@@ -72,6 +99,28 @@ export function ChatArea() {
     handleMergeWorktree();
   }
 
+  // Track whether the worktree branch is up-to-date with remote
+  const [syncStatus, setSyncStatus] = createSignal<string>("clean"); // "clean" | "dirty" | "ahead" | "diverged"
+  const prIsClean = () => syncStatus() === "clean";
+
+  // Check sync status when thread changes or worktree is active
+  createEffect(() => {
+    const tab = store.activeTab;
+    if (!tab) return;
+    const wt = store.worktrees[tab];
+    if (!wt || !wt.active) return;
+    const pr = store.projectPrMap;
+    // Debounce: check after a short delay
+    setTimeout(async () => {
+      try {
+        const status = await ipc.checkWorktreeSyncStatus(tab);
+        setSyncStatus(status);
+      } catch {
+        setSyncStatus("clean");
+      }
+    }, 500);
+  });
+
   const [creatingPr, setCreatingPr] = createSignal(false);
   const [initializingGit, setInitializingGit] = createSignal(false);
   const [showPrPicker, setShowPrPicker] = createSignal(false);
@@ -112,7 +161,7 @@ export function ChatArea() {
     setLinkingPr(true);
     try {
       // Checkout PR branch into worktree
-      const wt = await ipc.checkoutPrIntoWorktree(tab, pr.number, proj.path);
+      const wt = await ipc.checkoutPrIntoWorktree(tab, pr.number, proj.path, proj.id);
       appStore.setStore("worktrees", tab, wt);
       appStore.setStore("projectPrMap", proj.id, tab, pr.number);
 
@@ -136,7 +185,7 @@ export function ChatArea() {
     } catch (e) {
       appStore.setStore("threadMessages", tab, (msgs) => [
         ...(msgs || []),
-        { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: `Failed to link PR: ${e}` },
+        { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, system_kind: "error" as const, content: `Failed to link PR: ${e}` },
       ]);
     } finally {
       setLinkingPr(false);
@@ -187,7 +236,7 @@ export function ChatArea() {
       if (tab) {
         appStore.setStore("threadMessages", tab, (msgs) => [
           ...(msgs || []),
-          { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: `Failed to initialize git: ${e}` },
+          { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, system_kind: "error" as const, content: `Failed to initialize git: ${e}` },
         ]);
       }
     } finally {
@@ -231,7 +280,7 @@ export function ChatArea() {
     } catch (e) {
       appStore.setStore("threadMessages", tab, (msgs) => [
         ...(msgs || []),
-        { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: `Failed to create PR: ${e}` },
+        { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, system_kind: "error" as const, content: `Failed to create PR: ${e}` },
       ]);
     } finally {
       setCreatingPr(false);
@@ -302,28 +351,53 @@ export function ChatArea() {
     const project = store.projects.find((p) => p.threads.some((t) => t.id === tab));
     if (!thread || !project || project.path === ".") return;
     try {
-      const wt = await ipc.createWorktree(tab, thread.title, project.path);
+      const wt = await ipc.createWorktree(tab, thread.title, project.path, project.id);
       appStore.setStore("worktrees", tab, wt);
     } catch (e) {
       console.error("Failed to create worktree:", e);
     }
   }
 
+  const [merging, setMerging] = createSignal(false);
+
   async function handleMergeWorktree() {
     const tab = store.activeTab;
     if (!tab) return;
     const project = store.projects.find((p) => p.threads.some((t) => t.id === tab));
     if (!project) return;
+    setMerging(true);
     try {
       const msg = await ipc.mergeWorktree(tab, project.path);
-      appStore.setStore("worktrees", tab, undefined as any);
+      // Push to PR only — do NOT mark the thread as merged.
+      // Thread stays editable. It only locks when get_pr_status detects the
+      // PR has been merged on GitHub.
       appStore.setStore("threadMessages", tab, (msgs) => [
         ...(msgs || []),
         { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: msg },
       ]);
     } catch (e) {
-      // Auto-prompt the AI to help resolve the conflict
       const errorMsg = String(e);
+
+      // Typed divergence error from merge_worktree: we've detected that the
+      // remote PR branch has commits we don't. Don't ask the AI to "fix it";
+      // surface a clear, actionable message instead.
+      if (errorMsg.startsWith("DIVERGED:") || errorMsg.includes("DIVERGED:")) {
+        const aheadMatch = errorMsg.match(/ahead=(\d+)/);
+        const behindMatch = errorMsg.match(/behind=(\d+)/);
+        const ahead = aheadMatch ? aheadMatch[1] : "?";
+        const behind = behindMatch ? behindMatch[1] : "?";
+        const pretty =
+          errorMsg.includes("lease_rejected")
+            ? `The remote PR branch moved while we were pushing. Pull first, then try again.`
+            : `Your branch has diverged from the PR — ${ahead} ahead, ${behind} behind. Pull the remote changes and resolve any conflicts, then try pushing again.`;
+        appStore.setStore("threadMessages", tab, (msgs) => [
+          ...(msgs || []),
+          { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, system_kind: "warn" as const, content: pretty },
+        ]);
+        return;
+      }
+
+      // Generic failure — auto-prompt the AI to help resolve the conflict.
       const prompt = `My merge/push just failed with this error:\n\n\`\`\`\n${errorMsg}\n\`\`\`\n\nPlease help me resolve this. Check the git status, identify any conflicts, and fix them.`;
 
       try {
@@ -336,15 +410,16 @@ export function ChatArea() {
         const wt = store.worktrees[tab];
         const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
 
-        appStore.setStore("sessionStatuses", tab, "generating");
+        appStore.setStore("runStates", tab, "generating");
         await ipc.sendMessage(tab, prompt, store.selectedProvider, cwd, store.selectedModel ?? undefined);
       } catch (sendErr) {
-        // If sending fails too, just show the error
         appStore.setStore("threadMessages", tab, (msgs) => [
           ...(msgs || []),
-          { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, content: `Merge failed: ${errorMsg}` },
+          { id: crypto.randomUUID(), thread_id: tab, role: "system" as const, system_kind: "error" as const, content: `Merge failed: ${errorMsg}` },
         ]);
       }
+    } finally {
+      setMerging(false);
     }
   }
 
@@ -356,6 +431,10 @@ export function ChatArea() {
 
   return (
     <>
+    {/* Lifecycle banner — pinned above the chat scroll, not inside it. */}
+    <Show when={store.activeTab && !store.activeTab.startsWith("__")}>
+      <LifecycleBanner threadId={store.activeTab!} />
+    </Show>
     <div class="chat-area" ref={scrollRef} onScroll={handleScroll}>
       {/* Virtual tab content */}
       <Show when={store.activeTab === "__mcp__"}>
@@ -714,8 +793,8 @@ export function ChatArea() {
       </div>
     </Show>
 
-    {/* Worktree bar — persistent, always visible below Composer/StatusBar */}
-    <Show when={isGitProject() && worktree()}>
+    {/* Worktree bar — persistent, hidden after merge */}
+    <Show when={isGitProject() && worktree()?.active}>
       <div class="worktree-bar">
         <svg class="wt-bar-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 01-9 9" />
@@ -725,8 +804,8 @@ export function ChatArea() {
         <span class="wt-bar-path">{worktree()!.path}</span>
         <span class="wt-bar-spacer" />
 
-        {/* Create PR button — shown when no PR is linked */}
-        <Show when={!linkedPr()}>
+        {/* Create PR button — shown when no PR is linked AND the thread has actual assistant activity */}
+        <Show when={!linkedPr() && messages().some((m) => m.role === "assistant")}>
           <button
             class="wt-bar-create-pr"
             onClick={handleCreatePr}
@@ -739,35 +818,28 @@ export function ChatArea() {
           </button>
         </Show>
 
-        {/* Push/Merge button — shown when PR exists */}
-        <Show when={linkedPr()}>
-          <Show when={confirmingMerge()} fallback={
-            <button class="wt-bar-action" onClick={requestMergeConfirm}>
-              Push to PR #{linkedPr()}
+        {/* Push to PR button — only after at least one assistant message */}
+        <Show when={linkedPr() && messages().some((m) => m.role === "assistant")}>
+          <Show when={merging()}>
+            <button class="wt-bar-action" disabled>
+              <span class="wt-spinner" /> Pushing...
             </button>
-          }>
-            <div class="wt-confirm-group">
-              <span class="wt-confirm-label">Are you sure?</span>
-              <button class="wt-confirm-yes" onClick={confirmAndMerge}>Push</button>
-              <button class="wt-confirm-no" onClick={cancelMerge}>Cancel</button>
-            </div>
+          </Show>
+          <Show when={!merging()}>
+            <Show when={confirmingMerge()} fallback={
+              <button class="wt-bar-action" onClick={requestMergeConfirm}>
+                Push to PR #{linkedPr()}
+              </button>
+            }>
+              <div class="wt-confirm-group">
+                <span class="wt-confirm-label">Are you sure?</span>
+                <button class="wt-confirm-yes" onClick={confirmAndMerge}>Push</button>
+                <button class="wt-confirm-no" onClick={cancelMerge}>Cancel</button>
+              </div>
+            </Show>
           </Show>
         </Show>
 
-        {/* Merge to main — shown when no PR */}
-        <Show when={!linkedPr()}>
-          <Show when={confirmingMerge()} fallback={
-            <button class="wt-bar-action-secondary" onClick={requestMergeConfirm}>
-              Merge to main
-            </button>
-          }>
-            <div class="wt-confirm-group">
-              <span class="wt-confirm-label">Are you sure?</span>
-              <button class="wt-confirm-yes" onClick={confirmAndMerge}>Merge</button>
-              <button class="wt-confirm-no" onClick={cancelMerge}>Cancel</button>
-            </div>
-          </Show>
-        </Show>
       </div>
     </Show>
 
@@ -1197,6 +1269,7 @@ export function ChatArea() {
     }
 
     /* ── System message ── */
+    /* Base pill (info variant). Other variants override color/background. */
     .msg-system-pill {
       text-align: center;
       background: var(--bg-muted);
@@ -1207,8 +1280,41 @@ export function ChatArea() {
       padding: 4px 12px;
       display: inline-block;
       margin: 0 auto;
+      max-width: 80%;
       animation: fade-in 0.15s ease both;
+      line-height: 1.4;
     }
+    .msg-system-pill--info {
+      /* default — muted grey */
+    }
+    .msg-system-pill--warn {
+      color: var(--amber, #e6b84d);
+      background: rgba(240, 184, 64, 0.10);
+      border-color: rgba(240, 184, 64, 0.35);
+    }
+    .msg-system-pill--error {
+      color: var(--red);
+      background: rgba(242, 95, 103, 0.10);
+      border-color: rgba(242, 95, 103, 0.35);
+    }
+    .msg-system-pill--review {
+      color: var(--text);
+      background: rgba(102, 184, 224, 0.08);
+      border-color: rgba(102, 184, 224, 0.35);
+      text-align: left;
+      padding: 8px 14px;
+      max-width: 90%;
+      border-radius: var(--radius-md);
+      white-space: pre-wrap;
+    }
+    .msg-system-link {
+      color: var(--primary);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .msg-system-link:hover { filter: brightness(1.15); }
     .msg-system { text-align: center; }
 
     /* ── Assistant message ── */
@@ -1495,6 +1601,24 @@ export function ChatArea() {
       flex-shrink: 0;
     }
     .wt-bar-action:hover { filter: brightness(1.15); }
+    .wt-bar-action:disabled { opacity: 0.7; cursor: wait; filter: none; }
+    .wt-bar-action:disabled .wt-spinner,
+    .wt-bar-action-secondary:disabled .wt-spinner {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: wt-spin 0.6s linear infinite;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .wt-bar-action-secondary:disabled .wt-spinner {
+      border-color: rgba(0,0,0,0.15);
+      border-top-color: var(--text-secondary);
+    }
+    @keyframes wt-spin { to { transform: rotate(360deg); } }
     .wt-bar-action-secondary {
       padding: 4px 10px;
       background: var(--bg-accent);
@@ -1712,7 +1836,23 @@ function MessageBubble(props: { msg: any; isGenerating: boolean; isLast: boolean
   return (
     <div class={`msg msg-${props.msg.role}`}>
       <Show when={props.msg.role === "system"}>
-        <div class="msg-system-pill">{props.msg.content}</div>
+        <div
+          class="msg-system-pill"
+          classList={{
+            [`msg-system-pill--${props.msg.system_kind || "info"}`]: true,
+          }}
+        >
+          <For each={linkifyParts(props.msg.content)}>
+            {(part) => part.type === "link"
+              ? <span
+                  class="msg-system-link"
+                  role="link"
+                  onClick={() => { ipc.openExternalUrl(part.value).catch(() => {}); }}
+                >{part.value}</span>
+              : <span>{part.value}</span>
+            }
+          </For>
+        </div>
       </Show>
       <Show when={props.msg.role === "user"}>
         <div class="msg-user-bubble">{props.msg.content}</div>

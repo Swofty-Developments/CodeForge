@@ -59,7 +59,22 @@ export function PrDashboard(props: Props) {
     setLinkingPr(pr.number);
 
     try {
-      // Rename the current thread to reflect the PR
+      // Resolve project path for the backend call
+      const project = store.projects.find((p) => p.id === props.projectId);
+      if (!project) return;
+
+      // Persist the link in the worktrees table. The backend will either
+      // stamp the PR number on an existing worktree or create a new worktree
+      // checked out from the PR branch. Either way, this is the source of
+      // truth and survives restarts.
+      const wt = await ipc.linkPrToThread(threadId, pr.number, project.path, props.projectId);
+      setStore("worktrees", threadId, wt);
+      setStore("projectPrMap", props.projectId, (map) => ({
+        ...(map || {}),
+        [threadId]: pr.number,
+      }));
+
+      // Rename the current thread to reflect the PR.
       await ipc.renameThread(threadId, `PR #${pr.number}: ${pr.title}`);
       setStore("projects", (projects) =>
         projects.map((p) => ({
@@ -70,15 +85,6 @@ export function PrDashboard(props: Props) {
         }))
       );
 
-      // Store the PR link
-      ipc.setSetting(`pr:${threadId}`, String(pr.number)).catch(() => {});
-
-      // Update the PR map in the store
-      setStore("projectPrMap", props.projectId, (map) => ({
-        ...(map || {}),
-        [threadId]: pr.number,
-      }));
-
       // Inject PR context as first message
       const context = `I'm working on PR #${pr.number}: "${pr.title}" by ${pr.author}\n\nBranch: ${pr.branch} → ${pr.base}\n+${pr.additions} -${pr.deletions} across ${pr.changed_files} files\n${pr.labels.length > 0 ? `Labels: ${pr.labels.join(", ")}\n` : ""}\nHelp me review or continue work on this PR.`;
 
@@ -87,6 +93,9 @@ export function PrDashboard(props: Props) {
         ...(msgs || []),
         { id: msgId, thread_id: threadId, role: "user" as const, content: context },
       ]);
+
+      // Trigger a PR status reconcile so the banner reflects the new link immediately.
+      appStore.pollPrStatuses().catch(() => {});
     } catch (e) {
       console.error("Failed to link PR:", e);
     } finally {

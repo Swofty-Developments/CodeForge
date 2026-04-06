@@ -41,6 +41,23 @@ export function App() {
     }
   });
 
+  // Poll PR statuses every 60s to detect merges, new CI results, review comments
+  onMount(() => {
+    // Initial poll after a short delay so the store is loaded
+    const initialTimer = setTimeout(() => {
+      appStore.pollPrStatuses().catch(() => {});
+    }, 5000);
+
+    const pollInterval = setInterval(() => {
+      appStore.pollPrStatuses().catch(() => {});
+    }, 60_000);
+
+    onCleanup(() => {
+      clearTimeout(initialTimer);
+      clearInterval(pollInterval);
+    });
+  });
+
   // Side pane resize state (percentage of main-panel-body width/height for chat)
   const [chatPercent, setChatPercent] = createSignal(60);
   const [draggingDivider, setDraggingDivider] = createSignal(false);
@@ -320,13 +337,13 @@ export function App() {
     if (mod && key === ".") {
       e.preventDefault();
       if (store.activeTab) {
-        const status = store.sessionStatuses[store.activeTab];
+        const status = store.runStates[store.activeTab];
         if (status === "generating" || status === "interrupting") {
           if (status === "interrupting") {
             ipc.stopSession(store.activeTab).catch(() => {});
-            setStore("sessionStatuses", store.activeTab, "ready");
+            setStore("runStates", store.activeTab, "ready");
           } else {
-            setStore("sessionStatuses", store.activeTab, "interrupting");
+            setStore("runStates", store.activeTab, "interrupting");
             ipc.interruptSession(store.activeTab).catch(() => {});
           }
         }

@@ -77,13 +77,45 @@ pub fn spawn_event_forwarder(
                         ..default_payload()
                     }
                 }
-                AgentEvent::TurnStarted { turn_id } => AgentEventPayload {
-                    session_id: session_id.to_string(),
-                    thread_id: thread_id.to_string(),
-                    event_type: "turn_started".into(),
-                    turn_id: Some(turn_id.clone()),
-                    ..default_payload()
-                },
+                AgentEvent::TurnStarted { turn_id } => {
+                    // Capture HEAD commit for per-turn diff and undo checkpoints
+                    let db_clone = db.clone();
+                    let tid_str = thread_id.to_string();
+                    let turn_id_clone = turn_id.clone();
+                    tokio::task::spawn_blocking(move || {
+                        // Get worktree path from DB
+                        if let Ok(db) = db_clone.lock() {
+                            if let Ok(Some(wt)) = codeforge_persistence::queries::get_worktree_by_thread(
+                                db.conn(),
+                                tid_str.parse().unwrap(),
+                            ) {
+                                // Get HEAD commit in the worktree
+                                if let Ok(output) = std::process::Command::new("git")
+                                    .args(["rev-parse", "HEAD"])
+                                    .current_dir(&wt.path)
+                                    .output()
+                                {
+                                    if output.status.success() {
+                                        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                                        let id = Uuid::new_v4().to_string();
+                                        let now = chrono::Utc::now().to_rfc3339();
+                                        let _ = codeforge_persistence::queries::insert_turn_checkpoint(
+                                            db.conn(), &id, &tid_str, &turn_id_clone, &sha, &now,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    AgentEventPayload {
+                        session_id: session_id.to_string(),
+                        thread_id: thread_id.to_string(),
+                        event_type: "turn_started".into(),
+                        turn_id: Some(turn_id.clone()),
+                        ..default_payload()
+                    }
+                }
                 AgentEvent::TurnCompleted { turn_id } => {
                     // Persist accumulated message via spawn_blocking to avoid
                     // holding the std::sync::Mutex across an await point.

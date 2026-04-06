@@ -20,11 +20,11 @@ export function ThreadItem(props: {
   const [showTooltip, setShowTooltip] = createSignal(false);
   let hoverTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Direction A: completion pulse — detect when a thread finishes generating
+  // Completion pulse — detect when a thread finishes generating
   const [justCompleted, setJustCompleted] = createSignal(false);
   let prevStatus: string | undefined;
   createEffect(on(
-    () => store.sessionStatuses[props.thread.id],
+    () => store.runStates[props.thread.id],
     (status) => {
       if (prevStatus === "generating" && status === "ready" && !isActive()) {
         setJustCompleted(true);
@@ -52,8 +52,16 @@ export function ThreadItem(props: {
     return text ? (text.length >= 50 ? text + "..." : text) : null;
   };
 
+  // Lifecycle-driven derivations (badges, merged lock, etc.)
+  const lifecycle = () => store.lifecycleStates[props.thread.id];
+  const isMerged = () => lifecycle()?.kind === "pr_merged";
+  const isClosed = () => lifecycle()?.kind === "pr_closed";
+  const isLocked = () => isMerged() || isClosed();
+
+  // Run-state-driven derivations (color dot, pulse)
   const statusColor = () => {
-    const status = store.sessionStatuses[props.thread.id];
+    if (isLocked()) return "var(--text-tertiary)";
+    const status = store.runStates[props.thread.id];
     if (!status || status === "idle") return null;
     if (status === "ready") return "var(--green)";
     if (status === "generating" || status === "starting") return "var(--sky)";
@@ -62,7 +70,7 @@ export function ThreadItem(props: {
   };
 
   const isGenerating = () => {
-    const status = store.sessionStatuses[props.thread.id];
+    const status = store.runStates[props.thread.id];
     return status === "generating" || status === "starting";
   };
 
@@ -87,12 +95,15 @@ export function ThreadItem(props: {
     if (text) {
       import("../../ipc").then(({ renameThread }) => {
         renameThread(props.thread.id, text);
-        setStore("projects", (projects) =>
-          projects.map((p) => ({
-            ...p,
-            threads: p.threads.map((t) => t.id === props.thread.id ? { ...t, title: text } : t),
-          }))
+        const projectIdx = store.projects.findIndex((p) =>
+          p.threads.some((t) => t.id === props.thread.id)
         );
+        if (projectIdx !== -1) {
+          const threadIdx = store.projects[projectIdx].threads.findIndex((t) => t.id === props.thread.id);
+          if (threadIdx !== -1) {
+            setStore("projects", projectIdx, "threads", threadIdx, "title", text);
+          }
+        }
       });
     }
     setStore("renamingThread", null);
@@ -144,8 +155,14 @@ export function ThreadItem(props: {
           {/* Title + badges */}
           <div class="ti-content">
             <span class="ti-title">{props.thread.title}</span>
-            <Show when={props.prNumber || props.hasWorktree || prStatus()}>
+            <Show when={isLocked() || props.prNumber || props.hasWorktree || prStatus()}>
               <div class="ti-badges">
+                <Show when={isMerged()}>
+                  <span class="ti-badge ti-badge--merged">Merged</span>
+                </Show>
+                <Show when={isClosed()}>
+                  <span class="ti-badge ti-badge--closed">Closed</span>
+                </Show>
                 <Show when={props.prNumber}>
                   <span class="ti-badge ti-badge--pr">#{props.prNumber}</span>
                 </Show>
@@ -198,9 +215,16 @@ export function ThreadItem(props: {
                 e.stopPropagation();
                 import("../../ipc").then(({ deleteThread }) => {
                   deleteThread(props.thread.id);
-                  setStore("projects", (projects) =>
-                    projects.map((p) => ({ ...p, threads: p.threads.filter((t) => t.id !== props.thread.id) }))
+                  // Use path-based update so only the affected project object mutates,
+                  // preventing <For> from recreating all ProjectGroup components
+                  const projectIdx = store.projects.findIndex((p) =>
+                    p.threads.some((t) => t.id === props.thread.id)
                   );
+                  if (projectIdx !== -1) {
+                    setStore("projects", projectIdx, "threads", (threads: any[]) =>
+                      threads.filter((t) => t.id !== props.thread.id)
+                    );
+                  }
                   setStore("openTabs", (tabs) => tabs.filter((t) => t !== props.thread.id));
                   if (store.activeTab === props.thread.id) {
                     setStore("activeTab", store.openTabs.filter((t) => t !== props.thread.id).pop() || null);
@@ -385,6 +409,16 @@ export function ThreadItem(props: {
         .ti-badge--pr {
           color: var(--primary);
           background: rgba(107, 124, 255, 0.1);
+        }
+        .ti-badge--merged {
+          color: var(--text-tertiary);
+          background: var(--bg-muted);
+          text-decoration: line-through;
+        }
+        .ti-badge--closed {
+          color: var(--red);
+          background: rgba(242, 95, 103, 0.12);
+          text-decoration: line-through;
         }
         .ti-badge--wt {
           color: var(--text-tertiary);

@@ -101,10 +101,19 @@ export interface WorktreeInfo {
   branch: string;
   path: string;
   active: boolean;
+  pr_number: number | null;
+  /** "active" | "merged" | "closed" | "deleted" | "orphaned" */
+  status: string;
+  /** Cached from last GitHub poll: "open" | "closed" | "merged" | null */
+  pr_state: string | null;
+  /** Cached merge commit SHA (set iff pr_state === "merged") */
+  pr_merge_commit: string | null;
+  /** Cached PR URL for clickable links without another gh call */
+  pr_url: string | null;
 }
 
-export const createWorktree = (threadId: string, threadTitle: string, projectPath: string) =>
-  invoke<WorktreeInfo>("create_worktree", { threadId, threadTitle, projectPath });
+export const createWorktree = (threadId: string, threadTitle: string, projectPath: string, projectId: string) =>
+  invoke<WorktreeInfo>("create_worktree", { threadId, threadTitle, projectPath, projectId });
 
 export const getWorktree = (threadId: string) =>
   invoke<WorktreeInfo | null>("get_worktree", { threadId });
@@ -117,9 +126,22 @@ export const createPrFromWorktree = (threadId: string, projectPath: string, titl
 
 export interface PrStatus {
   pr_number: number;
-  ci_status: string;      // "success" | "failure" | "pending" | "none"
-  review_status: string;  // "approved" | "changes_requested" | "none"
+  ci_status: string;         // "success" | "failure" | "pending" | "none" | "unknown"
+  review_status: string;     // "approved" | "changes_requested" | "commented" | "none"
   comment_count: number;
+  /** Fully-resolved lifecycle state — the backend is the single source of truth. */
+  lifecycle: import("./types").LifecycleState;
+  /** Worktree status before this reconcile tick, so the frontend can emit
+   *  transition events only on change. One of: active/merged/closed/deleted/orphaned. */
+  previous_status: string;
+  /** Count of review comments new since the last persisted high-water mark. */
+  new_comment_count: number;
+  /** One-shot: this tick detected a revert (previously merged, now unreachable). */
+  revert_detected: boolean;
+  /** One-shot: this tick detected a reopen (merged/closed → open). */
+  reopen_detected: boolean;
+  /** One-shot: the PR no longer exists on GitHub. Linkage has been cleared. */
+  pr_missing: boolean;
 }
 
 export const getPrStatus = (threadId: string, projectPath: string) =>
@@ -148,8 +170,92 @@ export const listOpenPrs = (projectPath: string) =>
 export const findThreadForPr = (prNumber: number) =>
   invoke<string | null>("find_thread_for_pr", { prNumber });
 
-export const checkoutPrIntoWorktree = (threadId: string, prNumber: number, projectPath: string) =>
-  invoke<WorktreeInfo>("checkout_pr_into_worktree", { threadId, prNumber, projectPath });
+export const checkoutPrIntoWorktree = (threadId: string, prNumber: number, projectPath: string, projectId: string) =>
+  invoke<WorktreeInfo>("checkout_pr_into_worktree", { threadId, prNumber, projectPath, projectId });
+
+/**
+ * Link an existing PR to a thread. Persists the linkage to the worktrees table
+ * so it survives restarts and is visible to the poller. Handles three cases:
+ *   - thread has no worktree: checks out the PR branch into a new worktree
+ *   - thread has active worktree w/o PR: stamps the PR number on the existing row
+ *   - thread has active worktree w/ different PR: returns an error
+ */
+export const linkPrToThread = (threadId: string, prNumber: number, projectPath: string, projectId: string) =>
+  invoke<WorktreeInfo>("link_pr_to_thread", { threadId, prNumber, projectPath, projectId });
+
+// Health monitoring
+export interface WorktreeHealth {
+  thread_id: string;
+  status: string; // "healthy" | "missing" | "orphaned" | "detached_head"
+  branch: string;
+  path: string;
+}
+
+export const validateWorktrees = (projectPath: string, projectId: string) =>
+  invoke<WorktreeHealth[]>("validate_worktrees", { projectPath, projectId });
+
+export const repairWorktree = (threadId: string, projectPath: string, action: string) =>
+  invoke<WorktreeInfo>("repair_worktree", { threadId, projectPath, action });
+
+export const cleanupWorktrees = (projectPath: string) =>
+  invoke<number>("cleanup_worktrees", { projectPath });
+
+// Conflict resolution
+export const getConflictFiles = (cwd: string) =>
+  invoke<string[]>("get_conflict_files", { cwd });
+
+export interface ConflictFile {
+  path: string;
+  ours: string;
+  theirs: string;
+  base: string;
+}
+
+export const getConflictMarkers = (cwd: string, filePath: string) =>
+  invoke<ConflictFile>("get_conflict_markers", { cwd, filePath });
+
+export const resolveConflict = (cwd: string, filePath: string, resolution: string) =>
+  invoke<void>("resolve_conflict", { cwd, filePath, resolution });
+
+export const finalizeMerge = (cwd: string) =>
+  invoke<string>("finalize_merge", { cwd });
+
+export const abortMerge = (cwd: string) =>
+  invoke<void>("abort_merge", { cwd });
+
+// Per-turn diff
+export const getTurnDiff = (cwd: string, baseCommit: string) =>
+  invoke<any[]>("get_turn_diff", { cwd, baseCommit });
+
+export const getTurnChangedFiles = (cwd: string, baseCommit: string) =>
+  invoke<any[]>("get_turn_changed_files", { cwd, baseCommit });
+
+export const getHeadCommit = (cwd: string) =>
+  invoke<string>("get_head_commit", { cwd });
+
+// Blame
+export interface BlameLine {
+  line_number: number;
+  commit_hash: string;
+  author: string;
+  date: string;
+  content: string;
+}
+
+export const getFileBlame = (cwd: string, filePath: string, revision?: string) =>
+  invoke<BlameLine[]>("get_file_blame", { cwd, filePath, revision });
+
+// Worktree sync status
+export const checkWorktreeSyncStatus = (threadId: string) =>
+  invoke<string>("check_worktree_sync_status", { threadId });
+
+// Undo
+export const undoToCommit = (threadId: string, commitSha: string) =>
+  invoke<string>("undo_to_commit", { threadId, commitSha });
+
+// Thread forking
+export const forkThread = (threadId: string, messageId: string, newTitle: string) =>
+  invoke<{ id: string; project_id: string; title: string; color: string | null }>("fork_thread", { threadId, messageId, newTitle });
 
 // Search
 export interface SearchResult {
@@ -560,6 +666,13 @@ export const exportTheme = (id: string) =>
 // Filesystem
 export const openInFileManager = (path: string) =>
   invoke("open_in_file_manager", { path });
+
+/**
+ * Open an http/https URL in the user's default browser. Use this instead of
+ * `window.open` — the Tauri webview silently drops `window.open` for most URLs.
+ */
+export const openExternalUrl = (url: string) =>
+  invoke("open_external_url", { url });
 
 // Events
 export const listenAgentEvent = (callback: (payload: AgentEventPayload) => void) =>

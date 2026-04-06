@@ -12,18 +12,32 @@ export function Composer() {
   const isActive = () => store.activeTab !== null && !store.activeTab.startsWith("__");
   const isGenerating = () => {
     if (!store.activeTab) return false;
-    const s = store.sessionStatuses[store.activeTab];
+    const s = store.runStates[store.activeTab];
     return s === "generating" || s === "interrupting";
   };
 
   const isInterrupting = () => {
     if (!store.activeTab) return false;
-    return store.sessionStatuses[store.activeTab] === "interrupting";
+    return store.runStates[store.activeTab] === "interrupting";
   };
+
+  /**
+   * True if the thread is locked (read-only) due to its lifecycle state.
+   * Locks come from `lifecycleStates`, not from `runStates`. Only two
+   * lifecycle variants lock the composer: `pr_merged` and `pr_closed`.
+   */
+  const isLocked = () => {
+    if (!store.activeTab) return false;
+    const lc = store.lifecycleStates[store.activeTab];
+    return lc?.kind === "pr_merged" || lc?.kind === "pr_closed";
+  };
+
+  // Legacy alias used by the Composer's `<Show when>` guards.
+  const isMerged = isLocked;
 
   const sessionStatus = () => {
     if (!store.activeTab) return null;
-    return store.sessionStatuses[store.activeTab] || null;
+    return store.runStates[store.activeTab] || null;
   };
 
   const folderLabel = () => {
@@ -112,13 +126,13 @@ export function Composer() {
   async function handleStop() {
     if (!store.activeTab) return;
     const threadId = store.activeTab;
-    const status = store.sessionStatuses[threadId];
+    const status = store.runStates[threadId];
 
     if (status === "interrupting") {
       // Second click: force kill
       try {
         await ipc.stopSession(threadId);
-        appStore.setStore("sessionStatuses", threadId, "ready");
+        appStore.setStore("runStates", threadId, "ready");
       } catch (e) {
         console.error("Failed to kill session:", e);
       }
@@ -127,7 +141,7 @@ export function Composer() {
 
     // First click: graceful interrupt via SIGINT
     try {
-      setStore("sessionStatuses", threadId, "interrupting");
+      setStore("runStates", threadId, "interrupting");
       await ipc.interruptSession(threadId);
 
       // After 2 seconds, if still interrupting, the button will show "Force stop"
@@ -221,7 +235,7 @@ export function Composer() {
   };
 
   return (
-    <Show when={isActive()}>
+    <Show when={isActive() && !isMerged()}>
       <>
       <div class="composer-wrapper">
         <div
@@ -279,7 +293,8 @@ export function Composer() {
           <div class="composer-input-row">
             <textarea
               class="composer-input"
-              placeholder={isGenerating() ? "Send a message to steer…" : "Message..."}
+              disabled={isMerged()}
+              placeholder={isMerged() ? "Thread merged — read only" : isGenerating() ? "Send a message to steer…" : "Message..."}
               value={store.composerText}
               onInput={(e) => {
                 const val = e.currentTarget.value;

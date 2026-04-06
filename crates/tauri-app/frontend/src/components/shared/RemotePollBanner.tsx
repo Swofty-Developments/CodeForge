@@ -39,7 +39,20 @@ export function RemotePollBanner() {
     return num ? String(num) : undefined;
   }
 
+  /**
+   * Skip polling entirely for threads whose lifecycle is terminal — merged or
+   * closed PRs are read-only and there's nothing to pull. This keeps us from
+   * hammering the git remote for threads the user has finished with.
+   */
+  function isLocked(): boolean {
+    const tab = store.activeTab;
+    if (!tab) return false;
+    const lc = store.lifecycleStates[tab];
+    return lc?.kind === "pr_merged" || lc?.kind === "pr_closed";
+  }
+
   async function poll() {
+    if (isLocked()) { setUpdate(null); return; }
     const cwd = getCwd();
     if (!cwd) { setUpdate(null); return; }
     try {
@@ -104,7 +117,7 @@ export function RemotePollBanner() {
     onCleanup(() => clearInterval(interval));
   });
 
-  const visible = () => update() !== null && !dismissed();
+  const visible = () => update() !== null && !dismissed() && !isLocked();
 
   return (
     <>

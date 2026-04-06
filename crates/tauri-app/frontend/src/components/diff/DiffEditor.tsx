@@ -1,8 +1,92 @@
-import { createSignal, onMount, For, Show, createEffect } from "solid-js";
+import { createSignal, onMount, For, Show, createEffect, createMemo } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 import type { ChangedFile, FileDiff, DiffHunk } from "../../ipc";
 import { GitPanel } from "../git/GitPanel";
+
+// --- File tree types ---
+interface TreeNode {
+  name: string;
+  path: string;
+  isDir: boolean;
+  children: TreeNode[];
+  file?: ChangedFile;
+  insertions: number;
+  deletions: number;
+}
+
+function buildFileTree(files: ChangedFile[]): TreeNode[] {
+  const root: TreeNode = { name: "", path: "", isDir: true, children: [], insertions: 0, deletions: 0 };
+
+  for (const file of files) {
+    const parts = file.path.split("/");
+    let current = root;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+      const partPath = parts.slice(0, i + 1).join("/");
+
+      if (isLast) {
+        current.children.push({
+          name: part,
+          path: file.path,
+          isDir: false,
+          children: [],
+          file,
+          insertions: file.insertions,
+          deletions: file.deletions,
+        });
+      } else {
+        let dir = current.children.find((c) => c.isDir && c.name === part);
+        if (!dir) {
+          dir = { name: part, path: partPath, isDir: true, children: [], insertions: 0, deletions: 0 };
+          current.children.push(dir);
+        }
+        current = dir;
+      }
+    }
+  }
+
+  // Aggregate stats up the tree
+  function aggregate(node: TreeNode): void {
+    if (!node.isDir) return;
+    node.insertions = 0;
+    node.deletions = 0;
+    for (const child of node.children) {
+      aggregate(child);
+      node.insertions += child.insertions;
+      node.deletions += child.deletions;
+    }
+  }
+
+  // Collapse single-child directories (src/components -> src/components)
+  function collapse(nodes: TreeNode[]): TreeNode[] {
+    return nodes.map((node) => {
+      if (node.isDir && node.children.length === 1 && node.children[0].isDir) {
+        const child = node.children[0];
+        return collapse([{ ...child, name: `${node.name}/${child.name}` }])[0];
+      }
+      if (node.isDir) {
+        return { ...node, children: collapse(node.children) };
+      }
+      return node;
+    });
+  }
+
+  aggregate(root);
+  // Sort: dirs first, then files, alphabetically
+  function sortTree(nodes: TreeNode[]): TreeNode[] {
+    return nodes
+      .map((n) => (n.isDir ? { ...n, children: sortTree(n.children) } : n))
+      .sort((a, b) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }
+
+  return sortTree(collapse(root.children));
+}
 
 function statusBadge(status: string): { label: string; cls: string } {
   switch (status) {
@@ -23,6 +107,56 @@ function dirPath(path: string): string {
   const parts = path.split("/");
   if (parts.length <= 1) return "";
   return parts.slice(0, -1).join("/") + "/";
+}
+
+function FileTree(props: { nodes: TreeNode[]; selectedFile: string | null; onSelect: (path: string) => void; depth?: number }) {
+  const depth = props.depth ?? 0;
+  return (
+    <For each={props.nodes}>
+      {(node) => {
+        if (node.isDir) {
+          const [open, setOpen] = createSignal(true);
+          return (
+            <div class="de-tree-dir">
+              <button
+                class="de-tree-dir-header"
+                style={{ "padding-left": `${8 + depth * 12}px` }}
+                onClick={() => setOpen(!open())}
+              >
+                <svg class="de-tree-chevron" classList={{ "de-tree-chevron--open": open() }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                <svg class="de-tree-folder" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                <span class="de-tree-dir-name">{node.name}</span>
+                <span class="de-tree-dir-stats">
+                  <Show when={node.insertions > 0}><span class="de-stat-ins">+{node.insertions}</span></Show>
+                  <Show when={node.deletions > 0}><span class="de-stat-del">-{node.deletions}</span></Show>
+                </span>
+              </button>
+              <Show when={open()}>
+                <FileTree nodes={node.children} selectedFile={props.selectedFile} onSelect={props.onSelect} depth={depth + 1} />
+              </Show>
+            </div>
+          );
+        }
+        const badge = statusBadge(node.file!.status);
+        const isSelected = () => props.selectedFile === node.path;
+        return (
+          <button
+            class={`de-file-item ${isSelected() ? "de-file-selected" : ""}`}
+            style={{ "padding-left": `${8 + depth * 12}px` }}
+            onClick={() => props.onSelect(node.path)}
+            title={node.path}
+          >
+            <span class={`de-badge ${badge.cls}`}>{badge.label}</span>
+            <span class="de-file-name">{node.name}</span>
+            <div class="de-file-stats">
+              <Show when={node.insertions > 0}><span class="de-stat-ins">+{node.insertions}</span></Show>
+              <Show when={node.deletions > 0}><span class="de-stat-del">-{node.deletions}</span></Show>
+            </div>
+          </button>
+        );
+      }}
+    </For>
+  );
 }
 
 export function DiffEditor(props: { cwd: string; prNumber?: number | null }) {
@@ -181,6 +315,7 @@ export function DiffEditor(props: { cwd: string; prNumber?: number | null }) {
 
   const totalInsertions = () => files().reduce((s, f) => s + f.insertions, 0);
   const totalDeletions = () => files().reduce((s, f) => s + f.deletions, 0);
+  const fileTree = createMemo(() => buildFileTree(files()));
 
   const selectedDiff = () => diffs().find((d) => d.path === selectedFile()) ?? null;
 
@@ -275,33 +410,11 @@ export function DiffEditor(props: { cwd: string; prNumber?: number | null }) {
             <Show when={!loading() && files().length === 0 && !error()}>
               <div class="de-empty">No changes detected</div>
             </Show>
-            <For each={files()}>
-              {(file) => {
-                const badge = statusBadge(file.status);
-                const isSelected = () => selectedFile() === file.path;
-                return (
-                  <button
-                    class={`de-file-item ${isSelected() ? "de-file-selected" : ""}`}
-                    onClick={() => setSelectedFile(file.path)}
-                    title={file.path}
-                  >
-                    <span class={`de-badge ${badge.cls}`}>{badge.label}</span>
-                    <div class="de-file-info">
-                      <span class="de-file-name">{fileName(file.path)}</span>
-                      <span class="de-file-dir">{dirPath(file.path)}</span>
-                    </div>
-                    <div class="de-file-stats">
-                      <Show when={file.insertions > 0}>
-                        <span class="de-stat-ins">+{file.insertions}</span>
-                      </Show>
-                      <Show when={file.deletions > 0}>
-                        <span class="de-stat-del">-{file.deletions}</span>
-                      </Show>
-                    </div>
-                  </button>
-                );
-              }}
-            </For>
+            <FileTree
+              nodes={fileTree()}
+              selectedFile={selectedFile()}
+              onSelect={setSelectedFile}
+            />
           </div>
 
           {/* Diff view */}
@@ -745,5 +858,43 @@ const DIFF_STYLES = `
   }
   .de-git-chevron--open {
     transform: rotate(90deg);
+  }
+
+  /* File tree styles */
+  .de-tree-dir { display: flex; flex-direction: column; }
+  .de-tree-dir-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    transition: background 0.1s;
+    text-align: left;
+    width: 100%;
+  }
+  .de-tree-dir-header:hover { background: var(--bg-hover); }
+  .de-tree-chevron {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    transition: transform 0.15s ease;
+  }
+  .de-tree-chevron--open { transform: rotate(90deg); }
+  .de-tree-folder { flex-shrink: 0; color: var(--text-tertiary); }
+  .de-tree-dir-name {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .de-tree-dir-stats {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 10px;
   }
 `;
