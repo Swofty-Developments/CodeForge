@@ -104,8 +104,8 @@ if (!document.getElementById("thinking-styles")) {
       background: var(--purple);
       animation: tb-dot 1.4s infinite both;
     }
-    .tb-dots span:nth-child(2) { animation-delay: 0.16s; }
-    .tb-dots span:nth-child(3) { animation-delay: 0.32s; }
+    .tb-dots span:nth-child(2) { animation-delay: 0.12s; }
+    .tb-dots span:nth-child(3) { animation-delay: 0.24s; }
     @keyframes tb-dot {
       0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
       40% { opacity: 1; transform: scale(1); }

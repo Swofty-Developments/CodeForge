@@ -378,6 +378,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "codeforge-core",
  "rusqlite",
  "serde",
  "thiserror 2.0.18",

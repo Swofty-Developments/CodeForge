@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use tauri::{AppHandle, State};
-use uuid::Uuid;
 
+use codeforge_persistence::ThreadId;
 use codeforge_session::Provider;
 
 use crate::state::TauriState;
@@ -19,7 +19,8 @@ pub async fn send_message(
     model: Option<String>,
     permission_mode: Option<String>,
 ) -> Result<(), String> {
-    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
+    tracing::debug!("send_message thread_id={thread_id} provider={provider}");
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
 
     // Check if session exists, then release lock
     let existing_session = {
@@ -35,13 +36,17 @@ pub async fn send_message(
     } else {
         let prov = match provider.as_str() {
             "codex" => Provider::Codex,
-            _ => Provider::ClaudeCode,
+            "claude" | "claude_code" => Provider::ClaudeCode,
+            other => return Err(format!("Unknown provider: {other}")),
         };
         let cwd_path = PathBuf::from(&cwd);
 
         // Batch DB reads: permission_mode + claude_session_id in one lock
         let (perm_mode, previous_claude_session_id) = {
-            let db = state.db.lock().map_err(|e| e.to_string())?;
+            let db = state.db.lock().map_err(|e| {
+                tracing::error!("Failed to lock database: {e}");
+                e.to_string()
+            })?;
             let pm = permission_mode.or_else(|| {
                 codeforge_persistence::queries::get_setting(db.conn(), "permission_mode")
                     .ok()
@@ -104,7 +109,8 @@ pub async fn interrupt_session(
     state: State<'_, TauriState>,
     thread_id: String,
 ) -> Result<(), String> {
-    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
+    tracing::debug!("interrupt_session thread_id={thread_id}");
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
     let session_id = {
         let sessions = state.thread_sessions.lock().await;
         sessions.get(&tid).copied()
@@ -113,6 +119,8 @@ pub async fn interrupt_session(
         let mgr = state.session_manager.lock().await;
         mgr.interrupt_session(session_id)
             .map_err(|e| format!("{e:#}"))?;
+    } else {
+        tracing::debug!("No active session found for thread {tid}");
     }
     Ok(())
 }
@@ -122,14 +130,19 @@ pub async fn stop_session(
     state: State<'_, TauriState>,
     thread_id: String,
 ) -> Result<(), String> {
-    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
+    tracing::debug!("stop_session thread_id={thread_id}");
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
     let session_id = {
         let mut sessions = state.thread_sessions.lock().await;
         sessions.remove(&tid)
     };
     if let Some(session_id) = session_id {
         let mut mgr = state.session_manager.lock().await;
-        let _ = mgr.stop_session(session_id).await;
+        if let Err(e) = mgr.stop_session(session_id).await {
+            tracing::error!("Failed to stop session {session_id}: {e:#}");
+        }
+    } else {
+        tracing::debug!("No active session found for thread {tid}");
     }
     Ok(())
 }
@@ -141,7 +154,7 @@ pub async fn respond_to_approval(
     request_id: String,
     approve: bool,
 ) -> Result<(), String> {
-    let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let sid = session_id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
     let mgr = state.session_manager.lock().await;
     mgr.respond_to_approval(sid, &request_id, approve)
         .map_err(|e| format!("{e:#}"))

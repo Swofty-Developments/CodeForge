@@ -12,8 +12,8 @@ export const getThreadsByProject = (projectId: string) =>
     { projectId }
   );
 
-export const getMessagesByThread = (threadId: string) =>
-  invoke<ChatMessage[]>("get_messages_by_thread", { threadId });
+export const getMessagesByThread = (threadId: string, limit?: number, offset?: number) =>
+  invoke<ChatMessage[]>("get_messages_by_thread", { threadId, limit: limit ?? null, offset: offset ?? null });
 
 export const createProject = (name: string, path: string) =>
   invoke<{ id: string; name: string; path: string }>("create_project", { name, path });
@@ -111,6 +111,45 @@ export const getWorktree = (threadId: string) =>
 
 export const mergeWorktree = (threadId: string, projectPath: string) =>
   invoke<string>("merge_worktree", { threadId, projectPath });
+
+export const createPrFromWorktree = (threadId: string, projectPath: string, title: string, body: string) =>
+  invoke<string>("create_pr_from_worktree", { threadId, projectPath, title, body });
+
+export interface PrStatus {
+  pr_number: number;
+  ci_status: string;      // "success" | "failure" | "pending" | "none"
+  review_status: string;  // "approved" | "changes_requested" | "none"
+  comment_count: number;
+}
+
+export const getPrStatus = (threadId: string, projectPath: string) =>
+  invoke<PrStatus | null>("get_pr_status", { threadId, projectPath });
+
+export interface PrComment {
+  author: string;
+  state: string;
+  body: string;
+}
+
+export const getPrReviewComments = (threadId: string, projectPath: string) =>
+  invoke<PrComment[]>("get_pr_review_comments", { threadId, projectPath });
+
+export interface OpenPr {
+  number: number;
+  title: string;
+  branch: string;
+  author: string;
+  url: string;
+}
+
+export const listOpenPrs = (projectPath: string) =>
+  invoke<OpenPr[]>("list_open_prs", { projectPath });
+
+export const findThreadForPr = (prNumber: number) =>
+  invoke<string | null>("find_thread_for_pr", { prNumber });
+
+export const checkoutPrIntoWorktree = (threadId: string, prNumber: number, projectPath: string) =>
+  invoke<WorktreeInfo>("checkout_pr_into_worktree", { threadId, prNumber, projectPath });
 
 // Search
 export interface SearchResult {
@@ -403,6 +442,30 @@ export const gitDiffBranches = (cwd: string, branch1: string, branch2: string) =
 
 export const gitStatus = (cwd: string) =>
   invoke<GitStatusEntry[]>("git_status", { cwd });
+
+export interface RemoteUpdate {
+  branch: string;
+  behind: number;
+  latest_message: string;
+}
+
+export interface RepoStatus {
+  status: "none" | "git" | "github";
+  branch: string | null;
+  has_remote: boolean;
+}
+
+export const gitRepoStatus = (cwd: string) =>
+  invoke<RepoStatus>("git_repo_status", { cwd });
+
+export const gitInitRepo = (cwd: string) =>
+  invoke<string>("git_init_repo", { cwd });
+
+export const gitCheckRemote = (cwd: string, branch?: string, prNumber?: string) =>
+  invoke<RemoteUpdate | null>("git_check_remote", { cwd, branch: branch ?? null, prNumber: prNumber ?? null });
+
+export const gitPullBranch = (cwd: string, branch?: string, prNumber?: string) =>
+  invoke<string>("git_pull_branch", { cwd, branch: branch ?? null, prNumber: prNumber ?? null });
 
 // MCP
 export interface McpServer {

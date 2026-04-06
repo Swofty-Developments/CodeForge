@@ -129,7 +129,7 @@ if (!document.getElementById("breadcrumb-styles")) {
     .bc-sep {
       font-size: 11px;
       color: var(--text-tertiary);
-      opacity: 0.5;
+      opacity: 0.7;
       flex-shrink: 0;
     }
     .bc-badge {

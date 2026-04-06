@@ -5,7 +5,7 @@ use tauri::Emitter;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use codeforge_persistence::Database;
+use codeforge_persistence::{Database, MessageId, SessionId, ThreadId};
 use codeforge_session::AgentEvent;
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,13 +52,13 @@ pub struct AgentEventPayload {
 pub fn spawn_event_forwarder(
     app_handle: tauri::AppHandle,
     session_id: Uuid,
-    thread_id: Uuid,
-    mut rx: mpsc::UnboundedReceiver<AgentEvent>,
+    thread_id: codeforge_persistence::ThreadId,
+    mut rx: mpsc::Receiver<AgentEvent>,
     db: Arc<std::sync::Mutex<Database>>,
 ) {
     let app = app_handle;
     let mut accumulated_content = String::new();
-    let mut streaming_msg_id: Option<Uuid> = None;
+    let mut streaming_msg_id: Option<MessageId> = None;
 
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -66,7 +66,7 @@ pub fn spawn_event_forwarder(
                 AgentEvent::ContentDelta { text } => {
                     accumulated_content.push_str(text);
                     if streaming_msg_id.is_none() {
-                        streaming_msg_id = Some(Uuid::new_v4());
+                        streaming_msg_id = Some(MessageId::new());
                     }
 
                     AgentEventPayload {
@@ -90,19 +90,24 @@ pub fn spawn_event_forwarder(
                     if let Some(msg_id) = streaming_msg_id.take() {
                         let content = std::mem::take(&mut accumulated_content);
                         let db_clone = db.clone();
+                        let tid = thread_id;
                         tokio::task::spawn_blocking(move || {
                             if let Ok(db) = db_clone.lock() {
                                 let db_msg = codeforge_persistence::Message {
                                     id: msg_id,
-                                    thread_id,
+                                    thread_id: tid,
                                     role: codeforge_persistence::MessageRole::Assistant,
                                     content,
                                     created_at: chrono::Utc::now(),
                                 };
-                                let _ = codeforge_persistence::queries::insert_message(
+                                if let Err(e) = codeforge_persistence::queries::insert_message(
                                     db.conn(),
                                     &db_msg,
-                                );
+                                ) {
+                                    tracing::error!("Failed to insert message: {e}");
+                                }
+                            } else {
+                                tracing::error!("Failed to lock database for message insert");
                             }
                         });
                     }
@@ -160,7 +165,7 @@ pub fn spawn_event_forwarder(
                         if let Ok(db) = db_clone.lock() {
                             let id = Uuid::new_v4().to_string();
                             let now = chrono::Utc::now().to_rfc3339();
-                            let _ = codeforge_persistence::queries::insert_usage_log(
+                            if let Err(e) = codeforge_persistence::queries::insert_usage_log(
                                 db.conn(),
                                 &id,
                                 &tid_str,
@@ -168,7 +173,11 @@ pub fn spawn_event_forwarder(
                                 it, ot, crt, cwt, cu,
                                 Some(&m),
                                 &now,
-                            );
+                            ) {
+                                tracing::error!("Failed to insert usage log: {e}");
+                            }
+                        } else {
+                            tracing::error!("Failed to lock database for usage log insert");
                         }
                     });
 
@@ -189,28 +198,37 @@ pub fn spawn_event_forwarder(
                     // Persist session record via spawn_blocking
                     let db_clone = db.clone();
                     let csid = claude_session_id.clone();
+                    let sid: SessionId = SessionId::from(session_id);
+                    let tid: ThreadId = thread_id;
                     tokio::task::spawn_blocking(move || {
                         if let Ok(db) = db_clone.lock() {
                             let db_session = codeforge_persistence::Session {
-                                id: session_id,
-                                thread_id,
+                                id: sid,
+                                thread_id: tid,
                                 provider: codeforge_persistence::Provider::Claude,
                                 status: "ready".to_string(),
                                 approval_mode: None,
                                 pid: None,
+                                claude_session_id: csid.clone(),
                                 created_at: chrono::Utc::now(),
                             };
-                            let _ = codeforge_persistence::queries::insert_session(
+                            if let Err(e) = codeforge_persistence::queries::insert_session(
                                 db.conn(),
                                 &db_session,
-                            );
-                            if let Some(ref csid) = csid {
-                                let _ = codeforge_persistence::queries::update_session_claude_id(
-                                    db.conn(),
-                                    session_id,
-                                    csid,
-                                );
+                            ) {
+                                tracing::error!("Failed to insert session: {e}");
                             }
+                            if let Some(ref csid) = csid {
+                                if let Err(e) = codeforge_persistence::queries::update_session_claude_id(
+                                    db.conn(),
+                                    sid,
+                                    csid,
+                                ) {
+                                    tracing::error!("Failed to update session claude_id: {e}");
+                                }
+                            }
+                        } else {
+                            tracing::error!("Failed to lock database for session insert");
                         }
                     });
 
@@ -280,7 +298,9 @@ pub fn spawn_event_forwarder(
                 let end = t.char_indices().nth(40).map(|(i, _)| i).unwrap_or(t.len());
                 &t[..end]
             }));
-            let _ = app.emit("agent-event", &payload);
+            if let Err(e) = app.emit("agent-event", &payload) {
+                tracing::error!("Failed to emit agent-event: {e}");
+            }
         }
     });
 }

@@ -1,5 +1,6 @@
 use tauri::State;
-use uuid::Uuid;
+
+use codeforge_persistence::{MessageId, ProjectId, ThreadId};
 
 use crate::commands::projects::ThreadResponse;
 use crate::state::TauriState;
@@ -11,9 +12,13 @@ pub fn create_thread(
     title: String,
     _provider: String,
 ) -> Result<ThreadResponse, String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let pid = Uuid::parse_str(&project_id).map_err(|e| e.to_string())?;
-    let id = Uuid::new_v4();
+    tracing::debug!("create_thread project_id={project_id}");
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let pid = project_id.parse::<ProjectId>().map_err(|e| e.to_string())?;
+    let id = ThreadId::new();
     let now = chrono::Utc::now();
     let thread = codeforge_persistence::Thread {
         id,
@@ -35,8 +40,11 @@ pub fn create_thread(
 
 #[tauri::command]
 pub fn rename_thread(state: State<'_, TauriState>, id: String, title: String) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let uid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let uid = id.parse::<ThreadId>().map_err(|e| e.to_string())?;
     codeforge_persistence::queries::update_thread_title(db.conn(), uid, &title)
         .map_err(|e| e.to_string())
 }
@@ -47,17 +55,26 @@ pub fn set_thread_color(
     id: String,
     color: Option<String>,
 ) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let uid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let uid = id.parse::<ThreadId>().map_err(|e| e.to_string())?;
     codeforge_persistence::queries::update_thread_color(db.conn(), uid, color.as_deref())
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_thread(state: State<'_, TauriState>, id: String) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let uid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-    let _ = codeforge_persistence::queries::delete_messages_by_thread(db.conn(), uid);
+    tracing::debug!("delete_thread id={id}");
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let uid = id.parse::<ThreadId>().map_err(|e| e.to_string())?;
+    if let Err(e) = codeforge_persistence::queries::delete_messages_by_thread(db.conn(), uid) {
+        tracing::error!("Failed to delete messages for thread {uid}: {e}");
+    }
     codeforge_persistence::queries::delete_thread(db.conn(), uid).map_err(|e| e.to_string())
 }
 
@@ -67,9 +84,12 @@ pub fn move_thread_to_project(
     thread_id: String,
     target_project_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
-    let pid = Uuid::parse_str(&target_project_id).map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
+    let pid = target_project_id.parse::<ProjectId>().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     db.conn()
         .execute(
@@ -86,9 +106,12 @@ pub fn delete_messages_after(
     thread_id: String,
     message_id: String,
 ) -> Result<u64, String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
-    let mid = Uuid::parse_str(&message_id).map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
+    let mid = message_id.parse::<MessageId>().map_err(|e| e.to_string())?;
     codeforge_persistence::queries::delete_messages_after(db.conn(), tid, mid)
         .map_err(|e| e.to_string())
 }
@@ -99,9 +122,12 @@ pub fn persist_user_message(
     thread_id: String,
     content: String,
 ) -> Result<String, String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
-    let msg_id = Uuid::new_v4();
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
+    let msg_id = MessageId::new();
     let msg = codeforge_persistence::Message {
         id: msg_id,
         thread_id: tid,

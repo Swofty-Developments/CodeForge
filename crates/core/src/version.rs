@@ -329,8 +329,13 @@ impl VersionReq {
 
 impl fmt::Display for VersionReq {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let parts: Vec<String> = self.constraints.iter().map(|c| c.to_string()).collect();
-        write!(f, "{}", parts.join(", "))
+        for (i, c) in self.constraints.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{c}")?;
+        }
+        Ok(())
     }
 }
 

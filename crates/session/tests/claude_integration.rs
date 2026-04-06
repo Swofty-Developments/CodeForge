@@ -15,7 +15,7 @@ use tokio::time::timeout;
 async fn claude_code_send_and_receive() {
     let cwd = std::env::temp_dir();
 
-    let (session, mut rx) = ClaudeSession::start(&cwd, None)
+    let (session, mut rx) = ClaudeSession::start(&cwd, None, None)
         .await
         .expect("Failed to start Claude session — is `claude` installed?");
 
@@ -132,7 +132,7 @@ async fn claude_code_send_and_receive() {
 async fn claude_code_multi_turn() {
     let cwd = std::env::temp_dir();
 
-    let (session, mut rx) = ClaudeSession::start(&cwd, None)
+    let (session, mut rx) = ClaudeSession::start(&cwd, None, None)
         .await
         .expect("Failed to start Claude session");
 
@@ -167,7 +167,7 @@ async fn claude_code_multi_turn() {
 async fn claude_code_streams_incrementally() {
     let cwd = std::env::temp_dir();
 
-    let (session, mut rx) = ClaudeSession::start(&cwd, None)
+    let (session, mut rx) = ClaudeSession::start(&cwd, None, None)
         .await
         .expect("Failed to start Claude session");
 
@@ -210,7 +210,7 @@ async fn claude_code_streams_incrementally() {
 // ── Helpers ──
 
 async fn collect_response(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AgentEvent>,
+    rx: &mut tokio::sync::mpsc::Receiver<AgentEvent>,
 ) -> String {
     let mut text = String::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(90);

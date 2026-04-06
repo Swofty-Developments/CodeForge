@@ -11,7 +11,7 @@ use crate::message::{AgentMessage, Message};
 /// Shared state holding event receivers for active sessions.
 #[derive(Debug, Clone, Default)]
 pub struct AgentEventReceivers {
-    inner: Arc<Mutex<HashMap<SessionId, mpsc::UnboundedReceiver<AgentEvent>>>>,
+    inner: Arc<Mutex<HashMap<SessionId, mpsc::Receiver<AgentEvent>>>>,
 }
 
 // We use a constant hash since there is only ever one subscription instance.
@@ -28,7 +28,7 @@ impl AgentEventReceivers {
         }
     }
 
-    pub async fn insert(&self, id: SessionId, rx: mpsc::UnboundedReceiver<AgentEvent>) {
+    pub async fn insert(&self, id: SessionId, rx: mpsc::Receiver<AgentEvent>) {
         self.inner.lock().await.insert(id, rx);
     }
 

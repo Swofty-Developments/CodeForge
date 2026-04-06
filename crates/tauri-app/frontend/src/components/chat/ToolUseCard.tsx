@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import type { ContentBlock, ToolStatus } from "../../types";
 
 /** SVG icon paths per tool category. */
@@ -150,6 +150,7 @@ export function ToolUseCard(props: { block: ContentBlock }) {
   const status = () => props.block.tool_status;
 
   return (
+    <>
     <div
       class="tc"
       classList={{
@@ -218,13 +219,7 @@ export function ToolUseCard(props: { block: ContentBlock }) {
         </div>
       </div>
     </div>
-  );
-}
-
-if (!document.getElementById("tool-card-styles")) {
-  const s = document.createElement("style");
-  s.id = "tool-card-styles";
-  s.textContent = `
+    <style>{`
     /* ── Tool Card ── */
     .tc {
       margin: 8px 0;
@@ -378,6 +373,168 @@ if (!document.getElementById("tool-card-styles")) {
     .tc-code--error {
       color: var(--red);
     }
-  `;
-  document.head.appendChild(s);
+
+    /* ── Stacked Tool Cards ── */
+    .tc-stack {
+      margin: 8px 0;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .tc-stack .tc {
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .tc-stack .tc + .tc {
+      border-top: 1px solid var(--border);
+    }
+    .tc-stack-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    .tc-stack-header:hover {
+      background: rgba(255, 255, 255, 0.025);
+    }
+    .tc-stack-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .tc-stack-count {
+      font-size: 10px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+      background: var(--bg-accent);
+      border-radius: 4px;
+      padding: 1px 6px;
+      min-width: 20px;
+      text-align: center;
+    }
+    .tc-stack-status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 500;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+    }
+    .tc-stack-status--active { color: var(--amber); }
+    .tc-stack-status--done { color: var(--green); }
+    .tc-stack-chevron {
+      flex-shrink: 0;
+      color: var(--text-tertiary);
+      opacity: 0.5;
+      transition: transform 0.18s ease, opacity 0.15s;
+    }
+    .tc-stack-header:hover .tc-stack-chevron { opacity: 0.8; }
+    .tc-stack-chevron--open { transform: rotate(90deg); }
+    .tc-stack-body {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.2s ease;
+    }
+    .tc-stack-body--open {
+      grid-template-rows: 1fr;
+    }
+    .tc-stack-body-inner {
+      overflow: hidden;
+    }
+    `}</style>
+    </>
+  );
+}
+
+/**
+ * Renders a stack of consecutive same-name tool calls as a collapsible group.
+ * Shows a summary header with count and expands to reveal individual cards.
+ */
+export function ToolUseStack(props: { blocks: ContentBlock[] }) {
+  const [expanded, setExpanded] = createSignal(false);
+
+  const toolName = () => props.blocks[0]?.tool_name || "";
+  const label = () => TOOL_LABELS[toolName()] || toolName();
+  const count = () => props.blocks.length;
+
+  const allDone = () => props.blocks.every((b) => b.tool_status === "completed");
+  const anyActive = () => props.blocks.some(
+    (b) => b.tool_status === "generating" || b.tool_status === "running"
+  );
+  const anyError = () => props.blocks.some((b) => b.tool_status === "error");
+
+  const stackStatus = () => {
+    if (anyActive()) return "running";
+    if (anyError()) return "error";
+    if (allDone()) return "completed";
+    return "running";
+  };
+
+  const completedCount = () => props.blocks.filter((b) => b.tool_status === "completed").length;
+
+  /** Summarize what files/commands were touched across the stack */
+  const stackSummary = () => {
+    const summaries = props.blocks
+      .map((b) => summarizeInput(b.tool_name || "", parseToolInput(b.tool_input || "")))
+      .filter((s) => s.length > 0);
+    // Deduplicate and take first 3
+    const unique = [...new Set(summaries)];
+    if (unique.length <= 2) return unique.join(", ");
+    return `${unique[0]}, ${unique[1]}, +${unique.length - 2} more`;
+  };
+
+  return (
+    <div class="tc-stack">
+      <button class="tc-stack-header" onClick={() => setExpanded(!expanded())}>
+        <ToolIcon name={toolName()} class="tc-icon" />
+        <span class="tc-stack-label">{label()}</span>
+        <span class="tc-stack-count">{count()}x</span>
+        <Show when={!expanded() && stackSummary()}>
+          <span class="tc-summary">{stackSummary()}</span>
+        </Show>
+        <span class="tc-stack-status" classList={{
+          "tc-stack-status--active": anyActive(),
+          "tc-stack-status--done": allDone(),
+        }}>
+          <Show when={anyActive()}>
+            <span class="tc-pulse" />
+          </Show>
+          {anyActive()
+            ? `${completedCount()}/${count()}`
+            : allDone()
+              ? "All done"
+              : anyError()
+                ? "Failed"
+                : ""
+          }
+        </span>
+        <svg
+          class="tc-stack-chevron"
+          classList={{ "tc-stack-chevron--open": expanded() }}
+          width="12" height="12" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2.5"
+          stroke-linecap="round" stroke-linejoin="round"
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
+      <div class="tc-stack-body" classList={{ "tc-stack-body--open": expanded() }}>
+        <div class="tc-stack-body-inner">
+          <For each={props.blocks}>
+            {(block) => <ToolUseCard block={block} />}
+          </For>
+        </div>
+      </div>
+    </div>
+  );
 }

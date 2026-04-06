@@ -340,36 +340,19 @@ pub struct ThemePalette {
 impl ThemePalette {
     /// Generate CSS custom property declarations for this palette.
     pub fn to_css_variables(&self) -> String {
-        let mut css = String::new();
-        css.push_str(&format!("  --color-primary: {};\n", self.primary.to_hex()));
-        css.push_str(&format!(
-            "  --color-secondary: {};\n",
-            self.secondary.to_hex()
-        ));
-        css.push_str(&format!(
-            "  --color-background: {};\n",
-            self.background.to_hex()
-        ));
-        css.push_str(&format!(
-            "  --color-surface: {};\n",
-            self.surface.to_hex()
-        ));
-        css.push_str(&format!("  --color-text: {};\n", self.text.to_hex()));
-        css.push_str(&format!(
-            "  --color-text-muted: {};\n",
-            self.text_muted.to_hex()
-        ));
-        css.push_str(&format!("  --color-border: {};\n", self.border.to_hex()));
-        css.push_str(&format!(
-            "  --color-success: {};\n",
-            self.success.to_hex()
-        ));
-        css.push_str(&format!(
-            "  --color-warning: {};\n",
-            self.warning.to_hex()
-        ));
-        css.push_str(&format!("  --color-error: {};\n", self.error.to_hex()));
-        css.push_str(&format!("  --color-info: {};\n", self.info.to_hex()));
+        use std::fmt::Write;
+        let mut css = String::with_capacity(512);
+        let _ = writeln!(css, "  --color-primary: {};", self.primary.to_hex());
+        let _ = writeln!(css, "  --color-secondary: {};", self.secondary.to_hex());
+        let _ = writeln!(css, "  --color-background: {};", self.background.to_hex());
+        let _ = writeln!(css, "  --color-surface: {};", self.surface.to_hex());
+        let _ = writeln!(css, "  --color-text: {};", self.text.to_hex());
+        let _ = writeln!(css, "  --color-text-muted: {};", self.text_muted.to_hex());
+        let _ = writeln!(css, "  --color-border: {};", self.border.to_hex());
+        let _ = writeln!(css, "  --color-success: {};", self.success.to_hex());
+        let _ = writeln!(css, "  --color-warning: {};", self.warning.to_hex());
+        let _ = writeln!(css, "  --color-error: {};", self.error.to_hex());
+        let _ = writeln!(css, "  --color-info: {};", self.info.to_hex());
         css
     }
 

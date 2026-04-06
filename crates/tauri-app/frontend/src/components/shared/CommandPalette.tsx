@@ -1,5 +1,6 @@
 import { createSignal, createMemo, For, onMount } from "solid-js";
 import { appStore } from "../../stores/app-store";
+import * as ipc from "../../ipc";
 
 interface PaletteAction {
   id: string;
@@ -13,7 +14,23 @@ export function CommandPalette() {
   const { store, setStore, newThread, addProject, selectThread } = appStore;
   const [query, setQuery] = createSignal("");
   const [selectedIndex, setSelectedIndex] = createSignal(0);
+  const [openPrs, setOpenPrs] = createSignal<ipc.OpenPr[]>([]);
   let inputRef: HTMLInputElement | undefined;
+
+  // Load open PRs for GitHub projects (best-effort, non-blocking)
+  onMount(() => {
+    (async () => {
+      for (const project of store.projects) {
+        if (project.path !== "." && store.projectGitStatus[project.id] === "github") {
+          try {
+            const prs = await ipc.listOpenPrs(project.path);
+            setOpenPrs(prs);
+          } catch { /* ignore — gh might not be installed */ }
+          break;
+        }
+      }
+    })();
+  });
 
   function close() {
     setStore("commandPaletteOpen", false);
@@ -65,6 +82,56 @@ export function CommandPalette() {
         close();
       } },
     );
+
+    // Add open PRs as "Work on PR #N" actions
+    for (const pr of openPrs()) {
+      items.push({
+        id: `pr-${pr.number}`,
+        label: `Work on PR #${pr.number}: ${pr.title}`,
+        category: "Action" as const,
+        onSelect: async () => {
+          close();
+          // Check if already linked to a thread
+          try {
+            const existingThread = await ipc.findThreadForPr(pr.number);
+            if (existingThread) {
+              selectThread(existingThread);
+              return;
+            }
+          } catch { /* continue to create */ }
+
+          // Find the GitHub project
+          const project = store.projects.find(
+            (p) => p.path !== "." && store.projectGitStatus[p.id] === "github"
+          );
+          if (!project) return;
+
+          // Create a new thread titled after the PR
+          const threadId = await newThread(project.id);
+          if (!threadId) return;
+
+          // Rename the thread to the PR title
+          try {
+            await ipc.renameThread(threadId, `PR #${pr.number}: ${pr.title}`);
+            setStore("projects", (projects) =>
+              projects.map((p) => ({
+                ...p,
+                threads: p.threads.map((t) =>
+                  t.id === threadId ? { ...t, title: `PR #${pr.number}: ${pr.title}` } : t
+                ),
+              }))
+            );
+
+            // Checkout the PR branch into a worktree
+            const wt = await ipc.checkoutPrIntoWorktree(threadId, pr.number, project.path);
+            setStore("worktrees", threadId, wt);
+            setStore("projectPrMap", project.id, threadId, pr.number);
+          } catch (e) {
+            console.error("Failed to setup PR thread:", e);
+          }
+        },
+      });
+    }
 
     return items;
   });
@@ -148,7 +215,7 @@ export function CommandPalette() {
           display: flex;
           align-items: flex-start;
           justify-content: center;
-          padding-top: 18vh;
+          padding-top: 22vh;
           backdrop-filter: blur(8px);
           -webkit-backdrop-filter: blur(8px);
           animation: cmdFadeIn 0.1s ease-out;
@@ -176,8 +243,8 @@ export function CommandPalette() {
         .cmd-palette-input-wrap {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 14px 16px;
+          gap: var(--space-3);
+          padding: var(--space-4);
           border-bottom: 1px solid var(--border);
         }
         .cmd-palette-search-icon {
@@ -207,7 +274,7 @@ export function CommandPalette() {
         }
         .cmd-palette-list {
           overflow-y: auto;
-          padding: 6px;
+          padding: var(--space-1);
           max-height: 350px;
         }
         .cmd-palette-list::-webkit-scrollbar { width: 4px; }
@@ -220,8 +287,8 @@ export function CommandPalette() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 10px 12px;
-          border-radius: 8px;
+          padding: var(--space-2) var(--space-3);
+          border-radius: var(--radius-sm);
           cursor: pointer;
           transition: background 0.08s;
         }
@@ -234,7 +301,7 @@ export function CommandPalette() {
         .cmd-palette-item-right {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: var(--space-2);
           flex-shrink: 0;
         }
         .cmd-palette-shortcut {
@@ -268,7 +335,7 @@ export function CommandPalette() {
           background: rgba(240, 184, 64, 0.1);
         }
         .cmd-palette-empty {
-          padding: 24px;
+          padding: var(--space-6);
           text-align: center;
           color: var(--text-tertiary);
           font-size: 13px;

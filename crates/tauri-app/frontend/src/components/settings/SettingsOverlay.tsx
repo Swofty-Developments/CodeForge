@@ -1,4 +1,4 @@
-import { createSignal, onMount, For } from "solid-js";
+import { createSignal, onMount, For, Show } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import * as ipc from "../../ipc";
 
@@ -7,6 +7,8 @@ export function SettingsOverlay() {
   const { store, setStore } = appStore;
   const [claudePath, setClaudePath] = createSignal("claude");
   const [codexPath, setCodexPath] = createSignal("codex");
+  const [claudeSaveState, setClaudeSaveState] = createSignal<"idle" | "saved" | "error">("idle");
+  const [codexSaveState, setCodexSaveState] = createSignal<"idle" | "saved" | "error">("idle");
 
   onMount(async () => {
     const cp = await ipc.getSetting("claude_path");
@@ -17,6 +19,17 @@ export function SettingsOverlay() {
 
   function close() {
     setStore("settingsOpen", false);
+  }
+
+  async function savePath(key: string, value: string, setState: (s: "idle" | "saved" | "error") => void) {
+    try {
+      await ipc.setSetting(key, value);
+      setState("saved");
+      setTimeout(() => setState("idle"), 2000);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 3000);
+    }
   }
 
   return (
@@ -34,20 +47,44 @@ export function SettingsOverlay() {
         <div class="settings-section">
           <label>Claude Binary</label>
           <span class="settings-section-desc">Override the default binary locations for AI providers</span>
-          <input
-            value={claudePath()}
-            onInput={(e) => setClaudePath(e.currentTarget.value)}
-            onBlur={() => ipc.setSetting("claude_path", claudePath())}
-          />
+          <div class="settings-input-row">
+            <input
+              value={claudePath()}
+              onInput={(e) => setClaudePath(e.currentTarget.value)}
+              onBlur={() => savePath("claude_path", claudePath(), setClaudeSaveState)}
+              placeholder="claude"
+            />
+            <Show when={claudeSaveState() === "saved"}>
+              <span class="settings-save-indicator saved">Saved</span>
+            </Show>
+            <Show when={claudeSaveState() === "error"}>
+              <span class="settings-save-indicator error">Failed to save</span>
+            </Show>
+          </div>
+          <button class="settings-reset-btn" onClick={() => { setClaudePath("claude"); savePath("claude_path", "claude", setClaudeSaveState); }}>
+            Reset to default
+          </button>
         </div>
 
         <div class="settings-section">
           <label>Codex Binary</label>
-          <input
-            value={codexPath()}
-            onInput={(e) => setCodexPath(e.currentTarget.value)}
-            onBlur={() => ipc.setSetting("codex_path", codexPath())}
-          />
+          <div class="settings-input-row">
+            <input
+              value={codexPath()}
+              onInput={(e) => setCodexPath(e.currentTarget.value)}
+              onBlur={() => savePath("codex_path", codexPath(), setCodexSaveState)}
+              placeholder="codex"
+            />
+            <Show when={codexSaveState() === "saved"}>
+              <span class="settings-save-indicator saved">Saved</span>
+            </Show>
+            <Show when={codexSaveState() === "error"}>
+              <span class="settings-save-indicator error">Failed to save</span>
+            </Show>
+          </div>
+          <button class="settings-reset-btn" onClick={() => { setCodexPath("codex"); savePath("codex_path", "codex", setCodexSaveState); }}>
+            Reset to default
+          </button>
         </div>
 
 
@@ -87,7 +124,7 @@ export function SettingsOverlay() {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 20px;
+          margin-bottom: var(--space-5);
         }
         .settings-header h3 {
           font-size: 16px;
@@ -96,7 +133,7 @@ export function SettingsOverlay() {
         }
         .close-btn {
           color: var(--text-tertiary);
-          padding: 5px;
+          padding: var(--space-1);
           border-radius: var(--radius-sm);
           transition: background 0.12s, color 0.12s;
           display: flex;
@@ -104,14 +141,14 @@ export function SettingsOverlay() {
         }
         .close-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
         .settings-section {
-          margin-bottom: 16px;
+          margin-bottom: var(--space-4);
         }
         .settings-section label {
           display: block;
           font-size: 10px;
           font-weight: 600;
           color: var(--text-tertiary);
-          margin-bottom: 6px;
+          margin-bottom: var(--space-2);
           text-transform: uppercase;
           letter-spacing: 0.06em;
         }
@@ -119,25 +156,48 @@ export function SettingsOverlay() {
           width: 100%;
           font-family: var(--font-mono);
           font-size: 12px;
+          flex: 1;
         }
+        .settings-input-row {
+          display: flex;
+          align-items: center;
+          gap: var(--space-2);
+        }
+        .settings-save-indicator {
+          font-size: 10px;
+          font-weight: 600;
+          white-space: nowrap;
+          animation: fade-in 0.12s ease;
+          flex-shrink: 0;
+        }
+        .settings-save-indicator.saved { color: var(--green); }
+        .settings-save-indicator.error { color: var(--red); }
+        .settings-reset-btn {
+          font-size: 10px;
+          color: var(--text-tertiary);
+          margin-top: var(--space-1);
+          padding: 0;
+          transition: color 0.12s;
+        }
+        .settings-reset-btn:hover { color: var(--text-secondary); }
         .settings-section-desc {
           display: block;
           font-size: 11px;
           color: var(--text-tertiary);
-          margin-bottom: 6px;
+          margin-bottom: var(--space-2);
           line-height: 1.4;
         }
         .settings-hint {
           display: block;
           font-size: 10px;
           color: var(--text-tertiary);
-          margin-top: 4px;
+          margin-top: var(--space-1);
         }
         .settings-toggle-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
+          gap: var(--space-3);
         }
         .settings-toggle-desc {
           font-size: 12px;

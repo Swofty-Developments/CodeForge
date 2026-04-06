@@ -61,6 +61,7 @@ export function SetupWizard(props: Props) {
   }
 
   return (
+    <>
     <div class="sw-overlay">
       <div class="sw-card">
         {/* Progress dots */}
@@ -267,13 +268,7 @@ export function SetupWizard(props: Props) {
         </Show>
       </div>
     </div>
-  );
-}
-
-if (!document.getElementById("setup-wizard-styles")) {
-  const s = document.createElement("style");
-  s.id = "setup-wizard-styles";
-  s.textContent = `
+    <style>{`
     .sw-overlay {
       position: fixed;
       inset: 0;
@@ -522,6 +517,7 @@ if (!document.getElementById("setup-wizard-styles")) {
       font-size: 13px;
       color: var(--text-secondary);
     }
-  `;
-  document.head.appendChild(s);
+    `}</style>
+    </>
+  );
 }

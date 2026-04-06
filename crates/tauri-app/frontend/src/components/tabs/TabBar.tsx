@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, createMemo, createEffect, on, onCleanup } from "solid-js";
 import { DragDropProvider } from "@dnd-kit/solid";
 import { useSortable } from "@dnd-kit/solid/sortable";
 import { move } from "@dnd-kit/helpers";
@@ -13,7 +13,8 @@ function SortableTab(props: { tabId: string; index: number }) {
 
   const isActive = () => store.activeTab === props.tabId;
 
-  const color = () => {
+  // Project color for grouping tint
+  const projectColor = () => {
     const t = thread();
     if (!t) return null;
     const project = store.projects.find((p) => p.threads.some((th) => th.id === t.id));
@@ -36,6 +37,20 @@ function SortableTab(props: { tabId: string; index: number }) {
 
   const isUnread = () => !isActive() && !!store.unreadTabs[props.tabId];
 
+  // Detect when a background thread just completed (for breathe effect)
+  const [justCompleted, setJustCompleted] = createSignal(false);
+  let prevStatus: string | undefined;
+  createEffect(on(
+    () => store.sessionStatuses[props.tabId],
+    (status) => {
+      if (prevStatus === "generating" && status === "ready" && !isActive()) {
+        setJustCompleted(true);
+        setTimeout(() => setJustCompleted(false), 1500);
+      }
+      prevStatus = status;
+    }
+  ));
+
   const sortable = useSortable({
     get id() { return props.tabId; },
     get index() { return props.index; },
@@ -49,17 +64,60 @@ function SortableTab(props: { tabId: string; index: number }) {
     }
   }
 
+  // Tab hover preview — show last assistant message
+  const [hovered, setHovered] = createSignal(false);
+  const [previewPos, setPreviewPos] = createSignal({ x: 0, y: 0 });
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+  let tabEl: HTMLDivElement | undefined;
+
+  function onEnter() {
+    if (isActive()) return;
+    hoverTimer = setTimeout(() => {
+      if (tabEl) {
+        const rect = tabEl.getBoundingClientRect();
+        setPreviewPos({ x: rect.left + rect.width / 2, y: rect.bottom + 6 });
+      }
+      setHovered(true);
+    }, 350);
+  }
+  function onLeave() {
+    clearTimeout(hoverTimer);
+    setHovered(false);
+  }
+
+  const lastAssistantMsg = createMemo(() => {
+    if (props.tabId.startsWith("__")) return null;
+    const msgs = store.threadMessages[props.tabId];
+    if (!msgs) return null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant" && msgs[i].content) {
+        return msgs[i].content.slice(0, 120) + (msgs[i].content.length > 120 ? "..." : "");
+      }
+    }
+    return null;
+  });
+
+  // Compute project color tint style
+  const tintStyle = () => {
+    const c = projectColor();
+    if (!c || isActive()) return {};
+    return { "border-bottom": `2px solid ${c}` };
+  };
+
   return (
     <div
-      ref={sortable.ref}
+      ref={(el) => { sortable.ref(el); tabEl = el; }}
       class="tab"
       classList={{
         active: isActive(),
         dragging: typeof sortable.isDragging === 'function' ? sortable.isDragging() : !!sortable.isDragging,
         unread: isUnread(),
+        "tab-breathe": justCompleted(),
       }}
-      style={color() ? { "border-bottom": `2px solid ${color()}` } : {}}
+      style={tintStyle()}
       onClick={handleClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
     >
       <Show when={statusDotColor()}>
         {(dotColor) => (
@@ -87,6 +145,19 @@ function SortableTab(props: { tabId: string; index: number }) {
       >
         &times;
       </button>
+
+      {/* Hover preview tooltip — fixed position to escape overflow clipping */}
+      <Show when={hovered() && lastAssistantMsg()}>
+        <div
+          class="tab-preview"
+          style={{
+            left: `${previewPos().x}px`,
+            top: `${previewPos().y}px`,
+          }}
+        >
+          <div class="tab-preview-text">{lastAssistantMsg()}</div>
+        </div>
+      </Show>
     </div>
   );
 }
@@ -133,18 +204,48 @@ export function TabBar() {
     });
   }
 
+  // Detect overflow for fade edges
+  let tabsRef: HTMLDivElement | undefined;
+  const [overflowLeft, setOverflowLeft] = createSignal(false);
+  const [overflowRight, setOverflowRight] = createSignal(false);
+
+  function checkOverflow() {
+    if (!tabsRef) return;
+    setOverflowLeft(tabsRef.scrollLeft > 4);
+    setOverflowRight(tabsRef.scrollLeft < tabsRef.scrollWidth - tabsRef.clientWidth - 4);
+  }
+
+  // Check on mount and when tabs change
+  createEffect(() => {
+    const _ = store.openTabs.length;
+    requestAnimationFrame(checkOverflow);
+  });
+
   return (
     <Show when={store.openTabs.length > 0}>
+      <>
       <DragDropProvider
         onDragEnd={(event) => {
           setStore("openTabs", (tabs) => move(tabs, event));
         }}
       >
         <div class="tab-bar">
-          <div class="tab-bar-tabs">
-            <For each={store.openTabs}>
-              {(tabId, idx) => <SortableTab tabId={tabId} index={idx()} />}
-            </For>
+          <div
+            class="tab-bar-tabs"
+            classList={{
+              "overflow-left": overflowLeft(),
+              "overflow-right": overflowRight(),
+            }}
+          >
+            <div
+              class="tab-bar-tabs-inner"
+              ref={tabsRef}
+              onScroll={checkOverflow}
+            >
+              <For each={store.openTabs}>
+                {(tabId, idx) => <SortableTab tabId={tabId} index={idx()} />}
+              </For>
+            </div>
           </div>
           <Show when={store.activeTab}>
             <div class="tab-bar-actions">
@@ -178,14 +279,7 @@ export function TabBar() {
           </Show>
         </div>
       </DragDropProvider>
-    </Show>
-  );
-}
-
-if (!document.getElementById("tab-bar-styles")) {
-  const s = document.createElement("style");
-  s.id = "tab-bar-styles";
-  s.textContent = `
+      <style>{`
     .tab-bar {
       display: flex;
       align-items: stretch;
@@ -194,16 +288,46 @@ if (!document.getElementById("tab-bar-styles")) {
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
+
+    /* ── Scrollable tabs with fade edges ── */
     .tab-bar-tabs {
+      flex: 1;
+      min-width: 0;
+      position: relative;
+    }
+    .tab-bar-tabs::before,
+    .tab-bar-tabs::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 24px;
+      z-index: 3;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .tab-bar-tabs::before {
+      left: 0;
+      background: linear-gradient(to right, var(--bg-muted), transparent);
+    }
+    .tab-bar-tabs::after {
+      right: 0;
+      background: linear-gradient(to left, var(--bg-muted), transparent);
+    }
+    .tab-bar-tabs.overflow-left::before { opacity: 1; }
+    .tab-bar-tabs.overflow-right::after { opacity: 1; }
+
+    .tab-bar-tabs-inner {
       display: flex;
       align-items: stretch;
       gap: 1px;
-      flex: 1;
       overflow-x: auto;
       overflow-y: hidden;
-      min-width: 0;
+      scroll-behavior: smooth;
     }
-    .tab-bar-tabs::-webkit-scrollbar { height: 0; display: none; }
+    .tab-bar-tabs-inner::-webkit-scrollbar { height: 0; display: none; }
+
     .tab-bar-actions {
       display: flex;
       align-items: center;
@@ -212,41 +336,6 @@ if (!document.getElementById("tab-bar-styles")) {
       flex-shrink: 0;
       margin-left: 4px;
     }
-    .tb-url-group {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-      padding: 0 4px 4px;
-      margin-left: auto;
-      min-width: 140px;
-      max-width: 280px;
-      flex-shrink: 1;
-    }
-    .tb-url {
-      flex: 1;
-      min-width: 0;
-      height: 22px;
-      padding: 0 6px;
-      font-size: 11px;
-      font-family: var(--font-mono);
-      background: var(--bg-accent);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text);
-      outline: none;
-    }
-    .tb-url:focus { border-color: var(--primary); }
-    .tb-url-go {
-      height: 22px;
-      padding: 0 8px;
-      font-size: 10px;
-      font-weight: 600;
-      background: var(--primary);
-      color: #fff;
-      border-radius: 4px;
-      flex-shrink: 0;
-    }
-    .tb-url-go:hover { filter: brightness(1.15); }
     .tb-action {
       width: 24px;
       height: 24px;
@@ -281,6 +370,8 @@ if (!document.getElementById("tab-bar-styles")) {
       white-space: nowrap;
       pointer-events: none;
     }
+
+    /* ── Tab ── */
     .tab {
       display: flex;
       align-items: center;
@@ -291,22 +382,45 @@ if (!document.getElementById("tab-bar-styles")) {
       color: var(--text-secondary);
       border-radius: var(--radius-sm) var(--radius-sm) 0 0;
       cursor: grab;
-      transition: background 0.12s, color 0.12s, opacity 0.15s;
+      transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease,
+                  box-shadow 0.2s ease, transform 0.12s ease;
       white-space: nowrap;
       user-select: none;
       flex-shrink: 0;
       touch-action: none;
+      position: relative;
     }
-    .tab:active { cursor: grabbing; will-change: transform; }
-    .tab:hover { background: var(--bg-hover); color: var(--text-secondary); }
+    .tab:active { cursor: grabbing; will-change: transform; transform: scale(1.02); }
+    .tab:hover {
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+    }
     .tab.active {
       background: var(--bg-base);
       color: var(--text);
       border: 1px solid var(--border-strong);
       border-bottom: 1px solid var(--bg-base);
       margin-bottom: -1px;
+      box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.1);
     }
-    .tab.dragging { opacity: 0.4; will-change: transform; }
+    .tab.dragging {
+      opacity: 0.85;
+      will-change: transform;
+      transform: scale(1.03);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10;
+    }
+
+    /* ── Background thread completion breathe ── */
+    .tab-breathe {
+      animation: tab-breathe-anim 1.5s ease-out;
+    }
+    @keyframes tab-breathe-anim {
+      0% { box-shadow: 0 0 0 0 rgba(76, 214, 148, 0.4); }
+      30% { box-shadow: 0 0 12px 2px rgba(76, 214, 148, 0.3); transform: scale(1.03); }
+      100% { box-shadow: 0 0 0 0 rgba(76, 214, 148, 0); transform: scale(1); }
+    }
+
     .tab-label {
       overflow: hidden;
       text-overflow: ellipsis;
@@ -351,6 +465,59 @@ if (!document.getElementById("tab-bar-styles")) {
       color: var(--text);
       font-weight: 600;
     }
-  `;
-  document.head.appendChild(s);
+
+    /* ── Hover preview tooltip (fixed to escape overflow clipping) ── */
+    .tab-preview {
+      position: fixed;
+      transform: translateX(-50%);
+      z-index: 999;
+      width: 220px;
+      max-width: 280px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 8px 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      animation: tab-preview-in 0.12s ease-out both;
+      pointer-events: none;
+    }
+    .tab-preview::before {
+      content: "";
+      position: absolute;
+      top: -4px;
+      left: 50%;
+      transform: translateX(-50%) rotate(45deg);
+      width: 8px;
+      height: 8px;
+      background: var(--bg-card);
+      border-left: 1px solid var(--border-strong);
+      border-top: 1px solid var(--border-strong);
+    }
+    @keyframes tab-preview-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .tab-preview-text {
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--text-secondary);
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+      font-family: var(--font-body);
+      font-weight: 400;
+      white-space: normal;
+    }
+
+    /* ── prefers-reduced-motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      .tab-breathe { animation: none; }
+      .tab-preview { animation: none; }
+      .tab, .tab-status-dot { transition: none; }
+    }
+      `}</style>
+      </>
+    </Show>
+  );
 }

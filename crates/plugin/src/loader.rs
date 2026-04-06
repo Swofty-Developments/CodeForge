@@ -9,6 +9,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Default per-plugin memory limit (256 MiB).
+const DEFAULT_PLUGIN_MEMORY_BYTES: u64 = 256 * 1024 * 1024;
+
 /// The format/type of a plugin binary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PluginFormat {
@@ -239,7 +242,7 @@ impl Default for LoaderConfig {
             supported_formats: vec![PluginFormat::Wasm, PluginFormat::JavaScript],
             load_timeout: Duration::from_secs(10),
             init_timeout: Duration::from_secs(5),
-            max_memory_per_plugin: 256 * 1024 * 1024, // 256 MB
+            max_memory_per_plugin: DEFAULT_PLUGIN_MEMORY_BYTES,
             verify_signatures: false,
             allow_native: false,
         }

@@ -222,10 +222,15 @@ export function Composer() {
 
   return (
     <Show when={isActive()}>
+      <>
       <div class="composer-wrapper">
         <div
           class="composer-card"
-          classList={{ "drag-over": dragOver() }}
+          classList={{
+            "drag-over": dragOver(),
+            "generating": isGenerating() && !store.composerText.trim(),
+            "steering": isGenerating() && !!store.composerText.trim(),
+          }}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
@@ -403,14 +408,7 @@ export function Composer() {
           </div>
         </div>
       </div>
-    </Show>
-  );
-}
-
-if (!document.getElementById("composer-styles")) {
-  const style = document.createElement("style");
-  style.id = "composer-styles";
-  style.textContent = `
+      <style>{`
     .composer-wrapper {
       padding: 8px 20px 16px;
       display: flex;
@@ -427,7 +425,7 @@ if (!document.getElementById("composer-styles")) {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      transition: border-color 0.2s, box-shadow 0.2s;
+      transition: border-color 0.3s, box-shadow 0.3s;
       position: relative;
     }
     .composer-card:focus-within {
@@ -437,6 +435,20 @@ if (!document.getElementById("composer-styles")) {
     .composer-card.drag-over {
       border-color: var(--primary);
       background: rgba(107, 124, 255, 0.04);
+    }
+    /* Direction B: border pulse during generation */
+    .composer-card.generating {
+      animation: composer-gen-pulse 2s ease-in-out infinite;
+    }
+    @keyframes composer-gen-pulse {
+      0%, 100% { border-color: rgba(88, 196, 240, 0.15); }
+      50% { border-color: rgba(88, 196, 240, 0.35); box-shadow: 0 0 12px -4px rgba(88, 196, 240, 0.1); }
+    }
+    /* Steering mode — amber border */
+    .composer-card.steering {
+      animation: none;
+      border-color: rgba(240, 184, 64, 0.3);
+      box-shadow: 0 0 8px -4px rgba(240, 184, 64, 0.1);
     }
     .attachment-chips {
       display: flex;
@@ -516,14 +528,23 @@ if (!document.getElementById("composer-styles")) {
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      transition: background 0.15s, transform 0.1s;
+      transition: background 0.25s ease, transform 0.1s, box-shadow 0.25s;
     }
     .send-btn:hover { filter: brightness(1.1); transform: scale(1.04); }
     .send-btn:active { transform: scale(0.96); }
+    .send-btn svg {
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .send-btn:active svg { transform: scale(0.85); }
     .send-btn.stop { background: var(--amber, #e6b84d); }
     .send-btn.stop.force-stop { background: var(--red); }
     .send-btn.steering {
       background: var(--amber, #e6b84d);
+      box-shadow: 0 0 8px rgba(240, 184, 64, 0.2);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .composer-card.generating { animation: none; }
     }
     /* ── Slash command menu ── */
     @keyframes slash-menu-in {
@@ -648,6 +669,8 @@ if (!document.getElementById("composer-styles")) {
       border-radius: 50%;
     }
     .status-text { font-size: 10px; font-weight: 500; }
-  `;
-  document.head.appendChild(style);
+      `}</style>
+      </>
+    </Show>
+  );
 }

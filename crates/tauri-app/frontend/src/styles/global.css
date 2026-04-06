@@ -43,6 +43,16 @@
   --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code", monospace;
 
+  /* Spacing — 4px base scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
   /* Layout */
   --sidebar-width: 260px;
   --sidebar-min: 180px;
@@ -72,17 +82,6 @@ body {
   width: 100vw;
 }
 
-#app::before {
-  content: "";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--primary) 30%, var(--purple) 50%, var(--pink) 70%, transparent);
-  opacity: 0.5;
-  pointer-events: none;
-}
 
 
 /* ── Reset elements ── */
@@ -116,6 +115,21 @@ input {
 }
 
 input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+/* ── Focus-visible for keyboard navigation ── */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+input:focus-visible {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px var(--primary-glow);
 }
@@ -178,7 +192,7 @@ input:focus {
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: var(--space-6);
   max-width: 480px;
   width: 90%;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.05);

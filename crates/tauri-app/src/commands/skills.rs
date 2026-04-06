@@ -20,7 +20,8 @@ pub struct MarketplaceSource {
 pub async fn list_skills(provider: String) -> Result<Vec<SkillInfo>, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = Command::new(binary)
@@ -38,7 +39,8 @@ pub async fn list_skills(provider: String) -> Result<Vec<SkillInfo>, String> {
 pub async fn install_skill(provider: String, name: String) -> Result<String, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = Command::new(binary)
@@ -60,7 +62,8 @@ pub async fn install_skill(provider: String, name: String) -> Result<String, Str
 pub async fn uninstall_skill(provider: String, name: String) -> Result<String, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = Command::new(binary)
@@ -82,7 +85,8 @@ pub async fn uninstall_skill(provider: String, name: String) -> Result<String, S
 pub async fn enable_skill(provider: String, name: String) -> Result<String, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = Command::new(binary)
@@ -104,7 +108,8 @@ pub async fn enable_skill(provider: String, name: String) -> Result<String, Stri
 pub async fn disable_skill(provider: String, name: String) -> Result<String, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = Command::new(binary)
@@ -126,7 +131,8 @@ pub async fn disable_skill(provider: String, name: String) -> Result<String, Str
 pub async fn list_marketplaces(provider: String) -> Result<Vec<MarketplaceSource>, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = Command::new(binary)
@@ -144,7 +150,8 @@ pub async fn list_marketplaces(provider: String) -> Result<Vec<MarketplaceSource
 pub async fn add_marketplace(provider: String, source: String) -> Result<String, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = Command::new(binary)

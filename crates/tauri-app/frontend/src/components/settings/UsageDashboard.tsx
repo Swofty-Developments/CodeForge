@@ -47,140 +47,133 @@ export function UsageDashboard() {
 
   return (
     <div class="overlay" onClick={close}>
-      <div class="usage-overlay-panel" onClick={(e) => e.stopPropagation()}>
-        <div class="usage-dashboard">
-          <div class="ud-header">
-            <h3>Usage & Cost</h3>
-            <div class="ud-header-actions">
-              <button class="ud-icon-btn" onClick={load} title="Refresh">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M23 4v6h-6M1 20v-6h6" />
-                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-                </svg>
-              </button>
-              <button class="ud-icon-btn" onClick={close}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
+      <div class="ud-panel" onClick={(e) => e.stopPropagation()}>
+        <div class="ud-header">
+          <h3>Usage</h3>
+          <div class="ud-header-actions">
+            <button class="ud-icon-btn" onClick={load} title="Refresh">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6M1 20v-6h6" />
+                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+              </svg>
+            </button>
+            <button class="ud-icon-btn" onClick={close}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </div>
-
-          <Show when={loading()}>
-            <div class="ud-status">Loading usage data...</div>
-          </Show>
-          <Show when={error()}>
-            <div class="ud-status ud-error">{error()}</div>
-          </Show>
-
-          <Show when={!loading() && !error() && summary()}>
-            {(() => {
-              const s = summary()!;
-              const totalTokens = s.total_input_tokens + s.total_output_tokens;
-              return (
-                <>
-                  <div class="ud-hero">
-                    <div class="ud-hero-cost">{formatCost(s.total_cost_usd)}</div>
-                    <div class="ud-hero-label">total spend</div>
-                  </div>
-
-                  <div class="ud-token-grid">
-                    <div class="ud-token-card">
-                      <span class="ud-tv">{formatTokens(s.total_input_tokens)}</span>
-                      <span class="ud-tl">Input</span>
-                    </div>
-                    <div class="ud-token-card">
-                      <span class="ud-tv">{formatTokens(s.total_output_tokens)}</span>
-                      <span class="ud-tl">Output</span>
-                    </div>
-                    <div class="ud-token-card">
-                      <span class="ud-tv">{formatTokens(s.total_cache_read_tokens)}</span>
-                      <span class="ud-tl">Cache Read</span>
-                    </div>
-                    <div class="ud-token-card">
-                      <span class="ud-tv">{formatTokens(s.total_cache_write_tokens)}</span>
-                      <span class="ud-tl">Cache Write</span>
-                    </div>
-                  </div>
-
-                  <Show when={topThreads().length > 0}>
-                    <div class="ud-section">
-                      <h4>Cost by Thread</h4>
-                      <div class="ud-bars">
-                        <For each={topThreads()}>
-                          {(thread) => {
-                            const pct = () => Math.max((thread.cost_usd / maxThreadCost()) * 100, 1);
-                            return (
-                              <div class="ud-bar-row">
-                                <div class="ud-bar-label" title={thread.thread_title}>
-                                  {thread.thread_title.length > 28 ? thread.thread_title.slice(0, 28) + "..." : thread.thread_title}
-                                </div>
-                                <div class="ud-bar-track">
-                                  <div class="ud-bar-fill" style={{ width: `${pct()}%` }} />
-                                </div>
-                                <div class="ud-bar-value">{formatCost(thread.cost_usd)}</div>
-                              </div>
-                            );
-                          }}
-                        </For>
-                      </div>
-                    </div>
-                  </Show>
-
-                  <Show when={s.model_costs.length > 0}>
-                    <div class="ud-section">
-                      <h4>By Model</h4>
-                      <For each={s.model_costs}>
-                        {(mc) => (
-                          <div class="ud-model-row">
-                            <span class="ud-model-name">{mc.model}</span>
-                            <span class="ud-model-tokens">{formatTokens(mc.total_tokens)}</span>
-                            <span class="ud-model-cost">{formatCost(mc.cost_usd)}</span>
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-
-                  <Show when={totalTokens === 0}>
-                    <div class="ud-status">No usage data yet.</div>
-                  </Show>
-                </>
-              );
-            })()}
-          </Show>
         </div>
+
+        <Show when={loading()}>
+          <div class="ud-empty">Loading...</div>
+        </Show>
+        <Show when={error()}>
+          <div class="ud-empty ud-error">{error()}</div>
+        </Show>
+
+        <Show when={!loading() && !error() && summary()}>
+          {(() => {
+            const s = summary()!;
+            const totalTokens = s.total_input_tokens + s.total_output_tokens;
+            return (
+              <>
+                {/* Token summary — inline, compact */}
+                <div class="ud-totals">
+                  <span class="ud-total-cost">{formatCost(s.total_cost_usd)}</span>
+                  <span class="ud-total-sep" />
+                  <span class="ud-total-detail">{formatTokens(s.total_input_tokens)} in</span>
+                  <span class="ud-total-detail">{formatTokens(s.total_output_tokens)} out</span>
+                  <Show when={s.total_cache_read_tokens > 0}>
+                    <span class="ud-total-detail ud-total-dim">{formatTokens(s.total_cache_read_tokens)} cached</span>
+                  </Show>
+                </div>
+
+                {/* Thread breakdown */}
+                <Show when={topThreads().length > 0}>
+                  <table class="ud-table">
+                    <thead>
+                      <tr>
+                        <th>Thread</th>
+                        <th class="ud-th-right">Tokens</th>
+                        <th class="ud-th-right">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <For each={topThreads()}>
+                        {(thread) => {
+                          const pct = () => Math.max((thread.cost_usd / maxThreadCost()) * 100, 2);
+                          return (
+                            <tr>
+                              <td>
+                                <div class="ud-thread-cell">
+                                  <span class="ud-thread-name" title={thread.thread_title}>{thread.thread_title}</span>
+                                  <div class="ud-bar">
+                                    <div class="ud-bar-fill" style={{ width: `${pct()}%` }} />
+                                  </div>
+                                </div>
+                              </td>
+                              <td class="ud-td-mono">{formatTokens(thread.total_tokens ?? 0)}</td>
+                              <td class="ud-td-cost">{formatCost(thread.cost_usd)}</td>
+                            </tr>
+                          );
+                        }}
+                      </For>
+                    </tbody>
+                  </table>
+                </Show>
+
+                {/* Model breakdown */}
+                <Show when={s.model_costs.length > 0}>
+                  <div class="ud-models">
+                    <For each={s.model_costs}>
+                      {(mc) => (
+                        <span class="ud-model-tag">
+                          {mc.model}
+                          <span class="ud-model-cost">{formatCost(mc.cost_usd)}</span>
+                        </span>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+
+                <Show when={totalTokens === 0}>
+                  <div class="ud-empty">No usage data yet.</div>
+                </Show>
+              </>
+            );
+          })()}
+        </Show>
       </div>
 
       <style>{`
-        .usage-overlay-panel {
+        .ud-panel {
           background: var(--bg-card);
           border: 1px solid var(--border-strong);
           border-radius: var(--radius-lg);
-          padding: 24px;
-          max-width: 520px;
+          padding: var(--space-5);
+          max-width: 480px;
           width: 90%;
           max-height: 80vh;
           overflow-y: auto;
           box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.05);
           animation: overlay-panel-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
         }
-        .usage-dashboard { font-size: 13px; }
         .ud-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 16px;
+          margin-bottom: var(--space-4);
         }
         .ud-header h3 {
-          font-size: 16px;
+          font-size: 14px;
           font-weight: 600;
-          letter-spacing: -0.3px;
+          letter-spacing: -0.2px;
         }
-        .ud-header-actions { display: flex; align-items: center; gap: 4px; }
+        .ud-header-actions { display: flex; align-items: center; gap: var(--space-1); }
         .ud-icon-btn {
           color: var(--text-tertiary);
-          padding: 5px;
+          padding: var(--space-1);
           border-radius: var(--radius-sm);
           display: flex;
           align-items: center;
@@ -188,131 +181,135 @@ export function UsageDashboard() {
         }
         .ud-icon-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
 
-        .ud-status {
+        .ud-empty {
           text-align: center;
-          padding: 32px 0;
+          padding: var(--space-8) 0;
           color: var(--text-tertiary);
           font-size: 13px;
         }
         .ud-error { color: var(--red); }
 
-        .ud-hero { text-align: center; padding: 16px 0 14px; }
-        .ud-hero-cost {
-          font-size: 36px;
+        /* ── Totals row ── */
+        .ud-totals {
+          display: flex;
+          align-items: baseline;
+          gap: var(--space-2);
+          margin-bottom: var(--space-4);
+          padding-bottom: var(--space-3);
+          border-bottom: 1px solid var(--border);
+        }
+        .ud-total-cost {
+          font-size: 18px;
           font-weight: 700;
-          letter-spacing: -1px;
-          color: var(--green);
-          line-height: 1;
+          font-variant-numeric: tabular-nums;
+          letter-spacing: -0.5px;
+          color: var(--text);
+        }
+        .ud-total-sep {
+          width: 1px;
+          height: 14px;
+          background: var(--border-strong);
+          align-self: center;
+        }
+        .ud-total-detail {
+          font-size: 11px;
+          font-family: var(--font-mono);
+          color: var(--text-secondary);
           font-variant-numeric: tabular-nums;
         }
-        .ud-hero-label {
+        .ud-total-dim { color: var(--text-tertiary); }
+
+        /* ── Thread table ── */
+        .ud-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: var(--space-4);
+        }
+        .ud-table thead th {
           font-size: 10px;
           font-weight: 600;
           text-transform: uppercase;
-          letter-spacing: 0.08em;
+          letter-spacing: 0.06em;
           color: var(--text-tertiary);
-          margin-top: 6px;
+          padding: 0 0 var(--space-2);
+          text-align: left;
+          border-bottom: 1px solid var(--border);
         }
-
-        .ud-token-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-          margin-bottom: 20px;
+        .ud-th-right { text-align: right !important; }
+        .ud-table tbody tr {
+          transition: background 0.08s;
         }
-        .ud-token-card {
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 10px 12px;
+        .ud-table tbody tr:hover {
+          background: var(--bg-hover);
+        }
+        .ud-table td {
+          padding: var(--space-2) 0;
+          font-size: 12px;
+          border-bottom: 1px solid var(--border);
+          vertical-align: middle;
+        }
+        .ud-thread-cell {
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 3px;
+          padding-right: var(--space-3);
         }
-        .ud-tv {
-          font-size: 16px;
-          font-weight: 600;
-          font-variant-numeric: tabular-nums;
-        }
-        .ud-tl {
-          font-size: 10px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-          color: var(--text-tertiary);
-        }
-
-        .ud-section { margin-bottom: 18px; }
-        .ud-section h4 {
-          font-size: 10px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-          color: var(--text-tertiary);
-          margin: 0 0 10px;
-        }
-
-        .ud-bars { display: flex; flex-direction: column; gap: 6px; }
-        .ud-bar-row {
-          display: grid;
-          grid-template-columns: 130px 1fr 56px;
-          align-items: center;
-          gap: 8px;
-        }
-        .ud-bar-label {
-          font-size: 12px;
+        .ud-thread-name {
           color: var(--text-secondary);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          max-width: 260px;
         }
-        .ud-bar-track {
-          height: 5px;
+        .ud-bar {
+          height: 2px;
           background: var(--bg-accent);
-          border-radius: 3px;
+          border-radius: 1px;
           overflow: hidden;
         }
         .ud-bar-fill {
           height: 100%;
-          background: linear-gradient(90deg, var(--primary), var(--purple));
-          border-radius: 3px;
+          background: var(--primary);
+          border-radius: 1px;
           transition: width 0.3s ease;
         }
-        .ud-bar-value {
-          font-size: 12px;
-          color: var(--green);
+        .ud-td-mono {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          color: var(--text-tertiary);
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+        }
+        .ud-td-cost {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          color: var(--text-secondary);
           text-align: right;
           font-variant-numeric: tabular-nums;
           font-weight: 500;
         }
 
-        .ud-model-row {
-          display: grid;
-          grid-template-columns: 1fr auto auto;
-          gap: 12px;
-          padding: 6px 10px;
+        /* ── Model tags ── */
+        .ud-models {
+          display: flex;
+          flex-wrap: wrap;
+          gap: var(--space-2);
+        }
+        .ud-model-tag {
+          display: flex;
+          align-items: center;
+          gap: var(--space-2);
+          font-size: 11px;
+          color: var(--text-secondary);
+          padding: var(--space-1) var(--space-2);
           background: var(--bg-surface);
           border: 1px solid var(--border);
-          border-radius: 6px;
-          align-items: center;
-          margin-bottom: 4px;
-        }
-        .ud-model-name {
-          font-size: 12px;
-          font-weight: 500;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .ud-model-tokens {
-          font-size: 11px;
-          color: var(--text-tertiary);
-          font-variant-numeric: tabular-nums;
+          border-radius: var(--radius-sm);
         }
         .ud-model-cost {
-          font-size: 12px;
-          color: var(--green);
-          font-weight: 500;
+          font-family: var(--font-mono);
+          font-size: 10px;
+          color: var(--text-tertiary);
           font-variant-numeric: tabular-nums;
         }
       `}</style>

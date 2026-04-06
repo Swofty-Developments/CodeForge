@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+codeforge-core = { path = "../core" }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { workspace = true }
 uuid = { workspace = true }

@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -16,9 +16,11 @@ const SIDECAR_SCRIPT: &str = "crates/tauri-app/agent-sidecar/index.mjs";
 
 pub struct ClaudeSession {
     child: Child,
-    stdin_tx: mpsc::UnboundedSender<String>,
+    stdin_tx: mpsc::Sender<String>,
     /// The Claude Agent SDK session ID captured from the `session_ready` event.
-    claude_session_id: Arc<Mutex<Option<String>>>,
+    claude_session_id: Arc<OnceLock<String>>,
+    /// Tracked spawned tasks so we can abort them on stop.
+    tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl ClaudeSession {
@@ -26,7 +28,7 @@ impl ClaudeSession {
         cwd: &Path,
         model: Option<&str>,
         permission_mode: Option<&str>,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
+    ) -> Result<(Self, mpsc::Receiver<AgentEvent>)> {
         Self::spawn_sidecar(cwd, model, permission_mode, None).await
     }
 
@@ -35,13 +37,13 @@ impl ClaudeSession {
         cwd: &Path,
         claude_session_id: &str,
         model: Option<&str>,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
+    ) -> Result<(Self, mpsc::Receiver<AgentEvent>)> {
         Self::spawn_sidecar(cwd, model, None, Some(claude_session_id)).await
     }
 
     /// Return the captured Claude session ID, if available.
     pub fn claude_session_id(&self) -> Option<String> {
-        self.claude_session_id.lock().ok().and_then(|g| g.clone())
+        self.claude_session_id.get().cloned()
     }
 
     /// Send a user message by writing a `query` command to the sidecar's stdin.
@@ -51,7 +53,7 @@ impl ClaudeSession {
             "prompt": text,
         });
         self.stdin_tx
-            .send(msg.to_string())
+            .try_send(msg.to_string())
             .map_err(|_| anyhow::anyhow!("Sidecar stdin channel closed"))?;
         Ok(())
     }
@@ -60,7 +62,7 @@ impl ClaudeSession {
     pub fn interrupt(&self) -> Result<()> {
         let msg = serde_json::json!({ "type": "abort" });
         self.stdin_tx
-            .send(msg.to_string())
+            .try_send(msg.to_string())
             .map_err(|_| anyhow::anyhow!("Sidecar stdin channel closed"))?;
         Ok(())
     }
@@ -79,15 +81,20 @@ impl ClaudeSession {
             "decision": decision,
         });
         if let Some(m) = message {
-            msg.as_object_mut().unwrap().insert("message".into(), Value::String(m.to_string()));
+            if let Some(obj) = msg.as_object_mut() {
+                obj.insert("message".into(), Value::String(m.to_string()));
+            }
         }
         self.stdin_tx
-            .send(msg.to_string())
+            .try_send(msg.to_string())
             .map_err(|_| anyhow::anyhow!("Sidecar stdin channel closed"))?;
         Ok(())
     }
 
     pub async fn stop(&mut self) -> Result<()> {
+        for task in self.tasks.drain(..) {
+            task.abort();
+        }
         let _ = self.child.kill().await;
         Ok(())
     }
@@ -103,7 +110,7 @@ impl ClaudeSession {
         model: Option<&str>,
         permission_mode: Option<&str>,
         session_id: Option<&str>,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<AgentEvent>)> {
+    ) -> Result<(Self, mpsc::Receiver<AgentEvent>)> {
         // Resolve the sidecar script path.
         // Priority: 1) Bundled in app (production) 2) Dev workspace 3) CARGO_MANIFEST_DIR
         let sidecar_path = std::env::current_exe()
@@ -172,13 +179,14 @@ impl ClaudeSession {
         let stdin = child.stdin.take().context("Failed to capture stdin")?;
         let stderr = child.stderr.take();
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(1024);
 
         // Stderr reader — collect stderr and emit a SessionError if the sidecar
         // crashes before producing any stdout (e.g. shared-library mismatch).
+        let mut tasks = Vec::new();
         if let Some(stderr) = stderr {
             let err_tx = event_tx.clone();
-            tokio::spawn(async move {
+            let stderr_task = tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 let mut stderr_lines = Vec::new();
@@ -194,15 +202,16 @@ impl ClaudeSession {
                         "Agent sidecar crashed: {}",
                         stderr_lines.join("; ")
                     );
-                    let _ = err_tx.send(AgentEvent::SessionError { message });
+                    let _ = err_tx.send(AgentEvent::SessionError { message }).await;
                 }
             });
+            tasks.push(stderr_task);
         }
-        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
-        let claude_session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(256);
+        let claude_session_id: Arc<OnceLock<String>> = Arc::new(OnceLock::new());
 
         // Stdin writer task.
-        tokio::spawn(async move {
+        let stdin_task = tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(msg) = stdin_rx.recv().await {
                 let _ = stdin.write_all(msg.as_bytes()).await;
@@ -210,6 +219,7 @@ impl ClaudeSession {
                 let _ = stdin.flush().await;
             }
         });
+        tasks.push(stdin_task);
 
         // Store init params (cwd, model, permissionMode, sessionId) so they
         // can be injected into the first query command sent via send_message().
@@ -226,20 +236,21 @@ impl ClaudeSession {
         })));
 
         // Augmenting sender: injects init params into the first query command.
-        let (user_tx, mut user_rx) = mpsc::unbounded_channel::<String>();
+        let (user_tx, mut user_rx) = mpsc::channel::<String>(256);
         let init_params_clone = init_params.clone();
         let raw_tx = stdin_tx.clone();
-        tokio::spawn(async move {
+        let augment_task = tokio::spawn(async move {
             while let Some(msg) = user_rx.recv().await {
                 let augmented = augment_query_if_needed(&msg, &init_params_clone);
-                let _ = raw_tx.send(augmented);
+                let _ = raw_tx.send(augmented).await;
             }
         });
+        tasks.push(augment_task);
 
         // Stdout reader task — parse sidecar NDJSON events.
         let tx = event_tx;
         let session_id_clone = claude_session_id.clone();
-        tokio::spawn(async move {
+        let stdout_task = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
 
@@ -249,7 +260,10 @@ impl ClaudeSession {
                 }
                 let obj = match serde_json::from_str::<Value>(&line) {
                     Ok(o) => o,
-                    Err(_) => continue,
+                    Err(e) => {
+                        tracing::debug!("Ignoring unparseable sidecar line: {e}");
+                        continue;
+                    }
                 };
 
                 let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -262,10 +276,8 @@ impl ClaudeSession {
                     "session_ready" => {
                         let sid = obj.get("sessionId").and_then(|s| s.as_str()).map(|s| s.to_string());
                         let confirmed_model = obj.get("model").and_then(|m| m.as_str()).map(|m| m.to_string());
-                        if let Some(ref s) = sid {
-                            if let Ok(mut guard) = session_id_clone.lock() {
-                                *guard = Some(s.clone());
-                            }
+                        if let Some(s) = &sid {
+                            let _ = session_id_clone.set(s.clone());
                         }
                         vec![AgentEvent::SessionReady { claude_session_id: sid, model: confirmed_model }]
                     }
@@ -369,15 +381,16 @@ impl ClaudeSession {
                 };
 
                 for event in events {
-                    if tx.send(event).is_err() {
+                    if tx.send(event).await.is_err() {
                         return;
                     }
                 }
             }
             debug!("Sidecar stdout reader finished");
         });
+        tasks.push(stdout_task);
 
-        Ok((Self { child, stdin_tx: user_tx, claude_session_id }, event_rx))
+        Ok((Self { child, stdin_tx: user_tx, claude_session_id, tasks }, event_rx))
     }
 }
 
@@ -404,42 +417,24 @@ fn augment_query_if_needed(msg: &str, init: &Arc<Mutex<Option<SidecarInitParams>
 
     // Take the init params (only used once).
     let params = {
-        let mut guard = init.lock().unwrap();
+        let mut guard = init.lock().unwrap_or_else(|e| e.into_inner());
         guard.take()
     };
 
     if let Some(p) = params {
-        let obj = parsed.as_object_mut().unwrap();
-        obj.insert("cwd".into(), Value::String(p.cwd));
-        if let Some(m) = p.model {
-            obj.entry("model").or_insert(Value::String(m));
-        }
-        if let Some(pm) = p.permission_mode {
-            obj.entry("permissionMode").or_insert(Value::String(pm));
-        }
-        if let Some(sid) = p.session_id {
-            obj.entry("sessionId").or_insert(Value::String(sid));
+        if let Some(obj) = parsed.as_object_mut() {
+            obj.insert("cwd".into(), Value::String(p.cwd));
+            if let Some(m) = p.model {
+                obj.entry("model").or_insert(Value::String(m));
+            }
+            if let Some(pm) = p.permission_mode {
+                obj.entry("permissionMode").or_insert(Value::String(pm));
+            }
+            if let Some(sid) = p.session_id {
+                obj.entry("sessionId").or_insert(Value::String(sid));
+            }
         }
     }
 
     serde_json::to_string(&parsed).unwrap_or_else(|_| msg.to_string())
-}
-
-/// Walk up from `start` to find the workspace root (a directory containing
-/// a Cargo.toml with `[workspace]`).
-fn find_workspace_root(start: &Path) -> Option<std::path::PathBuf> {
-    let mut dir = start.to_path_buf();
-    loop {
-        let cargo = dir.join("Cargo.toml");
-        if cargo.exists() {
-            if let Ok(contents) = std::fs::read_to_string(&cargo) {
-                if contents.contains("[workspace]") {
-                    return Some(dir);
-                }
-            }
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
 }

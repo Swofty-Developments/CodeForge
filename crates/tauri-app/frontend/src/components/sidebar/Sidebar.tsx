@@ -135,8 +135,20 @@ export function Sidebar() {
               when={store.projects.length > 0}
               fallback={
                 <div class="empty-state">
-                  <p>No threads yet</p>
-                  <p class="hint">Click + below to start</p>
+                  <svg class="empty-state-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                    <line x1="9" y1="9" x2="15" y2="9" />
+                    <line x1="12" y1="6" x2="12" y2="12" />
+                  </svg>
+                  <p class="empty-state-title">Start a conversation</p>
+                  <p class="empty-state-desc">Create a thread to begin working with AI on your code</p>
+                  <button class="empty-state-cta" onClick={() => newThread()}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                      <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    New Thread
+                  </button>
+                  <span class="empty-state-hint">or <kbd>&#8984;T</kbd></span>
                 </div>
               }
             >
@@ -178,21 +190,18 @@ export function Sidebar() {
         .sidebar-header {
           display: flex;
           align-items: center;
-          padding: 16px 16px 12px;
+          padding: var(--space-4) var(--space-4) var(--space-3);
           justify-content: space-between;
         }
         .sidebar-title {
           font-size: 14px;
           font-weight: 700;
           letter-spacing: -0.3px;
-          background: linear-gradient(135deg, var(--text) 40%, var(--primary));
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
+          color: var(--text);
         }
         .icon-btn {
           color: var(--text-tertiary);
-          padding: 5px;
+          padding: var(--space-1);
           border-radius: var(--radius-sm);
           transition: background 0.15s, color 0.15s;
           display: flex;
@@ -206,33 +215,74 @@ export function Sidebar() {
           flex: 1;
           overflow-y: auto;
           overflow-x: hidden;
-          padding: 0 4px;
+          padding: var(--space-2) var(--space-1) 0;
         }
         .empty-state {
-          padding: 40px 16px;
+          padding: var(--space-10) var(--space-4);
           text-align: center;
-          color: var(--text-tertiary);
-          font-size: 13px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: var(--space-2);
         }
-        .empty-state .hint {
+        .empty-state-icon {
+          color: var(--text-tertiary);
+          opacity: 0.5;
+          margin-bottom: var(--space-1);
+        }
+        .empty-state-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: var(--text);
+        }
+        .empty-state-desc {
           font-size: 12px;
-          margin-top: 6px;
+          color: var(--text-tertiary);
+          line-height: 1.4;
+          max-width: 180px;
+        }
+        .empty-state-cta {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--space-2);
+          padding: var(--space-2) var(--space-4);
+          margin-top: var(--space-2);
+          font-size: 13px;
+          font-weight: 600;
+          color: #fff;
+          background: var(--primary);
+          border-radius: var(--radius-sm);
+          transition: filter 0.15s;
+        }
+        .empty-state-cta:hover { filter: brightness(1.15); }
+        .empty-state-hint {
+          font-size: 11px;
+          color: var(--text-tertiary);
           opacity: 0.6;
         }
+        .empty-state-hint kbd {
+          font-family: var(--font-body);
+          font-size: 10px;
+          background: var(--bg-accent);
+          border: 1px solid var(--border);
+          border-radius: 3px;
+          padding: 1px 4px;
+        }
         .sidebar-footer {
-          padding: 10px 10px 12px;
+          padding: var(--space-3);
           border-top: 1px solid var(--border);
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: var(--space-2);
         }
         .add-project-btn {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
+          gap: var(--space-2);
           width: 100%;
-          padding: 8px 12px;
+          padding: var(--space-2) var(--space-3);
           font-size: 13px;
           font-weight: 600;
           color: #fff;
@@ -248,9 +298,9 @@ export function Sidebar() {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
+          gap: var(--space-2);
           width: 100%;
-          padding: 8px 12px;
+          padding: var(--space-2) var(--space-3);
           font-size: 13px;
           font-weight: 500;
           color: var(--text-secondary);
@@ -265,8 +315,8 @@ export function Sidebar() {
         .sidebar-dock {
           display: flex;
           justify-content: space-between;
-          padding: 4px 6px;
-          margin: 0 8px;
+          padding: var(--space-1);
+          margin: 0 var(--space-2);
           background: var(--bg-muted);
           border-radius: var(--radius-md);
           flex-shrink: 0;
@@ -276,18 +326,37 @@ export function Sidebar() {
           flex-direction: column;
           align-items: center;
           gap: 2px;
-          padding: 6px 4px;
+          padding: 5px var(--space-1);
           border-radius: var(--radius-sm);
           color: var(--text-tertiary);
-          font-size: 9px;
+          font-size: 10px;
           font-weight: 500;
           letter-spacing: 0.01em;
           flex: 1;
           transition: all 0.12s;
+          position: relative;
+          overflow: hidden;
+        }
+        /* Direction C: upward fill animation on hover */
+        .dock-btn::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: var(--bg-accent);
+          transform: translateY(100%);
+          transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          border-radius: inherit;
+          z-index: 0;
+        }
+        .dock-btn:hover::before {
+          transform: translateY(0);
+        }
+        .dock-btn > * {
+          position: relative;
+          z-index: 1;
         }
         .dock-btn:hover {
           color: var(--text-secondary);
-          background: var(--bg-accent);
         }
         .dock-btn svg {
           flex-shrink: 0;
@@ -296,49 +365,47 @@ export function Sidebar() {
         .dock-btn:hover svg {
           color: var(--primary);
         }
-        .sidebar-actions-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 4px;
-        }
-        .sidebar-actions {
-          display: flex;
-          gap: 4px;
-        }
-        .sidebar-action {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 5px;
-          padding: 6px 8px;
-          font-size: 11px;
-          font-weight: 500;
-          color: var(--text-tertiary);
-          border-radius: var(--radius-sm);
-          transition: all 0.15s ease;
-        }
-        .sidebar-action:hover {
-          background: var(--bg-accent);
-          color: var(--text-secondary);
-        }
         .resize-handle {
-          width: 3px;
+          width: 5px;
           cursor: col-resize;
           background: transparent;
           flex-shrink: 0;
           transition: background 0.15s;
           position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
         .resize-handle::after {
           content: "";
           position: absolute;
-          inset: 0;
+          left: 2px;
+          top: 0;
+          bottom: 0;
+          width: 1px;
           background: var(--border);
-          transition: background 0.15s;
+          transition: background 0.15s, box-shadow 0.15s;
         }
         .resize-handle:hover::after {
           background: var(--primary);
+          box-shadow: 0 0 6px var(--primary-glow);
+        }
+        /* Grip dots — appear on hover */
+        .resize-handle::before {
+          content: "· · ·";
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%) rotate(90deg);
+          font-size: 8px;
+          color: var(--text-tertiary);
+          letter-spacing: 2px;
+          opacity: 0;
+          transition: opacity 0.15s;
+          pointer-events: none;
+        }
+        .resize-handle:hover::before {
+          opacity: 0.5;
         }
       `}</style>
     </>

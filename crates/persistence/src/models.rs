@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
+use codeforge_core::id::{MessageId, ProjectId, SessionId, ThreadId};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
-    pub id: Uuid,
+    pub id: ProjectId,
     pub path: String,
     pub name: String,
     pub created_at: DateTime<Utc>,
@@ -12,8 +12,8 @@ pub struct Project {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Thread {
-    pub id: Uuid,
-    pub project_id: Uuid,
+    pub id: ThreadId,
+    pub project_id: ProjectId,
     pub title: String,
     pub color: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -36,8 +36,12 @@ impl MessageRole {
             Self::System => "system",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Result<Self, String> {
+impl std::str::FromStr for MessageRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "user" => Ok(Self::User),
             "assistant" => Ok(Self::Assistant),
@@ -49,8 +53,8 @@ impl MessageRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    pub id: Uuid,
-    pub thread_id: Uuid,
+    pub id: MessageId,
+    pub thread_id: ThreadId,
     pub role: MessageRole,
     pub content: String,
     pub created_at: DateTime<Utc>,
@@ -70,8 +74,12 @@ impl Provider {
             Self::Codex => "codex",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Result<Self, String> {
+impl std::str::FromStr for Provider {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
@@ -82,12 +90,13 @@ impl Provider {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
-    pub id: Uuid,
-    pub thread_id: Uuid,
+    pub id: SessionId,
+    pub thread_id: ThreadId,
     pub provider: Provider,
     pub status: String,
     pub approval_mode: Option<String>,
     pub pid: Option<i64>,
+    pub claude_session_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

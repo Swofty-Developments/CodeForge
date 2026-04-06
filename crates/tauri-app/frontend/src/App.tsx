@@ -1,4 +1,4 @@
-import { Show, ErrorBoundary, createSignal, onMount, onCleanup } from "solid-js";
+import { Show, ErrorBoundary, createSignal, onMount, onCleanup, createEffect, on } from "solid-js";
 import { appStore } from "./stores/app-store";
 import { WelcomeScreen } from "./components/shared/WelcomeScreen";
 import { SetupWizard } from "./components/onboarding/SetupWizard";
@@ -20,6 +20,8 @@ import { UpdateChecker } from "./components/shared/UpdateChecker";
 import { KeyboardHelp } from "./components/shared/KeyboardHelp";
 import { Breadcrumb } from "./components/chat/Breadcrumb";
 import { StatusBar } from "./components/shared/StatusBar";
+import { AnimatedShow } from "./components/shared/AnimatedShow";
+import { RemotePollBanner } from "./components/shared/RemotePollBanner";
 import * as ipc from "./ipc";
 
 export function App() {
@@ -43,8 +45,74 @@ export function App() {
   const [chatPercent, setChatPercent] = createSignal(60);
   const [draggingDivider, setDraggingDivider] = createSignal(false);
   const [isVertical, setIsVertical] = createSignal(false);
+  const [focusedPane, setFocusedPane] = createSignal<"chat" | "side">("chat");
+  const [nearSnap, setNearSnap] = createSignal<number | null>(null);
   let bodyRef: HTMLDivElement | undefined;
   let chatPercentRef = 60;
+
+  // Snap points for divider (percentage values)
+  const SNAP_POINTS = [33.33, 50, 60, 66.67, 75];
+  const SNAP_THRESHOLD = 2.5; // magnetic pull range in %
+
+  // Spring physics solver for divider release
+  function springAnimate(
+    from: number,
+    to: number,
+    onUpdate: (v: number) => void,
+    onDone: () => void
+  ) {
+    const tension = 300;
+    const damping = 26;
+    const mass = 1;
+    let velocity = 0;
+    let position = from;
+    let raf: number;
+    let lastTime = performance.now();
+
+    function step(now: number) {
+      const dt = Math.min((now - lastTime) / 1000, 0.032); // cap at ~30fps min
+      lastTime = now;
+
+      const displacement = position - to;
+      const springForce = -tension * displacement;
+      const dampingForce = -damping * velocity;
+      const acceleration = (springForce + dampingForce) / mass;
+
+      velocity += acceleration * dt;
+      position += velocity * dt;
+
+      onUpdate(position);
+
+      if (Math.abs(velocity) < 0.1 && Math.abs(position - to) < 0.05) {
+        onUpdate(to);
+        onDone();
+        return;
+      }
+      raf = requestAnimationFrame(step);
+    }
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }
+
+  // Find nearest snap point within threshold
+  function findSnap(pct: number): number | null {
+    for (const sp of SNAP_POINTS) {
+      if (Math.abs(pct - sp) < SNAP_THRESHOLD) return sp;
+    }
+    return null;
+  }
+
+  // Format snap point as a human-readable ratio
+  function formatSnapLabel(pct: number): string {
+    const ratios: Record<number, string> = {
+      33.33: "1/3 : 2/3",
+      50: "1 : 1",
+      60: "3 : 2",
+      66.67: "2/3 : 1/3",
+      75: "3 : 1",
+    };
+    return ratios[pct] ?? `${Math.round(pct)}%`;
+  }
 
   // Whether active thread is in a git-activated project
   const isGitProject = () => {
@@ -116,6 +184,11 @@ export function App() {
         pct = ((ev.clientX - rect.left) / rect.width) * 100;
       }
       pct = Math.min(Math.max(pct, 25), 80);
+
+      // Show snap proximity feedback
+      const snap = findSnap(pct);
+      setNearSnap(snap);
+
       bodyRef!.style.setProperty("--chat-pct", `${pct}%`);
       bodyRef!.style.setProperty("--side-pct", `${100 - pct}%`);
       chatPercentRef = pct;
@@ -124,12 +197,36 @@ export function App() {
       bodyRef?.classList.remove("dragging");
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-      setChatPercent(chatPercentRef);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      document.body.style.cursor = "";
+
+      setNearSnap(null);
+
+      // Spring to nearest snap point if close, otherwise spring settle in place
+      const snap = findSnap(chatPercentRef);
+      const target = snap ?? chatPercentRef;
+
+      if (Math.abs(chatPercentRef - target) < 0.1) {
+        // No spring needed — already at target
+        setChatPercent(target);
+        return;
+      }
+
+      // Animate with spring physics
+      bodyRef?.classList.add("spring-settling");
+      springAnimate(
+        chatPercentRef,
+        target,
+        (v) => {
+          bodyRef?.style.setProperty("--chat-pct", `${v}%`);
+          bodyRef?.style.setProperty("--side-pct", `${100 - v}%`);
+        },
+        () => {
+          bodyRef?.classList.remove("spring-settling");
+          setChatPercent(target);
+        }
+      );
     };
-    document.body.style.cursor = isVertical() ? "row-resize" : "col-resize";
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }
@@ -292,6 +389,7 @@ export function App() {
         fallback={
           <div class="main-panel">
             <TabBar />
+            <RemotePollBanner />
             <Breadcrumb />
             <div
               ref={bodyRef}
@@ -301,21 +399,39 @@ export function App() {
                 /* dragging class added/removed via DOM directly for performance */
               }}
             >
-              <div class="main-panel-chat" style={hasSidePane() ? chatStyle() : { flex: "1" }}>
+              <div
+                class="main-panel-chat"
+                classList={{ focused: focusedPane() === "chat" && !!hasSidePane() }}
+                style={hasSidePane() ? chatStyle() : { flex: "1" }}
+                onFocusIn={() => setFocusedPane("chat")}
+                onClick={() => setFocusedPane("chat")}
+              >
                 <ChatArea />
                 <Composer />
                 <StatusBar />
               </div>
 
-              <Show when={hasSidePane()}>
+              <AnimatedShow when={!!hasSidePane()} class="side-pane-animated" duration={220}>
                 <div
                   class="pane-divider"
-                  classList={{ vertical: isVertical() }}
+                  classList={{
+                    vertical: isVertical(),
+                    "near-snap": nearSnap() !== null,
+                  }}
                   onMouseDown={handleDividerDown}
                 >
                   <div class="pane-divider-line" />
+                  <div class="pane-divider-grip">
+                    <span /><span /><span />
+                  </div>
                 </div>
-                <div class="main-panel-side" style={sideStyle()}>
+                <div
+                  class="main-panel-side"
+                  classList={{ focused: focusedPane() === "side" }}
+                  style={sideStyle()}
+                  onFocusIn={() => setFocusedPane("side")}
+                  onClick={() => setFocusedPane("side")}
+                >
                   <Show when={store.activeTab && store.threadBrowserOpen[store.activeTab!]}>
                     <BrowserPanel threadId={store.activeTab!} />
                   </Show>
@@ -323,7 +439,21 @@ export function App() {
                     <DiffEditor cwd={diffCwd()} prNumber={activePrNumber()} />
                   </Show>
                 </div>
-              </Show>
+
+                {/* Snap guide lines — visible during drag when near a snap point */}
+                <Show when={nearSnap() !== null}>
+                  <div
+                    class="snap-guide"
+                    style={{
+                      [isVertical() ? "top" : "left"]: `${nearSnap()!}%`,
+                      opacity: "1",
+                    }}
+                    classList={{ vertical: isVertical() }}
+                  >
+                    <span class="snap-guide-label">{formatSnapLabel(nearSnap()!)}</span>
+                  </div>
+                </Show>
+              </AnimatedShow>
             </div>
           </div>
         }
@@ -450,6 +580,7 @@ export function App() {
           flex-direction: row;
           min-height: 0;
           overflow: hidden;
+          position: relative;
         }
         .main-panel-body.vertical {
           flex-direction: column;
@@ -466,32 +597,104 @@ export function App() {
           pointer-events: none;
           will-change: width, height;
         }
+
+        /* ── Direction C: Spatial depth — chat pane ── */
         .main-panel-chat {
           display: flex;
           flex-direction: column;
           min-width: 0;
           min-height: 0;
           overflow: hidden;
+          transition: filter 0.2s ease, box-shadow 0.2s ease;
+        }
+        .main-panel-chat.focused {
+          filter: brightness(1);
+          box-shadow: 0 0 24px rgba(0, 0, 0, 0.15);
+          z-index: 1;
         }
 
-        /* ── Draggable pane divider ── */
+        /* ── Direction A: Side pane animated entrance/exit ── */
+        .side-pane-animated {
+          display: contents;
+        }
+        .side-pane-animated[data-state="entering"] .main-panel-side {
+          animation: side-pane-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        .side-pane-animated[data-state="exiting"] .main-panel-side {
+          animation: side-pane-out 180ms ease-in both;
+        }
+        .side-pane-animated[data-state="entering"] .pane-divider {
+          animation: fade-in 150ms ease-out both;
+        }
+        .side-pane-animated[data-state="exiting"] .pane-divider {
+          animation: fade-in 100ms ease-in both reverse;
+        }
+
+        @keyframes side-pane-in {
+          from {
+            opacity: 0;
+            transform: translateX(12px) scale(0.97);
+            filter: blur(2px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0) scale(1);
+            filter: blur(0);
+          }
+        }
+        @keyframes side-pane-out {
+          from {
+            opacity: 1;
+            transform: translateX(0) scale(1);
+          }
+          to {
+            opacity: 0;
+            transform: translateX(8px) scale(0.98);
+          }
+        }
+        /* Vertical variant */
+        .main-panel-body.vertical .side-pane-animated[data-state="entering"] .main-panel-side {
+          animation-name: side-pane-in-vert;
+        }
+        .main-panel-body.vertical .side-pane-animated[data-state="exiting"] .main-panel-side {
+          animation-name: side-pane-out-vert;
+        }
+        @keyframes side-pane-in-vert {
+          from { opacity: 0; transform: translateY(12px) scale(0.97); filter: blur(2px); }
+          to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+        }
+        @keyframes side-pane-out-vert {
+          from { opacity: 1; transform: translateY(0) scale(1); }
+          to { opacity: 0; transform: translateY(8px) scale(0.98); }
+        }
+
+        /* ── Direction B: Enhanced pane divider ── */
         .pane-divider {
           flex-shrink: 0;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: col-resize;
-          width: 5px;
+          width: 7px;
           z-index: 2;
+          position: relative;
+          transition: width 0.15s ease;
+        }
+        .pane-divider:hover {
+          width: 9px;
         }
         .pane-divider.vertical {
           cursor: row-resize;
           width: auto;
-          height: 5px;
+          height: 7px;
+          transition: height 0.15s ease;
+        }
+        .pane-divider.vertical:hover {
+          height: 9px;
         }
         .pane-divider-line {
           background: var(--border);
-          transition: background 0.15s;
+          transition: background 0.15s, box-shadow 0.15s;
         }
         .pane-divider:not(.vertical) .pane-divider-line {
           width: 1px;
@@ -504,14 +707,101 @@ export function App() {
         .pane-divider:hover .pane-divider-line,
         .main-panel-body.dragging .pane-divider-line {
           background: var(--primary);
+          box-shadow: 0 0 8px var(--primary-glow);
+        }
+        /* Snap proximity glow — amber to distinguish from normal drag blue */
+        .pane-divider.near-snap .pane-divider-line {
+          background: var(--amber);
+          box-shadow: 0 0 10px rgba(240, 184, 64, 0.3), 0 0 4px rgba(240, 184, 64, 0.2);
         }
 
+        /* Grip dots — visible on hover */
+        .pane-divider-grip {
+          position: absolute;
+          display: flex;
+          gap: 3px;
+          opacity: 0;
+          transition: opacity 0.15s;
+        }
+        .pane-divider:not(.vertical) .pane-divider-grip {
+          flex-direction: column;
+        }
+        .pane-divider:hover .pane-divider-grip,
+        .main-panel-body.dragging .pane-divider-grip {
+          opacity: 0.4;
+        }
+        .pane-divider-grip span {
+          width: 3px;
+          height: 3px;
+          border-radius: 50%;
+          background: var(--text-tertiary);
+        }
+
+        /* ── Direction B: Snap guide line ── */
+        .snap-guide {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          width: 1px;
+          pointer-events: none;
+          z-index: 3;
+          opacity: 0;
+          transition: opacity 0.12s;
+          background: repeating-linear-gradient(
+            to bottom,
+            var(--amber) 0px,
+            var(--amber) 4px,
+            transparent 4px,
+            transparent 8px
+          );
+        }
+        .snap-guide.vertical {
+          top: auto;
+          left: 0;
+          right: 0;
+          width: auto;
+          height: 1px;
+          background: repeating-linear-gradient(
+            to right,
+            var(--amber) 0px,
+            var(--amber) 4px,
+            transparent 4px,
+            transparent 8px
+          );
+        }
+        .snap-guide-label {
+          position: absolute;
+          top: 8px;
+          left: 50%;
+          transform: translateX(-50%);
+          font-size: 9px;
+          font-family: var(--font-mono);
+          font-weight: 600;
+          color: var(--amber);
+          background: var(--bg-card);
+          border: 1px solid rgba(240, 184, 64, 0.25);
+          border-radius: 3px;
+          padding: 1px 5px;
+          white-space: nowrap;
+          pointer-events: none;
+        }
+
+        /* ── Direction C: Spatial depth — side pane ── */
         .main-panel-side {
           display: flex;
           flex-direction: column;
           min-height: 0;
           min-width: 0;
           overflow: hidden;
+          transition: filter 0.2s ease, box-shadow 0.2s ease;
+        }
+        .main-panel-side:not(.focused) {
+          filter: brightness(0.95);
+        }
+        .main-panel-side.focused {
+          filter: brightness(1);
+          box-shadow: 0 0 24px rgba(0, 0, 0, 0.15);
+          z-index: 1;
         }
         .main-panel-side > * {
           flex: 1;
@@ -520,6 +810,33 @@ export function App() {
         }
         .main-panel-side > * + * {
           border-top: 1px solid var(--border);
+        }
+
+        /* When there's no side pane, remove depth effects from chat */
+        .main-panel-chat:not(.focused) {
+          filter: brightness(0.95);
+        }
+
+        /* Spring settling — keep will-change for smoother animation */
+        .main-panel-body.spring-settling .main-panel-chat,
+        .main-panel-body.spring-settling .main-panel-side {
+          will-change: width, height;
+        }
+
+        /* ── prefers-reduced-motion ── */
+        @media (prefers-reduced-motion: reduce) {
+          .side-pane-animated[data-state="entering"] .main-panel-side,
+          .side-pane-animated[data-state="exiting"] .main-panel-side,
+          .side-pane-animated[data-state="entering"] .pane-divider,
+          .side-pane-animated[data-state="exiting"] .pane-divider {
+            animation: none !important;
+          }
+          .main-panel-chat,
+          .main-panel-side,
+          .pane-divider,
+          .pane-divider-line {
+            transition: none !important;
+          }
         }
       `}</style>
     </>

@@ -42,7 +42,7 @@ impl SessionManager {
         cwd: &Path,
         model: Option<&str>,
         permission_mode: Option<&str>,
-    ) -> Result<(SessionId, mpsc::UnboundedReceiver<AgentEvent>)> {
+    ) -> Result<(SessionId, mpsc::Receiver<AgentEvent>)> {
         let id = uuid::Uuid::new_v4();
 
         let (active, event_rx) = match provider {
@@ -53,9 +53,18 @@ impl SessionManager {
                 (ActiveSession::Claude(session), rx)
             }
             Provider::Codex => {
-                let (session, rx) = CodexSession::start(cwd, "codex")
+                let (session, mut unbounded_rx) = CodexSession::start(cwd, "codex")
                     .await
                     .context("Failed to start Codex session")?;
+                // Bridge unbounded → bounded channel for uniform return type.
+                let (tx, rx) = mpsc::channel(1024);
+                tokio::spawn(async move {
+                    while let Some(event) = unbounded_rx.recv().await {
+                        if tx.send(event).await.is_err() {
+                            break;
+                        }
+                    }
+                });
                 (ActiveSession::Codex(session), rx)
             }
         };
@@ -72,7 +81,7 @@ impl SessionManager {
         claude_session_id: &str,
         cwd: &Path,
         model: Option<&str>,
-    ) -> Result<(SessionId, mpsc::UnboundedReceiver<AgentEvent>)> {
+    ) -> Result<(SessionId, mpsc::Receiver<AgentEvent>)> {
         let id = uuid::Uuid::new_v4();
 
         let (session, rx) = ClaudeSession::resume(cwd, claude_session_id, model)

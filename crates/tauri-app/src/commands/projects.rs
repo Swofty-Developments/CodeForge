@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::State;
-use uuid::Uuid;
+
+use codeforge_persistence::{ProjectId, ThreadId};
 
 use crate::state::TauriState;
 
@@ -49,8 +50,11 @@ pub fn get_threads_by_project(
     state: State<'_, TauriState>,
     project_id: String,
 ) -> Result<Vec<ThreadResponse>, String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let pid = Uuid::parse_str(&project_id).map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let pid = project_id.parse::<ProjectId>().map_err(|e| e.to_string())?;
     let threads = codeforge_persistence::queries::get_threads_by_project(db.conn(), pid)
         .map_err(|e| e.to_string())?;
     Ok(threads
@@ -68,11 +72,18 @@ pub fn get_threads_by_project(
 pub fn get_messages_by_thread(
     state: State<'_, TauriState>,
     thread_id: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<MessageResponse>, String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let tid = Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
-    let messages = codeforge_persistence::queries::get_messages_by_thread(db.conn(), tid)
-        .map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
+    let messages = codeforge_persistence::queries::get_messages_by_thread_paginated(
+        db.conn(), tid, limit, offset,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(messages
         .into_iter()
         .map(|m| MessageResponse {
@@ -90,8 +101,12 @@ pub fn create_project(
     name: String,
     path: String,
 ) -> Result<ProjectResponse, String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let id = Uuid::new_v4();
+    tracing::debug!("create_project name={name} path={path}");
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let id = ProjectId::new();
     let project = codeforge_persistence::Project {
         id,
         name: name.clone(),
@@ -114,8 +129,11 @@ pub fn rename_project(
     id: String,
     name: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let uid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let uid = id.parse::<ProjectId>().map_err(|e| e.to_string())?;
     db.conn()
         .execute(
             "UPDATE projects SET name = ?1 WHERE id = ?2",
@@ -131,16 +149,24 @@ pub fn delete_project(
     id: String,
     delete_threads: bool,
 ) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| format!("{e}"))?;
-    let uid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    tracing::debug!("delete_project id={id} delete_threads={delete_threads}");
+    let db = state.db.lock().map_err(|e| {
+        tracing::error!("Failed to lock database: {e}");
+        format!("{e}")
+    })?;
+    let uid = id.parse::<ProjectId>().map_err(|e| e.to_string())?;
 
     if delete_threads {
         let threads =
             codeforge_persistence::queries::get_threads_by_project(db.conn(), uid)
                 .map_err(|e| e.to_string())?;
         for t in threads {
-            let _ = codeforge_persistence::queries::delete_messages_by_thread(db.conn(), t.id);
-            let _ = codeforge_persistence::queries::delete_thread(db.conn(), t.id);
+            if let Err(e) = codeforge_persistence::queries::delete_messages_by_thread(db.conn(), t.id) {
+                tracing::error!("Failed to delete messages for thread {}: {e}", t.id);
+            }
+            if let Err(e) = codeforge_persistence::queries::delete_thread(db.conn(), t.id) {
+                tracing::error!("Failed to delete thread {}: {e}", t.id);
+            }
         }
     }
 

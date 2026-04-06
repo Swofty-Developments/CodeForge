@@ -22,7 +22,8 @@ pub struct SlashCommand {
 pub async fn mcp_list_servers(provider: String) -> Result<Vec<McpServer>, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     // Try CLI first
@@ -48,11 +49,16 @@ pub async fn mcp_list_servers(provider: String) -> Result<Vec<McpServer>, String
                     if let Some(obj) = json.get("mcpServers").and_then(|s| s.as_object())
                         .or_else(|| json.as_object()) {
                         for (name, config) in obj {
-                            let url_or_cmd = config.get("url")
+                            let url_or_cmd = match config.get("url")
                                 .or_else(|| config.get("command"))
                                 .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
+                            {
+                                Some(v) => v.to_string(),
+                                None => {
+                                    tracing::warn!("MCP server '{name}' in {path} has no 'url' or 'command' field, skipping");
+                                    continue;
+                                }
+                            };
                             let transport = if url_or_cmd.starts_with("http") { "http" }
                                 else if url_or_cmd.contains("sse") { "sse" }
                                 else { "stdio" };
@@ -86,7 +92,8 @@ pub async fn mcp_add_server(
 ) -> Result<String, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let mut args = vec!["mcp".to_string(), "add".to_string()];
@@ -136,7 +143,8 @@ pub async fn mcp_remove_server(
 ) -> Result<String, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let mut args = vec!["mcp", "remove"];
@@ -167,7 +175,8 @@ pub async fn mcp_remove_server(
 pub async fn list_slash_commands(provider: String) -> Result<Vec<SlashCommand>, String> {
     let binary = match provider.as_str() {
         "codex" => "codex",
-        _ => "claude",
+        "claude" | "claude_code" => "claude",
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     // Try to get plugin list with skills

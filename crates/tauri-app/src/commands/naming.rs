@@ -1,4 +1,7 @@
 use tauri::State;
+
+use codeforge_persistence::ThreadId;
+
 use crate::state::TauriState;
 
 /// Spawns a quick separate CLI call to generate a short thread name.
@@ -18,7 +21,8 @@ pub async fn auto_name_thread(
 
     let (cmd, args): (&str, Vec<&str>) = match provider.as_str() {
         "codex" => ("codex", vec!["-q", &prompt]),
-        _ => ("claude", vec!["-p", "--model", "haiku", &prompt]),
+        "claude" | "claude_code" => ("claude", vec!["-p", "--model", "haiku", &prompt]),
+        other => return Err(format!("Unknown provider: {other}")),
     };
 
     let output = tokio::process::Command::new(cmd)
@@ -40,10 +44,15 @@ pub async fn auto_name_thread(
     }
 
     // Persist the rename
-    let tid = uuid::Uuid::parse_str(&thread_id).map_err(|e| e.to_string())?;
+    let tid = thread_id.parse::<ThreadId>().map_err(|e| e.to_string())?;
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        let _ = codeforge_persistence::queries::update_thread_title(db.conn(), tid, &name);
+        let db = state.db.lock().map_err(|e| {
+            tracing::error!("Failed to lock database: {e}");
+            e.to_string()
+        })?;
+        if let Err(e) = codeforge_persistence::queries::update_thread_title(db.conn(), tid, &name) {
+            tracing::error!("Failed to persist thread rename: {e}");
+        }
     }
 
     Ok(name)

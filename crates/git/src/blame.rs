@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Attribution data for a single line in a blame result.
@@ -139,43 +139,39 @@ impl BlameResult {
     }
 
     /// Return the unique commit hashes that contributed to this file.
-    pub fn unique_commits(&self) -> Vec<String> {
-        let mut commits: Vec<String> = self
-            .lines
+    pub fn unique_commits(&self) -> Vec<&str> {
+        self.lines
             .iter()
-            .map(|l| l.commit_hash.clone())
-            .collect();
-        commits.sort();
-        commits.dedup();
-        commits
+            .map(|l| l.commit_hash.as_str())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// Return the unique authors that contributed to this file.
-    pub fn unique_authors(&self) -> Vec<String> {
-        let mut authors: Vec<String> = self
-            .lines
+    pub fn unique_authors(&self) -> Vec<&str> {
+        self.lines
             .iter()
-            .map(|l| l.author.clone())
-            .collect();
-        authors.sort();
-        authors.dedup();
-        authors
+            .map(|l| l.author.as_str())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// Return a per-author line count breakdown.
-    pub fn author_line_counts(&self) -> HashMap<String, usize> {
+    pub fn author_line_counts(&self) -> HashMap<&str, usize> {
         let mut counts = HashMap::new();
         for line in &self.lines {
-            *counts.entry(line.author.clone()).or_insert(0) += 1;
+            *counts.entry(line.author.as_str()).or_insert(0) += 1;
         }
         counts
     }
 
     /// Return a per-commit line count breakdown.
-    pub fn commit_line_counts(&self) -> HashMap<String, usize> {
+    pub fn commit_line_counts(&self) -> HashMap<&str, usize> {
         let mut counts = HashMap::new();
         for line in &self.lines {
-            *counts.entry(line.commit_hash.clone()).or_insert(0) += 1;
+            *counts.entry(line.commit_hash.as_str()).or_insert(0) += 1;
         }
         counts
     }
@@ -187,32 +183,34 @@ impl BlameResult {
             return groups;
         }
 
-        let mut current_hash = self.lines[0].commit_hash.clone();
+        let mut group_start_idx: usize = 0;
         let mut start_line = 1;
         let mut count = 1;
 
         for (i, line) in self.lines.iter().enumerate().skip(1) {
-            if line.commit_hash == current_hash {
+            if line.commit_hash == self.lines[group_start_idx].commit_hash {
                 count += 1;
             } else {
+                let prev = &self.lines[group_start_idx];
                 groups.push(BlameGroup {
-                    commit_hash: current_hash.clone(),
-                    author: self.lines[i - 1].author.clone(),
+                    commit_hash: prev.commit_hash.clone(),
+                    author: prev.author.clone(),
                     date: self.lines[i - 1].date,
                     start_line,
                     line_count: count,
                 });
-                current_hash = line.commit_hash.clone();
+                group_start_idx = i;
                 start_line = line.line_number;
                 count = 1;
             }
         }
 
         // Push the last group.
+        let first = &self.lines[group_start_idx];
         if let Some(last) = self.lines.last() {
             groups.push(BlameGroup {
-                commit_hash: current_hash,
-                author: last.author.clone(),
+                commit_hash: first.commit_hash.clone(),
+                author: first.author.clone(),
                 date: last.date,
                 start_line,
                 line_count: count,
@@ -300,7 +298,7 @@ impl BlameSummary {
         let (primary_author, primary_lines) = author_counts
             .iter()
             .max_by_key(|(_, count)| *count)
-            .map(|(author, count)| (Some(author.clone()), *count))
+            .map(|(author, count)| (Some((*author).to_owned()), *count))
             .unwrap_or((None, 0));
 
         Self {

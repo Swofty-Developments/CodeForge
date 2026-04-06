@@ -38,8 +38,8 @@ impl HealthStatus {
     pub fn merge(self, other: Self) -> Self {
         match (self, other) {
             (Self::Unhealthy, _) | (_, Self::Unhealthy) => Self::Unhealthy,
-            (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
             (Self::Degraded, _) | (_, Self::Degraded) => Self::Degraded,
+            (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
             _ => Self::Healthy,
         }
     }

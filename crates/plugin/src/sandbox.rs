@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
 
+/// Default memory limit for strict sandbox policy (256 MiB).
+const STRICT_MEMORY_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Default memory limit for standard sandbox policy (512 MiB).
+const STANDARD_MEMORY_LIMIT_BYTES: u64 = 512 * 1024 * 1024;
+
 /// The overall security policy for a plugin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SandboxPolicy {
@@ -175,7 +181,7 @@ impl SandboxConfig {
         Self {
             policy: SandboxPolicy::Strict,
             capabilities: Vec::new(),
-            memory_limit_bytes: 256 * 1024 * 1024, // 256 MB
+            memory_limit_bytes: STRICT_MEMORY_LIMIT_BYTES,
             cpu_time_limit_secs: 30,
             max_file_descriptors: 64,
             max_threads: 4,
@@ -192,7 +198,7 @@ impl SandboxConfig {
                 SandboxCapability::TempDirAccess,
                 SandboxCapability::NotificationAccess,
             ],
-            memory_limit_bytes: 512 * 1024 * 1024, // 512 MB
+            memory_limit_bytes: STANDARD_MEMORY_LIMIT_BYTES,
             cpu_time_limit_secs: 120,
             max_file_descriptors: 256,
             max_threads: 16,

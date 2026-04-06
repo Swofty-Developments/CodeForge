@@ -53,10 +53,10 @@ pub fn get_usage_summary(state: State<'_, TauriState>) -> Result<UsageSummary, S
     let thread_costs: Vec<ThreadCost> = thread_rows
         .into_iter()
         .map(|(tid, cost, tokens)| {
-            let title = uuid::Uuid::parse_str(&tid)
+            let title = tid.parse::<codeforge_persistence::ThreadId>()
                 .ok()
-                .and_then(|uuid| {
-                    codeforge_persistence::queries::get_thread_by_id(conn, uuid)
+                .and_then(|id| {
+                    codeforge_persistence::queries::get_thread_by_id(conn, id)
                         .ok()
                         .flatten()
                 })

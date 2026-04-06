@@ -159,12 +159,7 @@ export function WelcomeScreen(props: WelcomeScreenProps) {
         }
 
         .ws-t-code { color: var(--text); }
-        .ws-t-forge {
-          background: linear-gradient(135deg, var(--primary) 0%, var(--purple) 60%, var(--pink) 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
+        .ws-t-forge { color: var(--primary); }
 
         .ws-tagline {
           font-family: var(--font-mono);

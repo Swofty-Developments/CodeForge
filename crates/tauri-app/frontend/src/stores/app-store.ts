@@ -63,6 +63,7 @@ export interface AppStore {
   availableSlashCommands: string[];
   recentlyClosedTabs: string[];
   keyboardHelpOpen: boolean;
+  threadPrStatus: Record<string, import("../ipc").PrStatus>;
 }
 
 function createAppStore() {
@@ -107,6 +108,7 @@ function createAppStore() {
     availableSlashCommands: [],
     recentlyClosedTabs: [],
     keyboardHelpOpen: false,
+    threadPrStatus: {},
   });
 
   // ── Window state persistence (debounced) ──────────────────────────
@@ -161,12 +163,9 @@ function createAppStore() {
           const activeValid = state.activeTab && validTabs.includes(state.activeTab);
           setStore("activeTab", activeValid ? state.activeTab! : validTabs[validTabs.length - 1]);
 
-          // Load messages for restored thread tabs
-          for (const tabId of validTabs) {
-            if (!tabId.startsWith("__")) {
-              loadThreadMessages(tabId);
-            }
-          }
+          // Load messages for all restored tabs in parallel
+          const threadTabs = validTabs.filter((id) => !id.startsWith("__"));
+          await Promise.all(threadTabs.map((id) => loadThreadMessages(id)));
         }
       }
     } catch (e) {
@@ -177,23 +176,29 @@ function createAppStore() {
   async function loadData() {
     try {
       const rawProjects = await ipc.getAllProjects();
-      const projects: Project[] = [];
 
-      for (const p of rawProjects) {
-        const rawThreads = await ipc.getThreadsByProject(p.id);
-        const savedColor = await ipc.getSetting(`project_color:${p.id}`);
-        projects.push({
-          ...p,
-          color: savedColor || null,
-          collapsed: false,
-          threads: rawThreads.map((t) => ({ ...t })),
-        });
-      }
+      // Show sidebar skeleton immediately with empty threads
+      setStore("projects", rawProjects.map((p) => ({
+        ...p, color: null, collapsed: false, threads: [],
+      })));
+
+      // Fetch all threads + colors in parallel (not sequentially!)
+      const [allThreads, colorBatch] = await Promise.all([
+        Promise.all(rawProjects.map((p) => ipc.getThreadsByProject(p.id))),
+        ipc.getSettingsBatch(rawProjects.map((p) => `project_color:${p.id}`)),
+      ]);
+
+      const projects: Project[] = rawProjects.map((p, i) => ({
+        ...p,
+        color: colorBatch[`project_color:${p.id}`] || null,
+        collapsed: false,
+        threads: allThreads[i].map((t) => ({ ...t })),
+      }));
 
       setStore("projects", projects);
 
-      // Restore persisted window state after projects are loaded
-      await restoreState();
+      // Restore persisted window state after projects are loaded (don't block)
+      restoreState().catch((e) => console.error("Failed to restore state:", e));
     } catch (e) {
       console.error("Failed to load data:", e);
     }
@@ -203,7 +208,8 @@ function createAppStore() {
     if (store.threadMessages[threadId]) return;
     try {
       setStore("threadMessagesLoading", threadId, true);
-      const msgs = await ipc.getMessagesByThread(threadId);
+      // Load last 100 messages initially for fast thread switching
+      const msgs = await ipc.getMessagesByThread(threadId, 100);
       setStore("threadMessages", threadId, msgs);
     } catch (e) {
       console.error("Failed to load messages:", e);
@@ -237,7 +243,7 @@ function createAppStore() {
     }
   }
 
-  async function newThread(projectId?: string) {
+  async function newThread(projectId?: string): Promise<string | null> {
     // Optimistic: create a placeholder thread instantly in the UI
     const optimisticId = `opt-${crypto.randomUUID()}`;
     let targetProjectId = projectId;
@@ -255,7 +261,7 @@ function createAppStore() {
           targetProjectId = created.id;
         } catch (e) {
           console.error("Failed to create project:", e);
-          return;
+          return null;
         }
       }
     }
@@ -298,8 +304,10 @@ function createAppStore() {
         setStore("threadMessages", optimisticId, undefined as any);
       }
       persistState();
+      return thread.id;
     } catch (e) {
       console.error("Failed to create thread:", e);
+      return null;
     }
   }
 
@@ -414,16 +422,69 @@ function createAppStore() {
         return msgs;
       });
 
-      const msgId = await ipc.persistUserMessage(threadId, fullText);
-      const userMsg: ChatMessage = { id: msgId, thread_id: threadId, role: "user", content: fullText };
+      // Show message in UI immediately with optimistic ID
+      const optimisticMsgId = `msg-${crypto.randomUUID()}`;
+      const userMsg: ChatMessage = { id: optimisticMsgId, thread_id: threadId, role: "user", content: fullText };
       setStore("threadMessages", threadId, (msgs) => [...(msgs || []), userMsg]);
 
+      // Persist in background — don't block the send
+      ipc.persistUserMessage(threadId, fullText).catch((e) =>
+        console.error("Failed to persist message:", e)
+      );
+
       const project = store.projects.find((p) => p.threads.some((t) => t.id === threadId));
-      const wt = store.worktrees[threadId];
+      let wt = store.worktrees[threadId];
+
+      // Auto-create worktree for project threads that don't have one yet
+      if (project && project.path !== "." && !wt?.active) {
+        try {
+          // Check git status first — only create worktree if repo exists
+          const repoStatus = await ipc.gitRepoStatus(project.path);
+
+          if (repoStatus.status !== "none") {
+            // It's a git repo — create worktree
+            const thread = project.threads.find((t) => t.id === threadId);
+            if (thread) {
+              const newWt = await ipc.createWorktree(threadId, thread.title, project.path);
+              setStore("worktrees", threadId, newWt);
+              wt = newWt;
+            }
+            // Update cached git status if it changed
+            if (store.projectGitStatus[project.id] !== repoStatus.status) {
+              setStore("projectGitStatus", project.id, repoStatus.status as any);
+            }
+          } else {
+            // Not a git repo — update status so the migration banner shows
+            setStore("projectGitStatus", project.id, "none");
+          }
+        } catch (e) {
+          console.error("Failed to check repo / create worktree:", e);
+        }
+      }
+
       const cwd = wt?.active ? wt.path : (project && project.path !== "." ? project.path : ".");
 
+      // Inject worktree context on first message so the AI understands the environment
+      let sendText = text;
+      const existingMsgs = store.threadMessages[threadId] || [];
+      const isFirstUserMsg = existingMsgs.filter((m) => m.role === "user").length <= 1;
+      if (isFirstUserMsg && wt?.active && project) {
+        const prMap = store.projectPrMap[project.id];
+        const prNum = prMap?.[threadId];
+        let ctx = `[Context: You are working in a git worktree at \`${wt.path}\` on branch \`${wt.branch}\`. `;
+        ctx += `The main project is at \`${project.path}\`. `;
+        if (prNum) {
+          ctx += `This worktree is linked to PR #${prNum}. `;
+          ctx += `Changes you make here will be pushed to that PR's branch when the user clicks "Push to PR". `;
+        } else {
+          ctx += `Changes here are isolated from the main branch and will be merged back when the user clicks "Merge back to main". `;
+        }
+        ctx += `All file operations should use the worktree path, not the main project path.]`;
+        sendText = ctx + "\n\n" + text;
+      }
+
       setStore("sessionStatuses", threadId, "generating");
-      await ipc.sendMessage(threadId, text, store.selectedProvider, cwd, store.selectedModel ?? undefined);
+      await ipc.sendMessage(threadId, sendText, store.selectedProvider, cwd, store.selectedModel ?? undefined);
     } catch (e) {
       const errMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -926,22 +987,13 @@ function createAppStore() {
     }
   }
 
-  async function loadProjectGitStatus(projectId: string, projectPath: string, threads: { id: string }[]) {
-    if (store.projectGitStatus[projectId] !== undefined) return;
+  async function loadProjectGitStatus(projectId: string, projectPath: string, threads: { id: string }[], force?: boolean) {
+    if (!force && store.projectGitStatus[projectId] !== undefined) return;
     if (projectPath === ".") return;
 
     try {
-      const isGh = await ipc.isGithubRepo(projectPath);
-      if (isGh) {
-        setStore("projectGitStatus", projectId, "github");
-      } else {
-        try {
-          await ipc.getChangedFiles(projectPath);
-          setStore("projectGitStatus", projectId, "git");
-        } catch {
-          setStore("projectGitStatus", projectId, "none");
-        }
-      }
+      const repoStatus = await ipc.gitRepoStatus(projectPath);
+      setStore("projectGitStatus", projectId, repoStatus.status as any);
     } catch {
       setStore("projectGitStatus", projectId, "none");
     }
@@ -962,6 +1014,55 @@ function createAppStore() {
       }
     }
   }
+
+  // Track last seen comment count per thread to detect new ones
+  const lastSeenComments: Record<string, number> = {};
+
+  /** Poll CI/review status for all threads with linked PRs */
+  async function pollPrStatuses() {
+    for (const project of store.projects) {
+      if (project.path === ".") continue;
+      const prMap = store.projectPrMap[project.id];
+      if (!prMap) continue;
+      for (const threadId of Object.keys(prMap)) {
+        try {
+          const status = await ipc.getPrStatus(threadId, project.path);
+          if (status) {
+            setStore("threadPrStatus", threadId, status);
+
+            // Check for new review comments and inject into thread
+            const prevCount = lastSeenComments[threadId] ?? 0;
+            if (status.comment_count > prevCount && prevCount > 0) {
+              // Fetch new comments
+              const comments = await ipc.getPrReviewComments(threadId, project.path);
+              if (comments.length > 0) {
+                // Only show the newest comments we haven't seen
+                const newComments = comments.slice(-Math.max(status.comment_count - prevCount, 1));
+                for (const c of newComments) {
+                  if (!c.body?.trim()) continue;
+                  const content = `**PR Review from @${c.author}** (${c.state}):\n\n${c.body}`;
+                  setStore("threadMessages", threadId, (msgs) => [
+                    ...(msgs || []),
+                    { id: `pr-${crypto.randomUUID()}`, thread_id: threadId, role: "system" as const, content },
+                  ]);
+                }
+                // Mark thread as unread if not active
+                if (store.activeTab !== threadId) {
+                  setStore("unreadTabs", threadId, true);
+                }
+              }
+            }
+            lastSeenComments[threadId] = status.comment_count;
+          }
+        } catch {
+          // Silently ignore — PR status is best-effort
+        }
+      }
+    }
+  }
+
+  // PR status polling — lazy, only starts after first loadData completes
+  // (avoid calling IPC before store is ready)
 
   return {
     store,
@@ -985,6 +1086,7 @@ function createAppStore() {
     requestNotificationPermission,
     loadProjectGitStatus,
     persistState,
+    pollPrStatuses,
   };
 }
 
