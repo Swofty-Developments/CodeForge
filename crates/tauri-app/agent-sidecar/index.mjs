@@ -1,0 +1,483 @@
+#!/usr/bin/env node
+
+/**
+ * FeatureForge Agent Sidecar
+ *
+ * Node.js process that wraps the @anthropic-ai/claude-agent-sdk `query()` function.
+ * Communicates with the Rust backend (forge-session) via NDJSON over stdin/stdout.
+ *
+ * Stdin commands:
+ *   { type: "query", prompt, cwd, model?, permissionMode?, sessionId?, allowedTools? }
+ *   { type: "approval_response", requestId, decision, message? }
+ *   { type: "abort" }
+ *
+ * Stdout events:
+ *   { type: "ready" }
+ *   { type: "text_delta", text }
+ *   { type: "tool_use_start", toolId, toolName }
+ *   { type: "tool_use_input", toolId, inputJson }
+ *   { type: "tool_result", toolId, toolName, content, isError }
+ *   { type: "thinking_delta", text }
+ *   { type: "approval_request", requestId, toolName, input }
+ *   { type: "ask_user_question", requestId, questions }
+ *   { type: "session_ready", sessionId, model }
+ *   { type: "slash_commands", commands }
+ *   { type: "turn_started" }
+ *   { type: "turn_completed", sessionId }
+ *   { type: "usage", inputTokens, outputTokens, cacheRead, cacheWrite, costUsd, model }
+ *   { type: "error", message }
+ */
+
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { createInterface } from "readline";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function emit(obj) {
+  try {
+    process.stdout.write(JSON.stringify(obj) + "\n");
+  } catch (_) {
+    // stdout may be closed if the parent died
+  }
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+
+// Pending approval callbacks keyed by requestId.
+const pendingApprovals = new Map();
+
+// AbortController for the current query, if any.
+let currentAbort = null;
+
+// Counter for generating unique approval request IDs.
+let approvalCounter = 0;
+
+// Track whether we've completed at least one query (for continue support).
+let hasCompletedQuery = false;
+let lastSessionId = null;
+
+// Incremental streaming state — the SDK yields full message snapshots,
+// so we diff against the previous lengths to emit only new characters.
+let lastTextLen = 0;
+let lastThinkingLen = 0;
+
+// ── Stdin reader ─────────────────────────────────────────────────────────────
+
+const rl = createInterface({ input: process.stdin, terminal: false });
+
+rl.on("line", (line) => {
+  if (!line.trim()) return;
+
+  let cmd;
+  try {
+    cmd = JSON.parse(line);
+  } catch {
+    emit({ type: "error", message: `Invalid JSON on stdin: ${line}` });
+    return;
+  }
+
+  switch (cmd.type) {
+    case "query":
+      handleQuery(cmd).catch((err) => {
+        emit({ type: "error", message: String(err?.message ?? err) });
+      });
+      break;
+
+    case "approval_response":
+      handleApprovalResponse(cmd);
+      break;
+
+    case "abort":
+      handleAbort();
+      break;
+
+    default:
+      emit({ type: "error", message: `Unknown command type: ${cmd.type}` });
+  }
+});
+
+rl.on("close", () => {
+  // Parent closed stdin — exit cleanly.
+  process.exit(0);
+});
+
+// ── Command handlers ─────────────────────────────────────────────────────────
+
+async function handleQuery(cmd) {
+  const { prompt, cwd, model, permissionMode, sessionId, allowedTools } = cmd;
+
+  // Change to the requested working directory.
+  if (cwd) {
+    try {
+      process.chdir(cwd);
+    } catch (err) {
+      emit({ type: "error", message: `Failed to chdir to ${cwd}: ${err.message}` });
+      return;
+    }
+  }
+
+  // Build query options.
+  const options = {};
+
+  if (cwd) options.cwd = cwd;
+
+  if (allowedTools && Array.isArray(allowedTools) && allowedTools.length > 0) {
+    options.allowedTools = allowedTools;
+  }
+
+  if (permissionMode) {
+    options.permissionMode = permissionMode;
+    if (permissionMode === "bypassPermissions") {
+      options.allowDangerouslySkipPermissions = true;
+    }
+  }
+
+  if (model) options.model = model;
+
+  // Session continuity:
+  // - If we have a sessionId from a previous app launch, resume it
+  // - If we already completed a query in this sidecar process, continue it
+  if (sessionId && !hasCompletedQuery) {
+    options.resume = sessionId;
+  } else if (hasCompletedQuery) {
+    options.continue = true;
+  }
+
+  // canUseTool callback — sends approval requests to Rust, waits for response
+  options.canUseTool = async (toolName, input) => {
+    const requestId = String(++approvalCounter);
+
+    // AskUserQuestion — forward to frontend
+    if (toolName === "AskUserQuestion") {
+      emit({
+        type: "ask_user_question",
+        requestId,
+        questions: input.questions || [],
+      });
+    } else {
+      // Regular tool approval
+      emit({
+        type: "approval_request",
+        requestId,
+        toolName,
+        input,
+      });
+    }
+
+    // Wait for the response from Rust
+    return new Promise((resolve) => {
+      pendingApprovals.set(requestId, {
+        resolve: (resp) => {
+          if (resp.decision === "allow") {
+            resolve({ behavior: "allow", updatedInput: input });
+          } else {
+            resolve({ behavior: "deny", message: resp.message || "User denied this action" });
+          }
+        },
+      });
+    });
+  };
+
+  // Create an AbortController for this query.
+  const abort = new AbortController();
+  currentAbort = abort;
+  options.signal = abort.signal;
+
+  let capturedSessionId = sessionId || null;
+  const expectedResumeId = options.resume || null;
+  let turnEmitted = false;
+
+  // Reset incremental streaming counters for new query.
+  lastTextLen = 0;
+  lastThinkingLen = 0;
+
+  // Emit turn_started so the frontend shows "generating" state
+  emit({ type: "turn_started" });
+
+  try {
+    let queryIter;
+    try {
+      queryIter = query({ prompt, options });
+    } catch (resumeErr) {
+      // Resume failed (session not found on disk) — retry without resume
+      if (options.resume) {
+        emit({ type: "error", message: "Session not found, starting fresh" });
+        delete options.resume;
+        delete options.continue;
+        queryIter = query({ prompt, options });
+      } else {
+        throw resumeErr;
+      }
+    }
+    for await (const message of queryIter) {
+      // Abort was requested while iterating.
+      if (abort.signal.aborted) break;
+
+      const msgType = message.type;
+
+      // ── system messages ──
+      if (msgType === "system") {
+        if (message.subtype === "init" && message.session_id) {
+          capturedSessionId = message.session_id;
+          // Detect resume failure: expected to resume a specific session but got a different one
+          if (expectedResumeId && message.session_id !== expectedResumeId) {
+            emit({ type: "error", message: "Session resume failed, starting fresh" });
+          }
+          const confirmedModel = message.model || model || null;
+          emit({ type: "session_ready", sessionId: message.session_id, model: confirmedModel });
+
+          // Emit available slash commands from the init message
+          const slashCmds = message.slash_commands || message.skills || [];
+          if (slashCmds.length > 0) {
+            emit({ type: "slash_commands", commands: slashCmds });
+          }
+        }
+        continue;
+      }
+
+      // ── result message (final) ──
+      if (msgType === "result" || "result" in message) {
+        // Extract usage from various possible locations
+        const usage = message.usage || message.modelUsage;
+        const costUsd = message.total_cost_usd ?? message.cost_usd ?? 0;
+        const modelName = message.model ?? model ?? "unknown";
+
+        if (usage) {
+          // SDK may nest usage per-model or flat
+          let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheWrite = 0;
+
+          if (typeof usage === "object" && !Array.isArray(usage)) {
+            // Check if it's a flat usage object or per-model
+            if (usage.input_tokens != null || usage.inputTokens != null) {
+              inputTokens = usage.input_tokens ?? usage.inputTokens ?? 0;
+              outputTokens = usage.output_tokens ?? usage.outputTokens ?? 0;
+              cacheRead = usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0;
+              cacheWrite = usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0;
+            } else {
+              // Per-model usage: { "claude-...": { inputTokens, ... } }
+              for (const [, modelUsage] of Object.entries(usage)) {
+                if (typeof modelUsage === "object") {
+                  inputTokens += modelUsage.inputTokens ?? 0;
+                  outputTokens += modelUsage.outputTokens ?? 0;
+                  cacheRead += modelUsage.cacheReadInputTokens ?? 0;
+                  cacheWrite += modelUsage.cacheCreationInputTokens ?? 0;
+                }
+              }
+            }
+          }
+
+          emit({
+            type: "usage",
+            inputTokens,
+            outputTokens,
+            cacheRead,
+            cacheWrite,
+            costUsd,
+            model: modelName,
+          });
+        }
+
+        hasCompletedQuery = true;
+        lastSessionId = capturedSessionId;
+        lastTextLen = 0;
+        lastThinkingLen = 0;
+        emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
+        turnEmitted = true;
+        continue;
+      }
+
+      // ── streaming content messages ──
+      // The SDK yields various message shapes. We normalise them to our protocol.
+
+      // stream_event wrapping Anthropic API SSE events
+      if (msgType === "stream_event" && message.event) {
+        handleStreamEvent(message.event);
+        continue;
+      }
+
+      // assistant message — extract content blocks (incremental diff)
+      if (msgType === "assistant" && message.message?.content) {
+        for (const block of message.message.content) {
+          if (block.type === "text" && block.text) {
+            const newText = block.text.slice(lastTextLen);
+            if (newText) emit({ type: "text_delta", text: newText });
+            lastTextLen = block.text.length;
+          } else if (block.type === "tool_use") {
+            emit({
+              type: "tool_use_start",
+              toolId: block.id ?? "",
+              toolName: block.name ?? "tool",
+            });
+            if (block.input) {
+              emit({
+                type: "tool_use_input",
+                toolId: block.id ?? "",
+                inputJson: JSON.stringify(block.input),
+              });
+            }
+          } else if (block.type === "thinking" && block.thinking) {
+            const newThinking = block.thinking.slice(lastThinkingLen);
+            if (newThinking) emit({ type: "thinking_delta", text: newThinking });
+            lastThinkingLen = block.thinking.length;
+          }
+        }
+        continue;
+      }
+
+      // user message — contains tool results
+      if (msgType === "user" && message.message?.content) {
+        for (const block of message.message.content) {
+          if (block.type === "tool_result") {
+            const content = typeof block.content === "string"
+              ? block.content
+              : JSON.stringify(block.content);
+            emit({
+              type: "tool_result",
+              toolId: block.tool_use_id ?? "",
+              toolName: "",
+              content,
+              isError: !!block.is_error,
+            });
+          }
+        }
+        continue;
+      }
+
+      // Content delta shorthand (some SDK versions)
+      if (msgType === "content_delta" || msgType === "text") {
+        const text = message.text ?? message.delta?.text ?? "";
+        if (text) emit({ type: "text_delta", text });
+        continue;
+      }
+    }
+  } catch (err) {
+    if (abort.signal.aborted) {
+      // Intentional abort — not an error.
+    } else if (options.resume && String(err?.message ?? "").includes("conversation")) {
+      // Session resume failed (session file not found) — retry without resume
+      emit({ type: "error", message: "Previous session not found, starting fresh" });
+      delete options.resume;
+      delete options.continue;
+      try {
+        for await (const message of query({ prompt, options })) {
+          if (abort.signal.aborted) break;
+          // Re-process messages with the same handler logic
+          const msgType = message.type;
+          if (msgType === "system" && message.subtype === "init") {
+            capturedSessionId = message.session_id;
+            emit({ type: "session_ready", sessionId: message.session_id, model: message.model || model || null });
+          } else if (msgType === "assistant" && message.message?.content) {
+            for (const block of message.message.content) {
+              if (block.type === "text" && block.text) {
+                const newText = block.text.slice(lastTextLen);
+                if (newText) emit({ type: "text_delta", text: newText });
+                lastTextLen = block.text.length;
+              }
+            }
+          } else if (msgType === "result" || "result" in message) {
+            hasCompletedQuery = true;
+            lastSessionId = capturedSessionId;
+            emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
+            turnEmitted = true;
+          }
+        }
+      } catch (retryErr) {
+        emit({ type: "error", message: String(retryErr?.message ?? retryErr) });
+      }
+    } else {
+      emit({ type: "error", message: String(err?.message ?? err) });
+    }
+  } finally {
+    currentAbort = null;
+
+    // Make sure we always emit turn_completed so the Rust side knows we're done.
+    if (!turnEmitted) {
+      hasCompletedQuery = true;
+      lastSessionId = capturedSessionId;
+      emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
+    }
+  }
+}
+
+/**
+ * Handle raw Anthropic API SSE events forwarded by the SDK.
+ */
+function handleStreamEvent(event) {
+  const eventType = event.type;
+
+  switch (eventType) {
+    case "message_start": {
+      // Could extract model here if needed.
+      break;
+    }
+
+    case "content_block_start": {
+      const block = event.content_block;
+      if (!block) break;
+
+      if (block.type === "tool_use") {
+        emit({
+          type: "tool_use_start",
+          toolId: block.id ?? "",
+          toolName: block.name ?? "tool",
+        });
+      }
+      break;
+    }
+
+    case "content_block_delta": {
+      const delta = event.delta;
+      if (!delta) break;
+
+      switch (delta.type) {
+        case "text_delta":
+          if (delta.text) emit({ type: "text_delta", text: delta.text });
+          break;
+        case "input_json_delta":
+          if (delta.partial_json != null) {
+            // We need to know which tool this belongs to. The SDK usually
+            // provides event.index; we map it via prior content_block_start.
+            emit({
+              type: "tool_use_input",
+              toolId: "", // correlated by order on the Rust side
+              inputJson: delta.partial_json,
+            });
+          }
+          break;
+        case "thinking_delta":
+          if (delta.thinking) emit({ type: "thinking_delta", text: delta.thinking });
+          break;
+      }
+      break;
+    }
+
+    case "content_block_end": {
+      // The Rust side tracks completion via tool_result events already.
+      break;
+    }
+
+    case "message_delta": {
+      // Contains stop_reason and usage deltas.
+      break;
+    }
+  }
+}
+
+function handleApprovalResponse(cmd) {
+  const { requestId, decision, message } = cmd;
+  const pending = pendingApprovals.get(requestId);
+  if (pending) {
+    pendingApprovals.delete(requestId);
+    pending.resolve({ decision, message });
+  }
+}
+
+function handleAbort() {
+  if (currentAbort) {
+    currentAbort.abort();
+  }
+}
+
+// ── Ready ────────────────────────────────────────────────────────────────────
+
+emit({ type: "ready" });

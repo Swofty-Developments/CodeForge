@@ -1,0 +1,9 @@
+{
+  "name": "featureforge",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix crates/tauri-app/frontend",
+    "tauri:dev": "npm run dev --prefix crates/tauri-app/frontend & cargo tauri dev",
+    "build:frontend": "npm run build --prefix crates/tauri-app/frontend"
+  }
+}

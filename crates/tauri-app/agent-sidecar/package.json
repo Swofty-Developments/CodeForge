@@ -1,0 +1,8 @@
+{
+  "name": "featureforge-agent-sidecar",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest"
+  }
+}

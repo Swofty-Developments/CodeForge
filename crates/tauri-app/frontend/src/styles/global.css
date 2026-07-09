@@ -1,0 +1,304 @@
+/* FeatureForge global stylesheet — "Obsidian Forge" design tokens (base theme),
+ * element resets, scrollbars, overlay system, ALL shared keyframes (centralized
+ * here — do NOT re-declare keyframes inside components), semantic-tint utilities,
+ * and the prefers-reduced-motion block. Themes swap the :root vars at runtime. */
+
+:root {
+  /* Surface palette — warm-tinted darks */
+  --bg-base: #0f1012;
+  --bg-card: #151518;
+  --bg-surface: #18181c;
+  --bg-accent: #222228;
+  --bg-muted: #1c1c20;
+  --bg-user-bubble: #1e1e24;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+
+  /* Text with warm undertones */
+  --text: #f0eef8;
+  --text-secondary: #b8b6c8;
+  --text-tertiary: #807e92;
+
+  /* Accent palette — molten metals */
+  --primary: #6b7cff;
+  --primary-glow: rgba(107, 124, 255, 0.2);
+  --primary-muted: #5568d9;
+  --green: #4cd694;
+  --red: #f25f67;
+  --amber: #f0b840;
+  --sky: #58c4f0;
+  --purple: #b47aff;
+  --pink: #f07ab4;
+  --orange: #f5943c;
+
+  /* Accent RGB triplets — for the rgba() semantic-tint formula */
+  --primary-rgb: 107, 124, 255;
+  --green-rgb: 76, 214, 148;
+  --red-rgb: 242, 95, 103;
+  --amber-rgb: 240, 184, 64;
+  --sky-rgb: 88, 196, 240;
+  --purple-rgb: 180, 122, 255;
+
+  /* Borders — translucent warm */
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.10);
+  --border-glow: rgba(107, 124, 255, 0.25);
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 100px;
+
+  /* Typography */
+  --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code", monospace;
+
+  /* Spacing — 4px base scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Layout */
+  --sidebar-width: 260px;
+  --sidebar-min: 180px;
+  --sidebar-max: 500px;
+
+  /* Motion — the signature easing for every entrance */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Syntax highlighting (One-Dark-ish; themes must supply the full set) */
+  --hljs-keyword: #c678dd;
+  --hljs-string: #98c379;
+  --hljs-number: #d19a66;
+  --hljs-comment: #5c6370;
+  --hljs-builtin: #e6c07b;
+  --hljs-function: #61afef;
+  --hljs-attr: #d19a66;
+  --hljs-variable: #e06c75;
+  --hljs-params: #abb2bf;
+  --hljs-meta: #61afef;
+  --hljs-regexp: #56b6c2;
+  --hljs-tag: #e06c75;
+  --hljs-selector: #e6c07b;
+  --hljs-symbol: #56b6c2;
+  --hljs-link: #61afef;
+  --hljs-punctuation: #abb2bf;
+  --hljs-property: #e06c75;
+  --hljs-class: #e6c07b;
+  --hljs-code-bg: #0f1012;
+  --hljs-code-text: #ebebf0;
+  --hljs-inline-code: #dda0f7;
+}
+
+/* ── Z-index ladder (keep in sync app-wide) ──
+   1 focused pane · 2 pane divider · 3 snap guides/fade edges · 10 dragging item
+   50 slash menu · 100 .overlay modals/dropdowns · 150 toasts · 200/201 context
+   menu backdrop/menu · 999 hover previews · 9999 command palette/search ·
+   10000 welcome splash */
+
+/* ── Resets & chrome ── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-base);
+  color: var(--text);
+  overflow: hidden;
+  height: 100vh;
+  user-select: none;
+  -webkit-user-select: none;
+  font-feature-settings: "ss01", "ss02", "cv01";
+}
+
+#app { display: flex; height: 100vh; width: 100vw; }
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+input {
+  font-family: var(--font-body);
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+/* ── Focus-visible for keyboard navigation ── */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Scrollbar — 5px overlay style ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* ── Common label style ── */
+.section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+
+/* ── Overlay / modal system ── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: overlay-backdrop-in 120ms ease-out both;
+}
+.overlay-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: overlay-panel-in 200ms var(--ease-out) both;
+}
+
+/* ── Semantic tint utilities ──
+   The universal formula: rgba(accent, .04–.15) bg + rgba(accent, .12–.4) border
+   + solid accent text. Never invent new opaque colors. */
+.tint-primary { background: rgba(var(--primary-rgb), 0.08); border: 1px solid rgba(var(--primary-rgb), 0.2); color: var(--primary); }
+.tint-green   { background: rgba(var(--green-rgb), 0.08);   border: 1px solid rgba(var(--green-rgb), 0.2);   color: var(--green); }
+.tint-red     { background: rgba(var(--red-rgb), 0.08);     border: 1px solid rgba(var(--red-rgb), 0.2);     color: var(--red); }
+.tint-amber   { background: rgba(var(--amber-rgb), 0.08);   border: 1px solid rgba(var(--amber-rgb), 0.2);   color: var(--amber); }
+.tint-sky     { background: rgba(var(--sky-rgb), 0.08);     border: 1px solid rgba(var(--sky-rgb), 0.2);     color: var(--sky); }
+.tint-purple  { background: rgba(var(--purple-rgb), 0.08);  border: 1px solid rgba(var(--purple-rgb), 0.2);  color: var(--purple); }
+
+/* ── Status dot — the universal status vocabulary ──
+   green=ready · sky=working (pulse) · amber=waiting · red=error · tertiary=idle */
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); transition: background 0.2s; }
+.status-dot--ready { background: var(--green); }
+.status-dot--busy { background: var(--sky); animation: dot-pulse 1.5s ease-in-out infinite; }
+.status-dot--waiting { background: var(--amber); animation: dot-pulse 1.5s ease-in-out infinite; }
+.status-dot--error { background: var(--red); }
+
+/* ══ Shared keyframes — the ONLY place keyframes are declared ══ */
+
+/* Generic fades */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-slide-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fade-slide-down { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes overlay-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlay-panel-in {
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Universal pulse dot (tabs, rows, status bar, tool cards) */
+@keyframes dot-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }
+
+/* Streaming / loading */
+@keyframes streaming-line-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shimmer-flow { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes skeleton-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+
+/* Messages & tool cards */
+@keyframes msg-user-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes msg-assistant-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes tool-card-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+
+/* Sidebar rows stagger in (inline animation-delay: index * 30ms) */
+@keyframes row-stagger-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes row-shimmer { from { background-position: 0 0; } to { background-position: 0 -200%; } }
+
+/* Status bar activity line */
+@keyframes sb-line-flow { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@keyframes sb-line-done { 0% { opacity: 1; } 50% { opacity: 1; background: var(--green); } 100% { opacity: 0; height: 1px; } }
+
+/* Approval / composer pulses */
+@keyframes approval-enter { from { opacity: 0; transform: scale(0.95) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes approval-pulse {
+  0%, 100% { border-color: rgba(240, 184, 64, 0.4); box-shadow: 0 0 0 0 rgba(240, 184, 64, 0); }
+  50% { border-color: rgba(240, 184, 64, 0.7); box-shadow: 0 0 12px -2px rgba(240, 184, 64, 0.15); }
+}
+@keyframes composer-gen-pulse {
+  0%, 100% { border-color: rgba(88, 196, 240, 0.15); }
+  50% { border-color: rgba(88, 196, 240, 0.35); box-shadow: 0 0 12px -4px rgba(88, 196, 240, 0.1); }
+}
+
+/* Menus / palettes / tooltips */
+@keyframes cmd-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cmd-slide-in { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes ctx-menu-in { from { opacity: 0; transform: scale(0.94) translateY(-2px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes dropdown-in { from { opacity: 0; transform: translateY(4px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Side pane entrance/exit */
+@keyframes side-pane-in {
+  from { opacity: 0; transform: translateX(12px) scale(0.97); filter: blur(2px); }
+  to   { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
+}
+@keyframes side-pane-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(8px) scale(0.98); }
+}
+
+/* Completion breathe (background work finished) */
+@keyframes breathe-green {
+  0%   { box-shadow: 0 0 0 0 rgba(76, 214, 148, 0.4); }
+  30%  { box-shadow: 0 0 12px 2px rgba(76, 214, 148, 0.3); transform: scale(1.03); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 214, 148, 0); transform: scale(1); }
+}
+
+/* Spinners & carets */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Thinking dots (staggered 0.12s / 0.24s delays) */
+@keyframes thinking-dot { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+/* Welcome splash */
+@keyframes ws-pulse { from { opacity: 0.6; transform: translate(-50%, -50%) scale(0.95); } to { opacity: 1; transform: translate(-50%, -50%) scale(1.1); } }
+@keyframes ws-content-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ws-mark-in { from { opacity: 0; transform: scale(0.7) rotate(-8deg); } to { opacity: 1; transform: scale(1) rotate(0deg); } }
+@keyframes ws-title-in { from { opacity: 0; filter: blur(6px); transform: translateX(-8px); } to { opacity: 1; filter: blur(0); transform: translateX(0); } }
+
+/* ── Reduced motion — every animation must have a fallback ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
