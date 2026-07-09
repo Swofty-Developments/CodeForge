@@ -1,19 +1,19 @@
 //! Static assets the integration kit writes into a repo: the hook forwarder
 //! script, the CLAUDE.md guidance block, and the marker/matcher constants.
 
-/// Markers delimiting the FeatureForge-owned section of CLAUDE.md.
-pub(crate) const CLAUDE_MD_START: &str = "<!-- featureforge:start -->";
-pub(crate) const CLAUDE_MD_END: &str = "<!-- featureforge:end -->";
+/// Markers delimiting the CodeForge-owned section of CLAUDE.md.
+pub(crate) const CLAUDE_MD_START: &str = "<!-- codeforge:start -->";
+pub(crate) const CLAUDE_MD_END: &str = "<!-- codeforge:end -->";
 
 /// Hook command installed into `.claude/settings.json`. `$CLAUDE_PROJECT_DIR`
 /// is expanded by Claude Code at hook time.
-pub(crate) const HOOK_COMMAND: &str = "\"$CLAUDE_PROJECT_DIR\"/.featureforge/hooks/forward.sh";
+pub(crate) const HOOK_COMMAND: &str = "\"$CLAUDE_PROJECT_DIR\"/.codeforge/hooks/forward.sh";
 /// Substring identifying our hook entries across re-installs.
-pub(crate) const HOOK_MARKER: &str = ".featureforge/hooks/forward.sh";
+pub(crate) const HOOK_MARKER: &str = ".codeforge/hooks/forward.sh";
 pub(crate) const POST_TOOL_USE_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash";
 
 pub(crate) const FORWARD_SH: &str = r#"#!/bin/sh
-# FeatureForge hook forwarder: pipes Claude Code hook JSON (stdin) to the local
+# CodeForge hook forwarder: pipes Claude Code hook JSON (stdin) to the local
 # daemon. Always exits 0 so hooks never block Claude.
 #
 # Three named states, never collapsed:
@@ -23,8 +23,8 @@ pub(crate) const FORWARD_SH: &str = r#"#!/bin/sh
 #      -> spool the payload to runtime/spool/ for the daemon to drain on next
 #         start, instead of dropping it on the floor.
 ROOT="${CLAUDE_PROJECT_DIR:-.}"
-RUNTIME="$ROOT/.featureforge/runtime/daemon.json"
-SPOOL="$ROOT/.featureforge/runtime/spool"
+RUNTIME="$ROOT/.codeforge/runtime/daemon.json"
+SPOOL="$ROOT/.codeforge/runtime/spool"
 
 # State 1: app closed. No daemon has ever advertised a port here; drop silently.
 [ -f "$RUNTIME" ] || exit 0
@@ -46,10 +46,10 @@ fi
 exit 0
 "#;
 
-pub(crate) const CLAUDE_MD_BODY: &str = r#"## FeatureForge
+pub(crate) const CLAUDE_MD_BODY: &str = r#"## CodeForge
 
-This repository is indexed by FeatureForge. **Before exploring the codebase**, consult the
-`featureforge` MCP tools — they are faster and more accurate than searching from scratch:
+This repository is indexed by CodeForge. **Before exploring the codebase**, consult the
+`codeforge` MCP tools — they are faster and more accurate than searching from scratch:
 
 - `list_features` — every feature in this repo with a short description
 - `get_feature(slug)` — one feature's description, entry points, and key files

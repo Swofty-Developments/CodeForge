@@ -7,7 +7,7 @@ use crate::{
     base_repo_root, create_worktree, list_worktrees, merge_worktree, remove_worktree, Error,
 };
 
-/// A throwaway repo on a deterministic `main` branch, `.featureforge-worktrees/`
+/// A throwaway repo on a deterministic `main` branch, `.codeforge-worktrees/`
 /// already gitignored so the base stays clean once worktrees are spun off.
 struct Fixture {
     dir: tempfile::TempDir,
@@ -20,7 +20,7 @@ impl Fixture {
         git_in(f.path(), &["config", "user.email", "t@t.t"]);
         git_in(f.path(), &["config", "user.name", "test"]);
         git_in(f.path(), &["config", "commit.gpgsign", "false"]);
-        write_in(f.path(), ".gitignore", ".featureforge-worktrees/\n");
+        write_in(f.path(), ".gitignore", ".codeforge-worktrees/\n");
         write_in(f.path(), "README.md", "base\n");
         commit_in(f.path(), "init");
         f

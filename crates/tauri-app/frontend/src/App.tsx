@@ -7,8 +7,10 @@ import { CommandPalette } from "./components/CommandPalette";
 import { MergeResultPanel } from "./components/MergeResultPanel";
 import { SessionPane } from "./components/SessionPane";
 import { Sidebar } from "./components/Sidebar";
+import { StaleModal } from "./components/StaleModal";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
+import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { TitleBar } from "./components/TitleBar";
 import { WorktreeTabs } from "./components/WorktreeTabs";
 import { DiffReview } from "./views/DiffReview";
@@ -65,6 +67,9 @@ export default function App() {
     } else if (mod && e.key === "\\") {
       e.preventDefault();
       appStore.toggleSessionPane();
+    } else if (mod && e.key.toLowerCase() === "j" && store.repo) {
+      e.preventDefault();
+      appStore.toggleTerminalPanel();
     } else if (mod && VIEW_KEYS[e.key] && store.repo) {
       e.preventDefault();
       appStore.setActiveView(VIEW_KEYS[e.key]);
@@ -135,11 +140,15 @@ export default function App() {
                 <SessionPane />
               </Show>
             </div>
+            <Show when={store.terminalPanelOpen}>
+              <TerminalPanel />
+            </Show>
           </div>
         </Show>
       </div>
       <StatusBar />
       <MergeResultPanel />
+      <StaleModal />
       <Show when={store.paletteOpen}>
         <CommandPalette />
       </Show>

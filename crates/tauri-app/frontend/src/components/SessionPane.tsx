@@ -1,17 +1,17 @@
 /* Right session pane — embedded Claude Code sessions: tab strip (per session,
- * status dot + close), new-session model dropdown, the streamed message view,
- * and the autosize composer. Layout/CSS live in ./session/styles. */
+ * status dot + close), new-session model dropdown, a slim session header (model /
+ * mode / run-state), the streamed message view, and the composer. Layout/CSS live
+ * in ./session/styles; the composer + slash menu + attachments live in Composer. */
 
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { appStore } from "../stores/app-store";
 import { MessageStream } from "./session/MessageStream";
+import { SessionHeader } from "./session/SessionHeader";
+import { Composer } from "./session/Composer";
 import { closeSession, selectSession, startSessionWithModel } from "./session/local";
 import { injectSessionStyles } from "./session/styles";
-import { ModeControl } from "./session/ModeControl";
 import { samePath } from "../stores/path";
 import type { PermissionMode, RunState, SessionUi } from "../types";
-
-const MAX_COMPOSER_PX = 168; // ~8 lines at 13.5px / 1.45
 
 const MODEL_PRESETS: { value: string | null; name: string; desc: string }[] = [
   { value: null, name: "Default", desc: "CLI default model" },
@@ -30,20 +30,13 @@ function dotClass(runState: RunState): string {
   }
 }
 
-function autosize(el: HTMLTextAreaElement): void {
-  el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_PX)}px`;
-}
-
 export function SessionPane() {
   injectSessionStyles();
   const { store } = appStore;
-  const [input, setInput] = createSignal("");
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [custom, setCustom] = createSignal("");
   // Mode for the NEXT session started here; an active session shows its own live mode.
   const [pendingMode, setPendingMode] = createSignal<PermissionMode>("default");
-  let taRef: HTMLTextAreaElement | undefined;
 
   // Only the active context's sessions are shown (W1: sessions are context-tagged).
   const visibleSessions = createMemo((): SessionUi[] =>
@@ -56,8 +49,6 @@ export function SessionPane() {
     if (!id) return null;
     return visibleSessions().find((s) => s.info.id === id) ?? null;
   };
-  const generating = () => active()?.runState === "generating";
-  const canSend = () => !!store.repo && !!input().trim();
   const currentMode = (): PermissionMode => active()?.permissionMode ?? pendingMode();
 
   function selectMode(mode: PermissionMode): void {
@@ -66,25 +57,16 @@ export function SessionPane() {
     if (s) void appStore.setSessionMode(s.info.id, mode);
   }
 
-  // "Ask Claude about this feature" seeds composerPrefill + reveals the pane.
-  createEffect(() => {
-    const pf = store.composerPrefill;
-    if (pf == null) return;
-    setInput(pf);
-    appStore.clearComposerPrefill();
-    queueMicrotask(() => {
-      if (taRef) { taRef.focus(); autosize(taRef); }
-    });
-  });
-
-  async function submit(): Promise<void> {
-    const text = input().trim();
-    if (!text || !store.repo) return;
-    setInput("");
-    if (taRef) autosize(taRef);
+  async function onSend(text: string): Promise<void> {
+    if (!store.repo) return;
     if (!active()) await appStore.startSession(undefined, pendingMode());
     // sendSessionInput pushes the user message into session.messages itself.
     await appStore.sendSessionInput(text);
+  }
+
+  function onStop(): void {
+    const s = active();
+    if (s) void appStore.stopSession(s.info.id);
   }
 
   function pickModel(model: string | null): void {
@@ -172,6 +154,10 @@ export function SessionPane() {
         </div>
       </div>
 
+      <Show when={active()}>
+        {(session) => <SessionHeader session={session()} />}
+      </Show>
+
       <div class="sp-body">
         <Show
           when={active()}
@@ -189,49 +175,14 @@ export function SessionPane() {
         </Show>
       </div>
 
-      <div class="sp-composer-wrap">
-        <div class="sp-composer-card" classList={{ generating: generating(), disabled: !store.repo }}>
-          <textarea
-            ref={taRef}
-            class="sp-input"
-            rows={1}
-            placeholder={store.repo ? "Ask Claude about this repo…" : "Open a repository first"}
-            disabled={!store.repo}
-            value={input()}
-            onInput={(e) => { setInput(e.currentTarget.value); autosize(e.currentTarget); }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
-            }}
-          />
-          <div class="sp-composer-meta">
-            <ModeControl mode={currentMode()} disabled={!store.repo} onSelect={selectMode} />
-            <Show when={active()}>
-              {(s) => <span class="sp-model-tag">{s().info.model ?? "default"}</span>}
-            </Show>
-            <div class="sp-composer-spacer" />
-            <Show
-              when={generating()}
-              fallback={
-                <button class="sp-send" title="Send" disabled={!canSend()} onClick={() => void submit()}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                    <path d="M12 19V5M5 12l7-7 7 7" />
-                  </svg>
-                </button>
-              }
-            >
-              <button
-                class="sp-send stop"
-                title="Stop session"
-                onClick={() => { const s = active(); if (s) void appStore.stopSession(s.info.id); }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              </button>
-            </Show>
-          </div>
-        </div>
-      </div>
+      <Composer
+        disabled={!store.repo}
+        session={active()}
+        currentMode={currentMode()}
+        onSelectMode={selectMode}
+        onSend={onSend}
+        onStop={onStop}
+      />
     </div>
   );
 }

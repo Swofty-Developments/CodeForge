@@ -1,6 +1,6 @@
 {
-  "productName": "FeatureForge",
-  "identifier": "net.swofty.featureforge",
+  "productName": "CodeForge",
+  "identifier": "net.swofty.codeforge",
   "build": {
     "devUrl": "http://localhost:5173",
     "frontendDist": "./frontend/dist",
@@ -14,7 +14,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "FeatureForge",
+        "title": "CodeForge",
         "width": 1280,
         "height": 820,
         "center": true,

@@ -1,5 +1,5 @@
 {
-  "name": "featureforge-frontend",
+  "name": "codeforge-frontend",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,8 @@
     "@fontsource/jetbrains-mono": "^5.2.5",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "highlight.js": "^11.11.1",
     "marked": "^17.0.5",
     "solid-js": "^1.9.12"

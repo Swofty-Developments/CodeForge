@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for FeatureForge",
+  "description": "Default capabilities for CodeForge",
   "windows": ["*"],
   "permissions": [
     "core:default",

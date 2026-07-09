@@ -10,6 +10,7 @@ use forge_timeline::TimelineStore;
 use tokio::sync::RwLock;
 
 use crate::db::Database;
+use crate::terminal::TerminalManager;
 
 /// Everything running for one open repository.
 pub struct RepoRuntime {
@@ -38,6 +39,8 @@ pub struct AppState {
     /// rooted at the closing repo (a session must not outlive its repo). NOT
     /// used for event routing — that is by `sessionId` in the payload (CONTRACT-1).
     pub session_repos: tokio::sync::Mutex<HashMap<String, PathBuf>>,
+    /// Embedded PTY terminals (FZ-3). Interior-mutable; killed on app drop.
+    pub terminals: TerminalManager,
 }
 
 impl AppState {

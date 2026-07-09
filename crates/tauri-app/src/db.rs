@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::migrations::run_migrations;
 
-/// App-level SQLite database at `~/.featureforge/featureforge.db`.
+/// App-level SQLite database at `~/.codeforge/codeforge.db`.
 ///
 /// Single connection behind `Arc<std::sync::Mutex<Database>>` in managed state.
 /// The pragma set below is the tested combo for single-connection desktop use.

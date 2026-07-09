@@ -1,4 +1,4 @@
-/// Shared error type for FeatureForge crates.
+/// Shared error type for CodeForge crates.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("io error: {0}")]

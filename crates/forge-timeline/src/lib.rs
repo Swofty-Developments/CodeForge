@@ -1,6 +1,6 @@
 //! forge-timeline — per-repo append-only event log.
 //!
-//! Storage: SQLite at `<repo>/.featureforge/runtime/timeline.db`, WAL mode,
+//! Storage: SQLite at `<repo>/.codeforge/runtime/timeline.db`, WAL mode,
 //! `foreign_keys=ON`, `synchronous=NORMAL`, `busy_timeout=5000` (same pragma set
 //! as the app DB). Events are immutable once appended; `id` is the rowid.
 
@@ -62,10 +62,10 @@ struct Inner {
 }
 
 impl TimelineStore {
-    /// Open (creating if needed) `<repo_root>/.featureforge/runtime/timeline.db`
+    /// Open (creating if needed) `<repo_root>/.codeforge/runtime/timeline.db`
     /// and run idempotent migrations.
     pub fn open(repo_root: &Path) -> Result<Self> {
-        let runtime_dir = repo_root.join(".featureforge").join("runtime");
+        let runtime_dir = repo_root.join(".codeforge").join("runtime");
         std::fs::create_dir_all(&runtime_dir)?;
         let db_path = runtime_dir.join("timeline.db");
 

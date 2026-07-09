@@ -7,6 +7,7 @@ mod migrations;
 mod queries;
 mod runtime;
 mod state;
+mod terminal;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,21 +25,21 @@ fn db_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| "cannot locate home directory (neither HOME nor USERPROFILE is set)".to_string())?;
-    Ok(PathBuf::from(home).join(".featureforge").join("featureforge.db"))
+    Ok(PathBuf::from(home).join(".codeforge").join("codeforge.db"))
 }
 
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "featureforge=debug,forge=debug,info".into()),
+                .unwrap_or_else(|_| "codeforge=debug,forge=debug,info".into()),
         )
         .init();
 
     let db_path = match db_path() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("featureforge: {e}");
+            eprintln!("codeforge: {e}");
             std::process::exit(1);
         }
     };
@@ -52,6 +53,7 @@ fn main() {
         repos: tokio::sync::Mutex::new(HashMap::new()),
         sessions: tokio::sync::Mutex::new(SessionManager::new()),
         session_repos: tokio::sync::Mutex::new(HashMap::new()),
+        terminals: crate::terminal::TerminalManager::new(),
     };
 
     tauri::Builder::default()
@@ -67,6 +69,7 @@ fn main() {
             commands::features::get_features,
             commands::features::get_feature,
             commands::features::get_feature_doc,
+            commands::features::index_status,
             commands::features::pin_feature,
             commands::features::update_feature,
             commands::features::set_feature_color,
@@ -82,6 +85,11 @@ fn main() {
             commands::worktrees::create_worktree,
             commands::worktrees::remove_worktree,
             commands::worktrees::merge_worktree,
+            commands::terminals::open_terminal,
+            commands::terminals::write_terminal,
+            commands::terminals::resize_terminal,
+            commands::terminals::close_terminal,
+            commands::terminals::list_terminals,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

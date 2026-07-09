@@ -25,9 +25,23 @@ Explore this repository from its root:
 - skim the directory tree and any README / docs
 - open a few representative source files to understand responsibilities
 
-Then decompose the repo into 6-16 coarse-grained features. A feature is a user- or
-developer-facing capability (e.g. "authentication", "diff-review", "timeline-storage"),
-not a single file or a language-level module.
+Then decompose the repo into features. A feature is ONE distinct capability or
+flow (e.g. "login", "password-reset", "session-list", "diff-review",
+"timeline-storage") — finer-grained than a whole app or subsystem, but coarser
+than a single file or language-level module.
+
+Scale the number of features to the repo's real surface area. A small library
+might have 5-12; a large multi-crate or multi-package repo commonly has 25-60+.
+Do NOT force everything into a handful of coarse buckets, and do NOT cap yourself
+artificially — list every genuinely-distinct feature you find.
+
+CRITICAL — never emit a catch-all feature for an entire area. A whole frontend is
+never one "web" feature; a whole service is never one "api" feature. Decompose
+each area into its individual capabilities (the specific pages, user flows,
+screens, endpoint groups, jobs, or subsystems) and organise them with `group`
+(below), which is what keeps a long list navigable. If you are about to write a
+feature whose scope is "a whole crate / a whole app / a whole layer", STOP and
+split it into the distinct features inside it.
 
 Return ONLY a JSON array (no prose, no markdown fences) of objects with exactly
 these fields:
@@ -36,6 +50,7 @@ these fields:
     "slug": "kebab-case-id",
     "name": "Human Readable Name",
     "description": "1-3 sentences on what this feature does.",
+    "group": "hierarchy/path",
     "entryPoints": ["repo/relative/path.rs"],
     "files": [ { "path": "repo/relative/path.rs", "role": "core" } ],
     "tags": ["short", "keywords"],
@@ -45,6 +60,11 @@ these fields:
 
 Rules:
 - slug is kebab-case and stable; name is title-case.
+- group is a slash-delimited hierarchy path the sidebar nests features by. For a
+  multi-crate repo or monorepo use the crate/package name (e.g. "forge-index",
+  "web"); otherwise use a "layer/module" path (e.g. "backend/auth", "frontend").
+  Features in the same crate/package/layer MUST share the exact same group
+  string. Omit group only when a feature genuinely spans the whole repo.
 - entryPoints are the 1-3 best "start reading here" files for the feature.
 - role is one of: core | support | test | config.
 - every path is RELATIVE to the repo root and must exist on disk.
@@ -123,6 +143,7 @@ mod tests {
             confidence: 0.8,
             pinned: false,
             color: None,
+            group: None,
             updated_at: chrono::Utc::now(),
         };
         let prompt = doc_prompt(&feature);

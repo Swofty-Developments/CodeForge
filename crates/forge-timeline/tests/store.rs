@@ -26,10 +26,10 @@ fn append_query_roundtrip() {
     let (dir, store) = open_temp();
     assert!(store
         .db_path()
-        .ends_with(".featureforge/runtime/timeline.db"));
+        .ends_with(".codeforge/runtime/timeline.db"));
     assert!(dir
         .path()
-        .join(".featureforge/runtime/timeline.db")
+        .join(".codeforge/runtime/timeline.db")
         .exists());
 
     let stored = store

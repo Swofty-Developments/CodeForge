@@ -1,4 +1,4 @@
-/* FeatureForge global stylesheet — "Obsidian Forge" design tokens (base theme),
+/* CodeForge global stylesheet — "Obsidian Forge" design tokens (base theme),
  * element resets, scrollbars, overlay system, ALL shared keyframes (centralized
  * here — do NOT re-declare keyframes inside components), semantic-tint utilities,
  * and the prefers-reduced-motion block. Themes swap the :root vars at runtime. */

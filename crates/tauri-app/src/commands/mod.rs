@@ -5,5 +5,6 @@
 pub mod features;
 pub mod repo;
 pub mod sessions;
+pub mod terminals;
 pub mod timeline;
 pub mod worktrees;

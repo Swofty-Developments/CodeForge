@@ -19,17 +19,20 @@ import type {
   ErrorToast,
   Feature,
   IndexProgress,
+  IndexStatus,
   MergeResult,
   RepoContext,
   RepoState,
   SessionUi,
+  TerminalTab,
   TimelineEvent,
   Worktree,
 } from "../types";
 import { createSessionSlice } from "./session-slice";
 import { createContextSlice } from "./context-slice";
 import { createDataSlice } from "./data-slice";
-import { samePath } from "./path";
+import { createTerminalSlice } from "./terminal-slice";
+import { normPath, samePath } from "./path";
 
 const TIMELINE_CAP = 1000;
 const TOAST_DISMISS_MS = 5000;
@@ -52,7 +55,7 @@ export interface AppStore {
   selectedFeature: string | null;
   /** Recent timeline slice for the selected feature (FeatureDetail). */
   selectedFeatureTimeline: TimelineEvent[];
-  /** Living-doc markdown (.featureforge/docs/<slug>.md) for the selected feature. */
+  /** Living-doc markdown (.codeforge/docs/<slug>.md) for the selected feature. */
   selectedFeatureDoc: string | null;
   activeView: ActiveView;
   timeline: TimelineEvent[];
@@ -69,6 +72,15 @@ export interface AppStore {
   sessionPaneWidth: number;
   /** Text waiting to be inserted into the session composer ("Ask Claude" flow). */
   composerPrefill: string | null;
+  /** Bottom terminal panel (FZ-3) — worktree-scoped PTY tabs. */
+  terminals: TerminalTab[];
+  activeTerminalId: string | null;
+  terminalPanelOpen: boolean;
+  terminalPanelHeight: number;
+  /** Pending re-index prompt (FZ-2), keyed to the repo whose index went stale. */
+  staleModal: { repoPath: string; status: IndexStatus } | null;
+  /** Latest index:status per repo path — drives the status-bar freshness dot. */
+  indexStatusByPath: Record<string, IndexStatus>;
   lastError: string | null;
   toasts: ErrorToast[];
 }
@@ -105,6 +117,12 @@ function createAppStore() {
     sessionPaneOpen: true,
     sessionPaneWidth: 380,
     composerPrefill: null,
+    terminals: [],
+    activeTerminalId: null,
+    terminalPanelOpen: false,
+    terminalPanelHeight: 240,
+    staleModal: null,
+    indexStatusByPath: {},
     lastError: null,
     toasts: [],
   });
@@ -136,6 +154,40 @@ function createAppStore() {
     refreshDaemon: dataSlice.refreshDaemon,
   });
   const sessionSlice = createSessionSlice(store, setStore, pushError);
+  const terminalSlice = createTerminalSlice(store, setStore, pushError);
+
+  // ── Index staleness (FZ-2) — re-index prompt + per-repo suppression ────────
+
+  const staleKey = (p: string): string => `ff:stale-dismissed:${normPath(p)}`;
+  const isStaleSuppressed = (p: string): boolean => localStorage.getItem(staleKey(p)) === "1";
+
+  /** index:status handler — surface the modal only for actionable states the user
+   *  hasn't muted. `fresh`/`never` are silent; each state is named, not guessed. */
+  function handleIndexStatus(repoPath: string, status: IndexStatus): void {
+    setStore("indexStatusByPath", repoPath, status);
+    if (status.state !== "stale" && status.state !== "outdated") return;
+    if (isStaleSuppressed(repoPath)) return;
+    setStore("staleModal", { repoPath, status });
+  }
+
+  const dismissStaleModal = (): void => setStore("staleModal", null);
+
+  /** "Don't ask again" for this repo — persist and close. */
+  function suppressStale(repoPath: string): void {
+    localStorage.setItem(staleKey(repoPath), "1");
+    if (store.staleModal && samePath(store.staleModal.repoPath, repoPath)) setStore("staleModal", null);
+  }
+
+  /** Re-index the modal's repo (force) and close. Targets that repoPath, not
+   *  necessarily the active context — they can differ per-worktree. */
+  async function reindexStale(repoPath: string): Promise<void> {
+    setStore("staleModal", null);
+    try {
+      await ipc.reindexRepo(repoPath, true);
+    } catch (e) {
+      pushError(String(e));
+    }
+  }
 
   // ── Navigation / layout ───────────────────────────────────────────────────
 
@@ -167,7 +219,11 @@ function createAppStore() {
 
   // ── Event reducers (single global listeners, registered via initListeners) ─
 
-  function handleTimelineEvent(event: TimelineEvent): void {
+  /** FZ-5: append a LIVE timeline event only when it belongs to the active
+   *  context. Background contexts reload their timeline on switch, so appending
+   *  their live events here would leak across worktrees. */
+  function handleTimelineEvent(repoPath: string, event: TimelineEvent): void {
+    if (!store.activeContextPath || !samePath(repoPath, store.activeContextPath)) return;
     setStore("timeline", (t) => [event, ...t].slice(0, TIMELINE_CAP));
     for (const slug of event.featureSlugs) {
       setStore("featureActivity", slug, (n) => (n ?? 0) + 1);
@@ -206,6 +262,7 @@ function createAppStore() {
         ipc.listenAgentEvent(sessionSlice.handleAgentEvent),
         ipc.listenTimelineEvent(handleTimelineEvent),
         ipc.listenIndexProgress(handleIndexProgress),
+        ipc.listenIndexStatus(handleIndexStatus),
         ipc.listenRepoChanged(handleRepoChanged),
       ]);
     } catch {
@@ -219,6 +276,11 @@ function createAppStore() {
     ...dataSlice,
     ...contextSlice,
     ...sessionSlice,
+    ...terminalSlice,
+    handleIndexStatus,
+    dismissStaleModal,
+    suppressStale,
+    reindexStale,
     setActiveView,
     setPaletteOpen,
     setWorktreePromptOpen,

@@ -2,7 +2,7 @@
 //! context (contract W1): `create_worktree` reuses the same
 //! `repo_open::open_context` core as `open_repo`, and `remove_worktree` reuses
 //! `close_context`. The git primitives come from `forge_git` (worktree ops in forge-git).
-//! stand-in for `forge_git`; see that module) and the FeatureForge-specific
+//! stand-in for `forge_git`; see that module) and the CodeForge-specific
 //! setup from `worktree_fs`.
 
 use forge_core::{Actor, EventKind, MergeResult, Worktree};
@@ -23,7 +23,7 @@ pub async fn list_worktrees(repo_path: String) -> Result<Vec<Worktree>, String> 
 
 /// Create a worktree on a new branch `name` off `base_ref` (default: the base
 /// repo's current HEAD), have it inherit the base's feature model, keep
-/// `.featureforge-worktrees/` ignored, then open it as its own context.
+/// `.codeforge-worktrees/` ignored, then open it as its own context.
 #[tauri::command]
 pub async fn create_worktree(
     app: tauri::AppHandle,

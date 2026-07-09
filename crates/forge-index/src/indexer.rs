@@ -14,7 +14,7 @@ use crate::{parse, Error, Result};
 
 /// Max concurrent per-feature doc passes.
 const DOC_CONCURRENCY: usize = 3;
-const DOCS_DIR: &str = ".featureforge/docs";
+const DOCS_DIR: &str = ".codeforge/docs";
 
 /// Outcome of the per-feature doc pass. `written` and `failed` are distinct,
 /// named states — a doc that failed to generate is never silently counted as
@@ -76,7 +76,7 @@ impl Indexer {
         Ok(features)
     }
 
-    /// Write/update `.featureforge/docs/<slug>.md` for each feature via a
+    /// Write/update `.codeforge/docs/<slug>.md` for each feature via a
     /// concurrency-capped headless claude doc pass. This crate (not claude) writes
     /// the returned markdown to disk. Pinned features are skipped so human-edited
     /// docs survive verbatim. Emits `docs` progress per feature, then a terminal
@@ -248,6 +248,15 @@ mod tests {
             .join(DOCS_DIR)
             .join(format!("{}.md", features[0].slug));
         assert!(doc.is_file(), "expected a doc for the first feature");
+
+        // The reindex path also persists the content-hash manifest; mirror that
+        // here so a live cold start leaves the index reporting `fresh`.
+        let mut index = crate::FeatureIndex::load(tmp.path()).expect("load index");
+        index.merge_reindex(features.clone());
+        index.save().expect("save index");
+        index.write_meta().expect("write meta");
+        assert!(tmp.path().join(".codeforge/index-meta.json").is_file());
+        assert_eq!(crate::index_status(tmp.path()).unwrap().state, crate::IndexState::Fresh);
 
         drain.await.unwrap();
     }

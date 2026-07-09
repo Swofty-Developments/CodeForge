@@ -6,7 +6,7 @@
 //! (via [`ReindexQueue::pending`] + [`ReindexQueue::clear`]) to retroactively
 //! resolve the file→feature link instead of losing it forever.
 //!
-//! Storage: SQLite at `<repo>/.featureforge/runtime/reindex.db` — daemon-owned
+//! Storage: SQLite at `<repo>/.codeforge/runtime/reindex.db` — daemon-owned
 //! state, kept separate from the append-only timeline DB.
 
 use std::path::Path;
@@ -36,9 +36,9 @@ pub struct ReindexQueue {
 }
 
 impl ReindexQueue {
-    /// Open (creating if needed) `<repo>/.featureforge/runtime/reindex.db`.
+    /// Open (creating if needed) `<repo>/.codeforge/runtime/reindex.db`.
     pub fn open(repo_root: &Path) -> Result<Self> {
-        let runtime_dir = repo_root.join(".featureforge").join("runtime");
+        let runtime_dir = repo_root.join(".codeforge").join("runtime");
         std::fs::create_dir_all(&runtime_dir)?;
         let conn = Connection::open(runtime_dir.join("reindex.db"))?;
         conn.execute_batch(

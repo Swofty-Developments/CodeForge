@@ -68,6 +68,7 @@ mod tests {
             confidence: 0.5,
             pinned,
             color: None,
+            group: None,
             updated_at: Utc::now(),
         }
     }

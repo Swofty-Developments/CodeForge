@@ -75,6 +75,7 @@ fn feature(slug: &str, files: &[&str]) -> Feature {
         confidence: 1.0,
         pinned: false,
         color: None,
+        group: None,
         updated_at: Utc::now(),
     }
 }

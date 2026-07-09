@@ -51,7 +51,7 @@ export function FeatureDetail() {
   }
 
   const recent = createMemo(() => store.selectedFeatureTimeline.slice(0, RECENT_LIMIT));
-  // The living doc (.featureforge/docs/<slug>.md) is the single source of truth,
+  // The living doc (.codeforge/docs/<slug>.md) is the single source of truth,
   // written during indexing. Absent = "not indexed yet" (an honest empty state,
   // shown by the Show fallback below), never the description standing in for it.
   const livingDoc = createMemo(() => {
@@ -183,7 +183,7 @@ export function FeatureDetail() {
               </Show>
             </CollapsibleSection>
 
-            {/* ── Living doc — the generated .featureforge/docs/<slug>.md ── */}
+            {/* ── Living doc — the generated .codeforge/docs/<slug>.md ── */}
             <CollapsibleSection label="Living doc">
               <Show
                 when={livingDoc()}

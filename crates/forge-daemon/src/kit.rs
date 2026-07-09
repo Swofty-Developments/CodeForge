@@ -2,13 +2,13 @@
 //! clobbers user content:
 //!
 //! - `.claude/settings.json` — merge hooks: PostToolUse (Edit|Write|MultiEdit|
-//!   NotebookEdit|Bash), Stop, SessionStart → `.featureforge/hooks/forward.sh`.
-//! - `.mcp.json` — merge a `featureforge` stdio server → `~/.featureforge/bin/forge-mcp`.
+//!   NotebookEdit|Bash), Stop, SessionStart → `.codeforge/hooks/forward.sh`.
+//! - `.mcp.json` — merge a `codeforge` stdio server → `~/.codeforge/bin/forge-mcp`.
 //! - `CLAUDE.md` — append a marker-delimited section
-//!   (`<!-- featureforge:start -->` … `<!-- featureforge:end -->`) telling agents
+//!   (`<!-- codeforge:start -->` … `<!-- codeforge:end -->`) telling agents
 //!   to consult the feature index via MCP before exploring and to `record_note`
 //!   decisions. Re-installs replace only the marked section.
-//! - `.featureforge/` scaffold: `hooks/forward.sh` (0755) + `.gitignore` ignoring `runtime/`.
+//! - `.codeforge/` scaffold: `hooks/forward.sh` (0755) + `.gitignore` ignoring `runtime/`.
 
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,7 @@ pub struct KitReport {
 
 /// Install (or repair) the integration kit into `repo_root`. `mcp_bin_path` is
 /// where the `forge-mcp` binary was copied on app start
-/// (`~/.featureforge/bin/forge-mcp`).
+/// (`~/.codeforge/bin/forge-mcp`).
 pub fn install_kit(repo_root: &Path, mcp_bin_path: &Path) -> Result<KitReport> {
     let mut report = KitReport::default();
 
@@ -142,7 +142,7 @@ fn install_hooks_settings(repo_root: &Path, report: &mut KitReport) -> Result<bo
     write_json(&path, settings, report)
 }
 
-/// Merge `mcpServers.featureforge` into `.mcp.json`, preserving other servers.
+/// Merge `mcpServers.codeforge` into `.mcp.json`, preserving other servers.
 fn install_mcp_json(repo_root: &Path, mcp_bin_path: &Path, report: &mut KitReport) -> Result<bool> {
     let path = repo_root.join(".mcp.json");
     let mut root = read_json_object(&path)?;
@@ -157,14 +157,14 @@ fn install_mcp_json(repo_root: &Path, mcp_bin_path: &Path, report: &mut KitRepor
         "command": mcp_bin_path.to_string_lossy(),
         "args": [],
     });
-    if servers.get("featureforge") == Some(&desired) {
+    if servers.get("codeforge") == Some(&desired) {
         return Ok(false);
     }
-    servers.insert("featureforge".into(), desired);
+    servers.insert("codeforge".into(), desired);
     write_json(&path, root, report)
 }
 
-/// Where CLAUDE.md's FeatureForge markers stand — a named state, not a guess.
+/// Where CLAUDE.md's CodeForge markers stand — a named state, not a guess.
 enum MarkerState {
     /// Exactly one ordered START…END pair: replace the section in place.
     Healthy { start: usize, end: usize },
@@ -178,7 +178,7 @@ enum MarkerState {
 
 fn marker_state(text: &str) -> MarkerState {
     if text.matches(CLAUDE_MD_START).count() > 1 || text.matches(CLAUDE_MD_END).count() > 1 {
-        return MarkerState::Corrupt("duplicate FeatureForge markers");
+        return MarkerState::Corrupt("duplicate CodeForge markers");
     }
     match (text.find(CLAUDE_MD_START), text.find(CLAUDE_MD_END)) {
         (None, None) => MarkerState::Absent,
@@ -188,7 +188,7 @@ fn marker_state(text: &str) -> MarkerState {
     }
 }
 
-/// Strip every FeatureForge-marked region (and any stray marker) so a corrupt
+/// Strip every CodeForge-marked region (and any stray marker) so a corrupt
 /// file converges to exactly one clean section once re-appended.
 fn strip_ff_markers(text: &str) -> String {
     let mut out = text.to_string();
@@ -202,7 +202,7 @@ fn strip_ff_markers(text: &str) -> String {
     out.replace(CLAUDE_MD_START, "").replace(CLAUDE_MD_END, "")
 }
 
-/// Append or replace the marker-delimited FeatureForge section of CLAUDE.md.
+/// Append or replace the marker-delimited CodeForge section of CLAUDE.md.
 /// Explicit about each marker state so re-installs never duplicate the section.
 fn install_claude_md(repo_root: &Path, report: &mut KitReport) -> Result<bool> {
     let path = repo_root.join("CLAUDE.md");
@@ -230,7 +230,7 @@ fn install_claude_md(repo_root: &Path, report: &mut KitReport) -> Result<bool> {
             tracing::warn!(
                 reason,
                 path = %path.display(),
-                "CLAUDE.md FeatureForge markers are corrupt; repairing"
+                "CLAUDE.md CodeForge markers are corrupt; repairing"
             );
             append_to(&strip_ff_markers(&existing))
         }
@@ -238,9 +238,9 @@ fn install_claude_md(repo_root: &Path, report: &mut KitReport) -> Result<bool> {
     write_if_changed(&path, &updated, report)
 }
 
-/// `.featureforge/` scaffold: hooks/forward.sh (0755), .gitignore, dirs.
+/// `.codeforge/` scaffold: hooks/forward.sh (0755), .gitignore, dirs.
 fn install_scaffold(repo_root: &Path, report: &mut KitReport) -> Result<bool> {
-    let ff = repo_root.join(".featureforge");
+    let ff = repo_root.join(".codeforge");
     let mut changed = !ff.exists();
     std::fs::create_dir_all(ff.join("runtime"))?;
     std::fs::create_dir_all(ff.join("docs"))?;

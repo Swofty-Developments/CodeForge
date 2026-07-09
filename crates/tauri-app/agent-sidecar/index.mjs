@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * FeatureForge Agent Sidecar
+ * CodeForge Agent Sidecar
  *
  * Node.js process that wraps the @anthropic-ai/claude-agent-sdk `query()` function.
  * Communicates with the Rust backend (forge-session) via NDJSON over stdin/stdout.

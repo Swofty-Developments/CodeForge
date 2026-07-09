@@ -3,7 +3,7 @@
 //!
 //! The daemon runs as an in-process tokio task inside the Tauri app but is
 //! reachable externally: axum bound to `127.0.0.1:0`, actual port written to
-//! `<repo>/.featureforge/runtime/daemon.json` (`{port, pid, started_at}`).
+//! `<repo>/.codeforge/runtime/daemon.json` (`{port, pid, started_at}`).
 
 mod hooks;
 mod http;
@@ -81,14 +81,14 @@ pub struct Daemon;
 
 impl Daemon {
     /// Bind axum to `127.0.0.1:0`, serve [`build_router`], write
-    /// `.featureforge/runtime/daemon.json`, and return the handle with the
+    /// `.codeforge/runtime/daemon.json`, and return the handle with the
     /// actual port.
     pub async fn start(repo_root: &Path, deps: DaemonDeps) -> Result<DaemonHandle> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();
         let started_at = chrono::Utc::now();
 
-        let runtime_dir = repo_root.join(".featureforge").join("runtime");
+        let runtime_dir = repo_root.join(".codeforge").join("runtime");
         std::fs::create_dir_all(&runtime_dir)?;
         let daemon_json = runtime_dir.join("daemon.json");
         let manifest = serde_json::json!({
@@ -118,7 +118,7 @@ impl Daemon {
             }
         });
 
-        tracing::info!(port, "featureforge daemon listening");
+        tracing::info!(port, "codeforge daemon listening");
         Ok(DaemonHandle {
             port,
             shutdown_tx: Some(shutdown_tx),

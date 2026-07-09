@@ -1,4 +1,4 @@
-//! forge-core — shared domain types + errors for FeatureForge. No IO.
+//! forge-core — shared domain types + errors for CodeForge. No IO.
 //!
 //! # IPC serde contract
 //!

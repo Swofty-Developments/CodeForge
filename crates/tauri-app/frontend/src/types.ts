@@ -25,6 +25,8 @@ export interface Feature {
   pinned: boolean;
   /** User-set graph color (hex like "#74ade8"). Undefined = default per-slug hue. */
   color?: string;
+  /** Hierarchy group (slash-delimited path the sidebar nests by). */
+  group?: string;
   updatedAt: string; // RFC3339
 }
 
@@ -125,6 +127,37 @@ export interface IndexProgress {
   detail: string;
   done: number;
   total: number;
+}
+
+// ── Index staleness / versioning (FZ-2) ─────────────────────────────────────
+
+/** Whether a repo's on-disk feature index is current. Four named states, never a
+ *  guessed default: `never` = no index yet; `fresh` = hashes + version match;
+ *  `stale` = some indexed files' content changed outside CodeForge (e.g. a git
+ *  pull); `outdated` = stored indexVersion < the current index format. */
+export interface IndexStatus {
+  state: "never" | "fresh" | "stale" | "outdated";
+  changedFiles: string[];
+  indexVersion: number;
+  currentVersion: number;
+}
+
+// ── Embedded terminals (FZ-3) ───────────────────────────────────────────────
+
+/** A live PTY as reported by list_terminals. */
+export interface TerminalInfo {
+  id: string;
+  cwd: string;
+  title: string;
+}
+
+/** A terminal tab in the bottom panel. `cwd` is bound at open time to the active
+ *  worktree; `exited` flips true when the child process ends (terminal:exit). */
+export interface TerminalTab {
+  id: string;
+  title: string;
+  cwd: string;
+  exited: boolean;
 }
 
 // ── Worktrees (W2 frozen forge-core mirror) ─────────────────────────────────

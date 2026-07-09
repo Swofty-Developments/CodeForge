@@ -116,13 +116,18 @@ async fn run_indexed(
         .map_err(|e| e.to_string())?;
 
     // Merge (pinned survive) then persist. A failed save means the reindex is not
-    // durable — surface it rather than proceeding to a clean completion.
+    // durable — surface it rather than proceeding to a clean completion. The
+    // content-hash manifest (FZ-2) is rewritten over the MERGED set so a fresh
+    // index reports `fresh`; a failed meta write is a non-durable reindex too.
     {
         let mut index = ctx.index.write().await;
         index.merge_reindex(features.clone());
         index
             .save()
             .map_err(|e| format!("failed to save feature index: {e}"))?;
+        index
+            .write_meta()
+            .map_err(|e| format!("failed to write index meta: {e}"))?;
     }
 
     let report = Indexer::write_feature_docs(&ctx.repo_root, &features, progress_tx.clone())

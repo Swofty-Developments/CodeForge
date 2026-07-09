@@ -90,11 +90,11 @@ worktree /repo/main
 HEAD aaaa1111
 branch refs/heads/main
 
-worktree /repo/.featureforge-worktrees/feat
+worktree /repo/.codeforge-worktrees/feat
 HEAD bbbb2222
 branch refs/heads/feat
 
-worktree /repo/.featureforge-worktrees/loose
+worktree /repo/.codeforge-worktrees/loose
 HEAD cccc3333
 detached
 ";

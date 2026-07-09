@@ -1,7 +1,7 @@
-//! Keep `~/.featureforge/bin/forge-mcp` current with the built binary.
+//! Keep `~/.codeforge/bin/forge-mcp` current with the built binary.
 //!
 //! The MCP proxy is registered in every repo's `.mcp.json` pointing at the copy
-//! under `~/.featureforge/bin`. On app start we locate the freshly built binary
+//! under `~/.codeforge/bin`. On app start we locate the freshly built binary
 //! (sibling of the running exe in dev, or a `target/{debug,release}/forge-mcp`
 //! while walking up) and copy it over when newer.
 
@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 
 const MCP_BIN: &str = "forge-mcp";
 
-/// Ensure `~/.featureforge/bin/forge-mcp` reflects the built binary and return
+/// Ensure `~/.codeforge/bin/forge-mcp` reflects the built binary and return
 /// its path. Returns `Ok(path)` only when a usable binary is present there — a
 /// freshly copied build or a valid pre-existing copy. When no source can be
 /// found and no existing copy exists, returns `Err` so `open_repo` surfaces
 /// "MCP integration unavailable" instead of registering a path to nothing.
 pub fn ensure_mcp_binary() -> anyhow::Result<PathBuf> {
-    let dest_dir = home_dir()?.join(".featureforge").join("bin");
+    let dest_dir = home_dir()?.join(".codeforge").join("bin");
     std::fs::create_dir_all(&dest_dir)?;
     let dest = dest_dir.join(MCP_BIN);
 

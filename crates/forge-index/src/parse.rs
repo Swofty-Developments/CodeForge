@@ -1,7 +1,7 @@
 //! Parsing + validation of the feature JSON returned by headless `claude`.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use forge_core::{Feature, FeatureFile, FileRole};
@@ -25,6 +25,10 @@ pub(crate) struct RawFeature {
     pub tags: Vec<String>,
     #[serde(default)]
     pub confidence: f32,
+    /// Hierarchy path (slash-delimited) the model may assign, e.g. a crate name
+    /// or "layer/module". Blank/absent → derived by [`derive_group`].
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +111,8 @@ pub(crate) fn validate_features(repo_root: &Path, raw: Vec<RawFeature>) -> Resul
             tracing::warn!(slug = %slug, "dropping feature with no existing files");
             continue;
         }
+        let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+        let group = resolve_group(feature.group.as_deref(), &entry_points, &file_paths);
         features.push(Feature {
             slug,
             name: feature.name,
@@ -117,6 +123,7 @@ pub(crate) fn validate_features(repo_root: &Path, raw: Vec<RawFeature>) -> Resul
             confidence: clamp_confidence(feature.confidence),
             pinned: false,
             color: None,
+            group,
             updated_at: now,
         });
     }
@@ -140,6 +147,77 @@ fn clamp_path(repo_root: &Path, canonical_root: &Path, path: &Path) -> Option<Pa
         return None;
     }
     canonical.strip_prefix(canonical_root).ok().map(Path::to_path_buf)
+}
+
+/// A feature's hierarchy group: the model's value when it supplied a non-blank
+/// one (trimmed of surrounding whitespace and `/`), otherwise the deterministic
+/// [`derive_group`] rule. This is not a fallback — a present model value is used
+/// as-is and an absent one triggers a single named derivation rule.
+fn resolve_group(model: Option<&str>, entry_points: &[PathBuf], files: &[PathBuf]) -> Option<String> {
+    let cleaned = model
+        .map(|g| g.trim().trim_matches('/').to_string())
+        .filter(|g| !g.is_empty());
+    cleaned.or_else(|| derive_group(entry_points, files))
+}
+
+/// Deterministic group-derivation rule (a NAMED rule, not a fallback): the group
+/// is the top-level directory segment shared by ALL of a feature's files
+/// (entry_points ∪ files). In a monorepo whose shared top segment is `crates` or
+/// `packages`, descend one level and use the crate/package name — so files all
+/// under `crates/forge-index/**` derive to `"forge-index"`. Files that share no
+/// common top-level directory (spread across the repo, or sitting at the repo
+/// root) derive to `None` → the sidebar's "Ungrouped" bucket.
+fn derive_group(entry_points: &[PathBuf], files: &[PathBuf]) -> Option<String> {
+    let dirs: Vec<Vec<String>> = entry_points
+        .iter()
+        .chain(files.iter())
+        .map(|p| dir_components(p))
+        .collect();
+    if dirs.is_empty() {
+        return None;
+    }
+    let shared = common_prefix(&dirs);
+    let first = shared.first()?;
+    if (first == "crates" || first == "packages") && shared.len() >= 2 {
+        Some(shared[1].clone())
+    } else {
+        Some(first.clone())
+    }
+}
+
+/// The parent-directory components of a repo-relative path (`Normal` components
+/// only, filename dropped). A root-level file yields an empty vec.
+fn dir_components(path: &Path) -> Vec<String> {
+    let mut comps: Vec<String> = path
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    comps.pop(); // drop the filename
+    comps
+}
+
+/// Longest common leading component sequence across all lists (empty if any
+/// list is empty or they diverge at the first component).
+fn common_prefix(lists: &[Vec<String>]) -> Vec<String> {
+    let Some(first) = lists.first() else {
+        return Vec::new();
+    };
+    let mut len = first.len();
+    for list in &lists[1..] {
+        let shared = first
+            .iter()
+            .zip(list.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        len = len.min(shared);
+        if len == 0 {
+            break;
+        }
+    }
+    first[..len].to_vec()
 }
 
 fn sanitize_slug(raw: &str) -> String {
@@ -257,6 +335,83 @@ mod tests {
         assert_eq!(parse_role(Some("tests")), FileRole::Test);
         // A non-empty string we don't recognise is its own Unknown state.
         assert_eq!(parse_role(Some("whatever")), FileRole::Unknown);
+    }
+
+    fn bufs(paths: &[&str]) -> Vec<PathBuf> {
+        paths.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn derive_group_collapses_monorepo_crate_to_leaf() {
+        // All files under crates/forge-index/** → the crate leaf.
+        let g = derive_group(
+            &bufs(&["crates/forge-index/src/lib.rs"]),
+            &bufs(&["crates/forge-index/src/parse.rs", "crates/forge-index/Cargo.toml"]),
+        );
+        assert_eq!(g.as_deref(), Some("forge-index"));
+        // packages/<x> collapses the same way.
+        assert_eq!(
+            derive_group(&[], &bufs(&["packages/web/src/app.ts", "packages/web/index.html"]))
+                .as_deref(),
+            Some("web")
+        );
+    }
+
+    #[test]
+    fn derive_group_uses_top_segment_off_the_monorepo_path() {
+        // A plain top-level directory is the group verbatim.
+        assert_eq!(
+            derive_group(&[], &bufs(&["src/auth/mod.rs", "src/auth/session.rs"])).as_deref(),
+            Some("src")
+        );
+    }
+
+    #[test]
+    fn derive_group_is_none_when_no_shared_top_dir() {
+        // Root-only files share no directory.
+        assert_eq!(derive_group(&[], &bufs(&["Cargo.toml", "README.md"])), None);
+        // A root file mixed with a src file kills the shared prefix.
+        assert_eq!(derive_group(&bufs(&["Cargo.toml"]), &bufs(&["src/lib.rs"])), None);
+        // Divergent top-level dirs → no shared segment.
+        assert_eq!(derive_group(&[], &bufs(&["src/a.rs", "docs/b.md"])), None);
+    }
+
+    #[test]
+    fn resolve_group_prefers_model_value_over_derivation() {
+        // A non-blank model group wins verbatim (surrounding whitespace/slashes trimmed).
+        assert_eq!(
+            resolve_group(Some("  /backend/api/  "), &[], &bufs(&["crates/x/lib.rs"])).as_deref(),
+            Some("backend/api")
+        );
+        // A blank model group falls through to the derivation rule.
+        assert_eq!(
+            resolve_group(Some("   "), &[], &bufs(&["crates/x/lib.rs"])).as_deref(),
+            Some("x")
+        );
+        assert_eq!(resolve_group(None, &[], &bufs(&["src/x.rs"])).as_deref(), Some("src"));
+    }
+
+    #[test]
+    fn validate_populates_group_from_model_and_derivation() {
+        let tmp = TempDir::new("group");
+        tmp.write("crates/forge-index/src/lib.rs", "fn a() {}");
+        tmp.write("src/auth/mod.rs", "fn b() {}");
+
+        let raw = parse_features(
+            r#"[
+              {"slug":"derived","name":"Derived",
+               "files":[{"path":"crates/forge-index/src/lib.rs","role":"core"}]},
+              {"slug":"explicit","name":"Explicit","group":"backend/auth",
+               "files":[{"path":"src/auth/mod.rs","role":"core"}]}
+            ]"#,
+        )
+        .expect("parse");
+        let features = validate_features(tmp.path(), raw).expect("validate");
+
+        let derived = features.iter().find(|f| f.slug == "derived").unwrap();
+        assert_eq!(derived.group.as_deref(), Some("forge-index"));
+        let explicit = features.iter().find(|f| f.slug == "explicit").unwrap();
+        assert_eq!(explicit.group.as_deref(), Some("backend/auth"));
     }
 
     #[test]

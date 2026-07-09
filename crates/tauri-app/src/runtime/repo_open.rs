@@ -9,19 +9,30 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use forge_core::RepoState;
+use forge_core::{RepoState, TimelineEvent};
 use forge_daemon::{Daemon, DaemonDeps};
 use forge_index::FeatureIndex;
 use forge_timeline::TimelineStore;
+use serde::Serialize;
 use tauri::Emitter;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::RwLock;
 
 use crate::db::Database;
 use crate::runtime::indexing::{self, ReindexCtx};
-use crate::runtime::{mcp, repo_util};
+use crate::runtime::{mcp, repo_util, staleness};
 use crate::state::{AppState, RepoRuntime};
 use crate::{events, queries};
+
+/// `timeline:event` payload (FZ-5): the emitting context's canonical repo path
+/// plus the event, so the frontend appends a LIVE event only to its active
+/// context and never leaks it across worktrees.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TimelineEventEnvelope<'a> {
+    repo_path: &'a Path,
+    event: &'a TimelineEvent,
+}
 
 /// Open `root` as a repo context: idempotent for an already-open repo, otherwise
 /// install the kit, open timeline + index, start the daemon, upsert the repos
@@ -93,11 +104,17 @@ pub async fn open_context(
     // Subscribe before spawning so events between open and first poll aren't lost.
     let mut rx = timeline.subscribe();
     let app_fwd = app.clone();
+    // FZ-5: tag each live event with THIS context's canonical path so the
+    // frontend appends it only to the active context (no cross-worktree leak).
+    let fwd_root = root.clone();
     let forwarder_task = tokio::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    let _ = app_fwd.emit(events::TIMELINE_EVENT, &event);
+                    let _ = app_fwd.emit(
+                        events::TIMELINE_EVENT,
+                        TimelineEventEnvelope { repo_path: &fwd_root, event: &event },
+                    );
                 }
                 Err(RecvError::Lagged(n)) => tracing::warn!("timeline forwarder lagged {n} events"),
                 Err(RecvError::Closed) => break,
@@ -145,6 +162,10 @@ pub async fn open_context(
     repo_state.indexed_at = indexed_at; // CONTRACT-3: DB is source of truth
     repo_state.branch = forge_git::current_branch(&root).await.map_err(|e| e.to_string())?;
     let _ = app.emit(events::REPO_CHANGED, &repo_state);
+
+    // FZ-2: after opening, push the on-disk staleness/version verdict so the UI
+    // can prompt a re-index. Never auto-reindexes — the UI decides.
+    staleness::emit_status(&app, &root).await;
     Ok(repo_state)
 }
 

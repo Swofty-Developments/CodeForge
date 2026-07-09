@@ -1,5 +1,5 @@
 {
-  "name": "featureforge-agent-sidecar",
+  "name": "codeforge-agent-sidecar",
   "private": true,
   "type": "module",
   "dependencies": {

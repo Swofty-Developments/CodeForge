@@ -1,5 +1,5 @@
 //! Parsing of Claude Code hook payloads (stdin JSON forwarded by
-//! `.featureforge/hooks/forward.sh`) into timeline events.
+//! `.codeforge/hooks/forward.sh`) into timeline events.
 
 use std::path::PathBuf;
 

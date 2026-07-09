@@ -1,8 +1,9 @@
 use forge_core::{Actor, EventKind, Feature, FeaturePatch};
+use forge_index::IndexStatus;
 use forge_timeline::NewEvent;
 use tauri::State;
 
-use crate::runtime::{feature_color, repo_util};
+use crate::runtime::{feature_color, repo_util, staleness};
 use crate::state::AppState;
 
 /// All features of an open repo (sidebar feature tree).
@@ -30,7 +31,7 @@ pub async fn get_feature(
         .ok_or_else(|| format!("unknown feature: {slug}"))
 }
 
-/// The living doc markdown for a feature (`.featureforge/docs/<slug>.md`), or
+/// The living doc markdown for a feature (`.codeforge/docs/<slug>.md`), or
 /// `None` if it has not been generated yet. Feature detail renders this above
 /// the description.
 #[tauri::command]
@@ -43,6 +44,17 @@ pub async fn get_feature_doc(
     let index = state.index(&root).await.ok_or("repo is not open")?;
     let guard = index.read().await;
     guard.read_doc(&slug).map_err(|e| format!("{e}"))
+}
+
+/// On-disk index staleness + version verdict (FZ-2). Pure: reads
+/// `.codeforge/features.json` + `index-meta.json` and re-hashes the manifest
+/// files; never re-indexes. The UI polls this (and listens for `index:status`)
+/// to decide whether to prompt a re-index. Works whether or not the repo is
+/// open — the state lives on disk.
+#[tauri::command]
+pub async fn index_status(repo_path: String) -> Result<IndexStatus, String> {
+    let root = repo_util::canonical(&repo_path)?;
+    staleness::compute(root).await
 }
 
 /// Pin/unpin a feature (pinned features survive re-index verbatim). Appends a

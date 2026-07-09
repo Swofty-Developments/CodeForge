@@ -1,8 +1,8 @@
-//! forge-mcp — MCP stdio server proxying to the per-repo FeatureForge daemon.
+//! forge-mcp — MCP stdio server proxying to the per-repo CodeForge daemon.
 //!
 //! Hand-rolled JSON-RPC 2.0 over stdio (initialize, tools/list, tools/call).
 //! Discovers the daemon by walking up from cwd looking for
-//! `.featureforge/runtime/daemon.json`, then proxies tool calls to its HTTP API.
+//! `.codeforge/runtime/daemon.json`, then proxies tool calls to its HTTP API.
 //!
 //! Tool surface (frozen contract):
 //! - `list_features` ()
@@ -16,12 +16,12 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-/// Repo isn't tracked by FeatureForge (no manifest) — the user should open it.
+/// Repo isn't tracked by CodeForge (no manifest) — the user should open it.
 const MSG_NO_MANIFEST: &str =
-    "FeatureForge is not tracking this repo yet — open it in FeatureForge.";
+    "CodeForge is not tracking this repo yet — open it in CodeForge.";
 /// A manifest exists but the daemon is corrupt/unreachable — reopen the repo.
 const MSG_STALE: &str =
-    "FeatureForge is not reachable — the app exited uncleanly; reopen the repo in FeatureForge.";
+    "CodeForge is not reachable — the app exited uncleanly; reopen the repo in CodeForge.";
 
 fn main() {
     let stdin = std::io::stdin();
@@ -54,7 +54,7 @@ fn main() {
                     "result": {
                         "protocolVersion": version,
                         "capabilities": { "tools": {} },
-                        "serverInfo": { "name": "featureforge", "version": env!("CARGO_PKG_VERSION") }
+                        "serverInfo": { "name": "codeforge", "version": env!("CARGO_PKG_VERSION") }
                     }
                 })
             }
@@ -151,7 +151,7 @@ fn handle_tool_call(params: &Value) -> Result<Value, Value> {
 enum DaemonLocation {
     /// Repo root has a manifest advertising a usable `port`.
     Port(u16),
-    /// A FeatureForge repo (`.featureforge/` present) with no daemon manifest —
+    /// A CodeForge repo (`.codeforge/` present) with no daemon manifest —
     /// never opened, or not currently open.
     NoManifest,
     /// Manifest present but corrupt/portless — the app exited uncleanly.
@@ -171,7 +171,7 @@ enum ProxyOutcome {
 }
 
 /// Walk up from cwd, stopping at the FIRST ancestor that contains a
-/// `.featureforge/` dir — that IS this repo's root. Its manifest alone decides
+/// `.codeforge/` dir — that IS this repo's root. Its manifest alone decides
 /// the state; we never walk past a corrupt/portless manifest into a parent
 /// repo's daemon (which would silently answer for the wrong repo).
 fn discover_daemon() -> DaemonLocation {
@@ -179,10 +179,10 @@ fn discover_daemon() -> DaemonLocation {
         return DaemonLocation::NoManifest;
     };
     for dir in cwd.ancestors() {
-        if !dir.join(".featureforge").is_dir() {
+        if !dir.join(".codeforge").is_dir() {
             continue;
         }
-        let manifest: PathBuf = dir.join(".featureforge").join("runtime").join("daemon.json");
+        let manifest: PathBuf = dir.join(".codeforge").join("runtime").join("daemon.json");
         let Ok(text) = std::fs::read_to_string(&manifest) else {
             return DaemonLocation::NoManifest;
         };
@@ -250,7 +250,7 @@ fn tool_definitions() -> Value {
     json!([
         {
             "name": "list_features",
-            "description": "List all features of this repository from the FeatureForge index.",
+            "description": "List all features of this repository from the CodeForge index.",
             "inputSchema": { "type": "object", "properties": {}, "required": [] }
         },
         {

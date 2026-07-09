@@ -33,9 +33,10 @@ fn seed_features_json(repo: &Path) {
         confidence: 0.9,
         pinned: false,
         color: None,
+        group: None,
         updated_at: Utc::now(),
     }];
-    let dir = repo.join(".featureforge");
+    let dir = repo.join(".codeforge");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("features.json"),
@@ -66,7 +67,7 @@ async fn hook_post_lands_classified_timeline_row() {
 
     // daemon.json advertises the bound port.
     let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(repo.join(".featureforge/runtime/daemon.json")).unwrap(),
+        &std::fs::read_to_string(repo.join(".codeforge/runtime/daemon.json")).unwrap(),
     )
     .unwrap();
     assert_eq!(manifest["port"].as_u64().unwrap() as u16, handle.port);
@@ -111,7 +112,7 @@ async fn hook_post_lands_classified_timeline_row() {
 
     handle.shutdown().await;
     assert!(
-        !repo.join(".featureforge/runtime/daemon.json").exists(),
+        !repo.join(".codeforge/runtime/daemon.json").exists(),
         "daemon.json removed on shutdown"
     );
 }
@@ -123,7 +124,7 @@ async fn daemon_drains_spooled_payloads_on_start() {
     seed_features_json(repo);
 
     // Simulate forward.sh having spooled a payload while the app was closed.
-    let spool = repo.join(".featureforge/runtime/spool");
+    let spool = repo.join(".codeforge/runtime/spool");
     std::fs::create_dir_all(&spool).unwrap();
     let edited = repo.join("src/auth/mod.rs");
     std::fs::write(

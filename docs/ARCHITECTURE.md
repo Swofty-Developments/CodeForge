@@ -1,15 +1,15 @@
-# FeatureForge — Architecture Spec (v1)
+# CodeForge — Architecture Spec (v1)
 
 **One-liner:** An IDE built off of Claude Code. You open a repository and see *features*, not files. A local
 daemon keeps a feature index + append-only timeline, fed by Claude Code hooks and consumed by agents via MCP.
 Modeled on CodeForge (same author) for app architecture + design language; styled per Zed One Dark.
 
-Repo: `~/DeveloperPersonal/FeatureForge`. All product decisions below are FINAL unless a brief contradicts
+Repo: `~/DeveloperPersonal/CodeForge`. All product decisions below are FINAL unless a brief contradicts
 a technical assumption (versions, protocol details) — in that case the brief wins.
 
 ## Product loop (the demo that must work)
 
-1. Open a repo → FeatureForge installs its integration kit + runs cold-start indexing (headless `claude -p`).
+1. Open a repo → CodeForge installs its integration kit + runs cold-start indexing (headless `claude -p`).
 2. Sidebar shows the **feature tree** (not files). Click a feature → docs, key files, recent changes.
 3. Ask for work in the embedded **Claude Code pane** (real `claude` process, stream-json).
 4. Hooks (PostToolUse/Stop) fire → daemon classifies changes → **timeline** updates live.
@@ -19,7 +19,7 @@ a technical assumption (versions, protocol details) — in that case the brief w
 ## Workspace layout
 
 ```
-FeatureForge/
+CodeForge/
 ├── Cargo.toml                      # workspace, resolver=2, same dep style as CodeForge
 ├── crates/
 │   ├── forge-core/                 # shared domain types + errors (serde). No IO.
@@ -67,13 +67,13 @@ pub enum EventKind { SessionStarted, SessionEnded, FileEdited, CommandRun, Tests
     IndexStarted, IndexCompleted, FeaturePinned, FeatureEdited, Note }
 ```
 
-Index on disk (per repo): `.featureforge/features.json` (committable, human-readable),
-`.featureforge/docs/<slug>.md` (per-feature living doc), `.featureforge/runtime/` (gitignored):
+Index on disk (per repo): `.codeforge/features.json` (committable, human-readable),
+`.codeforge/docs/<slug>.md` (per-feature living doc), `.codeforge/runtime/` (gitignored):
 `timeline.db`, `daemon.json` `{port, pid, started_at}`.
 
 ## Daemon (in-process tokio task inside the Tauri app, but reachable externally)
 
-axum on `127.0.0.1:0` (ephemeral) → writes actual port to `.featureforge/runtime/daemon.json` per open repo.
+axum on `127.0.0.1:0` (ephemeral) → writes actual port to `.codeforge/runtime/daemon.json` per open repo.
 Routes:
 - `POST /hooks/event` — receives Claude Code hook payloads (hook JSON piped by installed hook script).
   Fire-and-forget from the hook's perspective. Daemon: parse → append raw TimelineEvent → async classify
@@ -86,13 +86,13 @@ Routes:
 
 **Integration kit** (installed into a repo on open; idempotent; never clobbers user content):
 - `.claude/settings.json` — merge in hooks: PostToolUse(Edit|Write|MultiEdit|NotebookEdit → forward to
-  daemon via `.featureforge/hooks/forward.sh`), Stop, SessionStart. Script reads port from daemon.json,
+  daemon via `.codeforge/hooks/forward.sh`), Stop, SessionStart. Script reads port from daemon.json,
   `curl --max-time 2 ... || true` (no-op when app closed).
-- `.mcp.json` — merge `featureforge` stdio server → `~/.featureforge/bin/forge-mcp` (binary copied there
+- `.mcp.json` — merge `codeforge` stdio server → `~/.codeforge/bin/forge-mcp` (binary copied there
   on app start).
-- `CLAUDE.md` — append a fenced, marker-delimited section (`<!-- featureforge:start/end -->`) telling the
+- `CLAUDE.md` — append a fenced, marker-delimited section (`<!-- codeforge:start/end -->`) telling the
   agent to consult the feature index via MCP before exploring, and to `record_note` decisions.
-- `.featureforge/` scaffold + `.gitignore` for runtime/.
+- `.codeforge/` scaffold + `.gitignore` for runtime/.
 
 ## Indexing (forge-index)
 
@@ -168,11 +168,11 @@ peek + "open in editor" only) · cloud anything · Windows/Linux polish (macOS f
 
 ## Persistence (per app-architecture brief)
 
-App-level DB `~/.featureforge/featureforge.db`: rusqlite 0.31 `features=["bundled"]`, single connection in
+App-level DB `~/.codeforge/codeforge.db`: rusqlite 0.31 `features=["bundled"]`, single connection in
 `Arc<std::sync::Mutex<Database>>` managed state, PRAGMA journal_mode=WAL + foreign_keys=ON +
 synchronous=NORMAL + busy_timeout=5000, hand-written idempotent migrations (column_exists PRAGMA guard).
 Tables: repos, threads, messages, sessions (claude_session_id for resume), settings KV, usage_logs.
-Per-repo timeline DB `.featureforge/runtime/timeline.db` (owned by forge-timeline, same pragmas).
+Per-repo timeline DB `.codeforge/runtime/timeline.db` (owned by forge-timeline, same pragmas).
 Tauri 2.10.x + plugins: dialog, shell, process. Capabilities: core:default, dialog:default, shell:default,
 core:event:default. Window 1200x800 min 800x500. All commands `Result<T, String>`; IDs cross IPC as
 Strings (typed newtype parse Rust-side).

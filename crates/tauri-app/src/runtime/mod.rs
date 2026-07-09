@@ -6,4 +6,5 @@ pub mod mcp;
 pub mod repo_open;
 pub mod repo_util;
 pub mod session_forward;
+pub mod staleness;
 pub mod worktree_fs;

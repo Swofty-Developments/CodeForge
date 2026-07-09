@@ -6,26 +6,14 @@
 import { For, Show, createEffect, createMemo } from "solid-js";
 import { appStore } from "../stores/app-store";
 import { FeatureRow } from "./sidebar/FeatureRow";
-import { latestActivity, markSeen, seen, sortFeatures, unseenCounts } from "./sidebar/activity";
-import { createNow, formatAgo } from "./sidebar/time";
-import type { DaemonState } from "../types";
-
-/** Hover title per named daemon state; `unknown` surfaces the probe error. */
-function daemonTitle(d: DaemonState | null): string {
-  if (!d) return "daemon: no repo";
-  switch (d.kind) {
-    case "running":
-      return d.port != null ? `daemon on :${d.port}` : "daemon on";
-    case "offline":
-      return "daemon offline";
-    case "unknown":
-      return `daemon status unknown: ${d.error}`;
-  }
-}
+import { GroupNode, type TreeCtx } from "./sidebar/GroupNode";
+import { buildFeatureTree, ungroupedNode } from "./sidebar/tree";
+import { latestActivity, markSeen, seen, unseenCounts } from "./sidebar/activity";
+import { injectTreeStyles } from "./sidebar/tree-styles";
 
 export function Sidebar() {
+  injectTreeStyles();
   const { store } = appStore;
-  const now = createNow();
 
   const maxEventId = () => store.timeline.reduce((m, e) => Math.max(m, e.id), 0);
 
@@ -38,45 +26,30 @@ export function Sidebar() {
     }
   });
 
-  const ordered = createMemo(() => sortFeatures(store.features, latestActivity(store.timeline)));
+  const tree = createMemo(() => buildFeatureTree(store.features, latestActivity(store.timeline)));
   const activity = createMemo(() => unseenCounts(store.timeline, seen));
+  const hasFeatures = () => tree().roots.length > 0 || tree().ungrouped.length > 0;
 
   function onSelect(slug: string): void {
     markSeen(slug, maxEventId());
     appStore.openFeatureDetail(slug);
   }
 
-  const daemonKind = () => store.daemon?.kind;
-  const indexing = () => !!store.indexProgress;
+  const treeCtx: TreeCtx = {
+    activity: (slug) => activity().get(slug) ?? 0,
+    selected: () => store.selectedFeature,
+    onSelect,
+    onTogglePin: (slug, pinned) => void appStore.pinFeature(slug, pinned),
+  };
 
   return (
     <div class="sidebar" style={{ width: `${store.sidebarWidth}px` }}>
       <div class="sidebar-header">
         <div class="sb-repo-line">
           <span class="sb-repo-name" title={store.repo?.path ?? undefined}>
-            {store.repo ? store.repo.name : "FeatureForge"}
+            {store.repo ? store.repo.name : "CodeForge"}
           </span>
-          <Show when={store.repo}>
-            <span
-              class="status-dot"
-              classList={{
-                "status-dot--busy": indexing(),
-                "status-dot--ready": !indexing() && daemonKind() === "running",
-                "status-dot--error": !indexing() && daemonKind() === "offline",
-                "status-dot--waiting": !indexing() && daemonKind() === "unknown",
-              }}
-              title={daemonTitle(store.daemon)}
-            />
-          </Show>
         </div>
-        <Show when={store.repo}>
-          <div class="sb-meta">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
-              <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" />
-            </svg>
-            <span>{formatAgo(store.repo!.indexedAt, now())}</span>
-          </div>
-        </Show>
       </div>
 
       <div class="section-label sb-section-label">Features</div>
@@ -92,51 +65,45 @@ export function Sidebar() {
           }
         >
           <Show
-            when={ordered().length > 0}
+            when={hasFeatures()}
             fallback={<div class="sb-blank"><span class="sb-blank-sub">No features indexed yet.</span></div>}
           >
-            <For each={ordered()}>
-              {(feature, i) => (
-                <FeatureRow
-                  feature={feature}
-                  active={store.selectedFeature === feature.slug}
-                  activity={activity().get(feature.slug) ?? 0}
-                  index={i()}
-                  onSelect={onSelect}
-                  onTogglePin={(slug, pinned) => void appStore.pinFeature(slug, pinned)}
-                />
-              )}
-            </For>
+            {/* Grouped features nest under group headers; ungrouped features go
+                under an "Ungrouped" header only when real groups exist, else they
+                render flat (an all-ungrouped repo shouldn't grow a lone header). */}
+            <Show
+              when={tree().roots.length > 0}
+              fallback={
+                <For each={tree().ungrouped}>
+                  {(feature, i) => (
+                    <FeatureRow
+                      feature={feature}
+                      active={store.selectedFeature === feature.slug}
+                      activity={activity().get(feature.slug) ?? 0}
+                      index={i()}
+                      onSelect={onSelect}
+                      onTogglePin={(slug, pinned) => void appStore.pinFeature(slug, pinned)}
+                    />
+                  )}
+                </For>
+              }
+            >
+              <For each={tree().roots}>
+                {(node) => <GroupNode node={node} ctx={treeCtx} />}
+              </For>
+              <Show when={tree().ungrouped.length > 0}>
+                <GroupNode node={ungroupedNode(tree().ungrouped)} ctx={treeCtx} />
+              </Show>
+            </Show>
           </Show>
         </Show>
       </div>
 
-      <div class="sidebar-footer">
-        <Show
-          when={store.indexProgress}
-          fallback={
-            <div class="sb-foot-row">
-              <div class="sb-index-status">
-                <span
-                  class="status-dot"
-                  classList={{ "status-dot--ready": !!store.repo }}
-                />
-                <span class="sb-mono">
-                  {store.repo ? `indexed ${formatAgo(store.repo.indexedAt, now())}` : "no repo"}
-                </span>
-              </div>
-              <button
-                class="sb-reindex"
-                disabled={!store.repo}
-                title="Re-index this repository"
-                onClick={() => void appStore.reindex(false)}
-              >
-                Reindex
-              </button>
-            </div>
-          }
-        >
-          {(p) => (
+      {/* Footer shows ONLY live indexing progress; all resting status (daemon,
+          freshness, reindex) lives in the bottom status bar now. */}
+      <Show when={store.indexProgress}>
+        {(p) => (
+          <div class="sidebar-footer">
             <div class="sb-progress">
               <div class="sb-progress-head">
                 <span class="sb-mono sb-progress-stage">{p().stage}</span>
@@ -149,9 +116,9 @@ export function Sidebar() {
                 <span class="sb-progress-detail">{p().detail}</span>
               </Show>
             </div>
-          )}
-        </Show>
-      </div>
+          </div>
+        )}
+      </Show>
 
       <style>{`
         .sidebar {
@@ -174,11 +141,6 @@ export function Sidebar() {
           font-size: 13px; font-weight: 600; letter-spacing: -0.2px; color: var(--text);
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .sb-meta {
-          display: flex; align-items: center; gap: 4px;
-          font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary);
-        }
-        .sb-meta svg { opacity: 0.7; flex-shrink: 0; }
 
         .sb-section-label { padding: 0 var(--space-4) 6px; }
 
@@ -193,24 +155,7 @@ export function Sidebar() {
         .sb-blank-sub { font-size: 11px; line-height: 1.5; }
 
         .sidebar-footer { padding: var(--space-3); border-top: 1px solid var(--border); }
-        .sb-foot-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-        .sb-index-status {
-          display: flex; align-items: center; gap: var(--space-2);
-          min-width: 0; font-size: 11px; color: var(--text-tertiary);
-        }
         .sb-mono { font-family: var(--font-mono); }
-        .sb-index-status .sb-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-        .sb-reindex {
-          flex-shrink: 0;
-          font-family: var(--font-mono); font-size: 10px; font-weight: 600;
-          letter-spacing: 0.02em;
-          color: var(--text-secondary);
-          padding: 3px 10px;
-          border-radius: var(--radius-sm);
-        }
-        .sb-reindex:hover { background: rgba(var(--primary-rgb), 0.1); color: var(--primary); }
-        .sb-reindex:disabled { opacity: 0.4; cursor: default; background: none; color: var(--text-tertiary); }
 
         .sb-progress { display: flex; flex-direction: column; gap: 5px; }
         .sb-progress-head { display: flex; align-items: baseline; justify-content: space-between; }

@@ -1,16 +1,16 @@
-//! FeatureForge-specific filesystem setup applied to a freshly created worktree
-//! (contract W4): copy the base repo's `.featureforge/features.json` into the
+//! CodeForge-specific filesystem setup applied to a freshly created worktree
+//! (contract W4): copy the base repo's `.codeforge/features.json` into the
 //! new worktree so it inherits the feature model immediately, and keep
-//! `.featureforge-worktrees/` ignored in the base repo. Pure fs; git lives in
+//! `.codeforge-worktrees/` ignored in the base repo. Pure fs; git lives in
 //! git worktree ops (see `forge_git`).
 
 use std::path::Path;
 
-/// The directory (under the base repo) that holds all FeatureForge worktrees.
-const WORKTREES_DIR_IGNORE: &str = ".featureforge-worktrees/";
-const FEATURES_REL: &str = ".featureforge/features.json";
+/// The directory (under the base repo) that holds all CodeForge worktrees.
+const WORKTREES_DIR_IGNORE: &str = ".codeforge-worktrees/";
+const FEATURES_REL: &str = ".codeforge/features.json";
 
-/// Copy `<base>/.featureforge/features.json` into `<worktree>/.featureforge/`.
+/// Copy `<base>/.codeforge/features.json` into `<worktree>/.codeforge/`.
 ///
 /// Returns `Ok(true)` when the file was copied, `Ok(false)` when the base has no
 /// `features.json` yet — a real "base not indexed" state (the worktree simply
@@ -29,7 +29,7 @@ pub fn inherit_features(base: &Path, worktree: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Ensure `.featureforge-worktrees/` is ignored in the base repo's `.gitignore`
+/// Ensure `.codeforge-worktrees/` is ignored in the base repo's `.gitignore`
 /// (idempotent read-modify-write). A missing `.gitignore` is created.
 pub fn ensure_worktrees_ignored(base: &Path) -> Result<(), String> {
     let path = base.join(".gitignore");
@@ -69,7 +69,7 @@ mod tests {
         // Create from scratch.
         ensure_worktrees_ignored(&base).unwrap();
         let first = std::fs::read_to_string(base.join(".gitignore")).unwrap();
-        assert_eq!(first, ".featureforge-worktrees/\n");
+        assert_eq!(first, ".codeforge-worktrees/\n");
         // Second call must not duplicate the entry.
         ensure_worktrees_ignored(&base).unwrap();
         let second = std::fs::read_to_string(base.join(".gitignore")).unwrap();
@@ -83,7 +83,7 @@ mod tests {
         std::fs::write(base.join(".gitignore"), "target/\nnode_modules/").unwrap(); // no trailing newline
         ensure_worktrees_ignored(&base).unwrap();
         let text = std::fs::read_to_string(base.join(".gitignore")).unwrap();
-        assert_eq!(text, "target/\nnode_modules/\n.featureforge-worktrees/\n");
+        assert_eq!(text, "target/\nnode_modules/\n.codeforge-worktrees/\n");
         // Idempotent even when the entry sits at the end.
         ensure_worktrees_ignored(&base).unwrap();
         let again = std::fs::read_to_string(base.join(".gitignore")).unwrap();
@@ -101,7 +101,7 @@ mod tests {
         assert!(!worktree.join(FEATURES_REL).exists());
 
         // Now the base has a features.json → it is copied verbatim.
-        std::fs::create_dir_all(base.join(".featureforge")).unwrap();
+        std::fs::create_dir_all(base.join(".codeforge")).unwrap();
         std::fs::write(base.join(FEATURES_REL), "[{\"slug\":\"x\"}]\n").unwrap();
         assert!(inherit_features(&base, &worktree).unwrap());
         let copied = std::fs::read_to_string(worktree.join(FEATURES_REL)).unwrap();

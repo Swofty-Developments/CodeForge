@@ -1,5 +1,5 @@
 {
-  "name": "featureforge",
+  "name": "codeforge",
   "private": true,
   "scripts": {
     "dev": "npm run dev --prefix crates/tauri-app/frontend",

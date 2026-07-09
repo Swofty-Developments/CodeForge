@@ -1,4 +1,4 @@
-# FeatureForge
+# CodeForge
 
 An IDE built off of Claude Code — open a repository and see features, not files.
 
@@ -33,7 +33,7 @@ and `build.devUrl` in `crates/tauri-app/tauri.conf.json` to match.
 ```bash
 cd crates/tauri-app
 frontend/node_modules/.bin/tauri build --bundles app
-open target/release/bundle/macos/FeatureForge.app
+open target/release/bundle/macos/CodeForge.app
 ```
 
 The Tauri CLI ships with the frontend dev dependencies, so no global install is needed.

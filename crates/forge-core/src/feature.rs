@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// A feature of the indexed repository — the primary unit FeatureForge organises code by.
+/// A feature of the indexed repository — the primary unit CodeForge organises code by.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Feature {
@@ -24,6 +24,10 @@ pub struct Feature {
     /// User-set graph node color (hex, e.g. "#74ade8"). `None` = default palette.
     #[serde(default)]
     pub color: Option<String>,
+    /// Hierarchy group — a slash-delimited path the sidebar nests by, e.g.
+    /// "backend/forge-index" or a crate/package name. `None` = ungrouped.
+    #[serde(default)]
+    pub group: Option<String>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -79,6 +83,7 @@ mod tests {
             confidence: 0.9,
             pinned: true,
             color: None,
+            group: None,
             updated_at: Utc::now(),
         }
     }

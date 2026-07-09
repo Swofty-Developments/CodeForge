@@ -90,11 +90,11 @@ pub(crate) async fn process_hook(
 }
 
 /// Replay hook payloads that `forward.sh` spooled to
-/// `.featureforge/runtime/spool/` while the daemon was down, then delete each on
+/// `.codeforge/runtime/spool/` while the daemon was down, then delete each on
 /// success. Payloads that aren't valid JSON are quarantined under
 /// `spool/rejected/` (the lost-data state is named, not silently dropped).
 pub(crate) async fn drain_spool(deps: &DaemonDeps, queue: &Arc<ReindexQueue>) {
-    let spool = deps.repo_root.join(".featureforge").join("runtime").join("spool");
+    let spool = deps.repo_root.join(".codeforge").join("runtime").join("spool");
     let read = match std::fs::read_dir(&spool) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,

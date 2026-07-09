@@ -67,6 +67,7 @@ mod tests {
             confidence: 0.5,
             pinned: false,
             color: None,
+            group: None,
             updated_at: chrono::Utc::now(),
         }
     }

@@ -91,7 +91,7 @@ pub async fn list_worktrees(repo_root: &Path) -> Result<Vec<Worktree>> {
 }
 
 /// Create a new worktree on branch `<slug of name>` at
-/// `<base>/.featureforge-worktrees/<slug>`, off `base_ref` (default: the repo's
+/// `<base>/.codeforge-worktrees/<slug>`, off `base_ref` (default: the repo's
 /// current branch, or its HEAD sha when detached). An existing branch or path is
 /// a named error — never silently reused.
 pub async fn create_worktree(
@@ -104,7 +104,7 @@ pub async fn create_worktree(
     if slug.is_empty() {
         return Err(Error::InvalidName(name.to_string()));
     }
-    let path = base.join(".featureforge-worktrees").join(&slug);
+    let path = base.join(".codeforge-worktrees").join(&slug);
     if path.exists() {
         return Err(Error::WorktreePathExists(path));
     }

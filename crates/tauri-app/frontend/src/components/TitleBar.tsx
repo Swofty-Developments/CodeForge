@@ -9,9 +9,6 @@ import { samePath } from "../stores/path";
 export function TitleBar() {
   const { store } = appStore;
   const repo = () => store.repo;
-  const indexing = createMemo(
-    () => store.indexProgress != null && store.indexProgress.stage !== "error",
-  );
 
   const [branchMenu, setBranchMenu] = createSignal(false);
 
@@ -40,7 +37,7 @@ export function TitleBar() {
       <div class="tb-traffic" />
       <Show
         when={repo()}
-        fallback={<span class="tb-appname">FeatureForge</span>}
+        fallback={<span class="tb-appname">CodeForge</span>}
       >
         {(r) => (
           <div class="tb-pills">
@@ -107,20 +104,7 @@ export function TitleBar() {
         )}
       </Show>
 
-      <div class="tb-right">
-        <Show when={repo()}>
-          <button
-            class="tb-reindex"
-            classList={{ "tb-reindex--busy": indexing() }}
-            disabled={indexing()}
-            onClick={() => void appStore.reindex()}
-            title="Re-index this repository"
-          >
-            <span class="tb-reindex-dot" />
-            {indexing() ? "indexing…" : "reindex"}
-          </button>
-        </Show>
-      </div>
+      <div class="tb-right" />
 
       <style>{`
         .titlebar {
@@ -190,28 +174,6 @@ export function TitleBar() {
         .tb-ico { width: 13px; height: 13px; flex-shrink: 0; }
 
         .tb-right { margin-left: auto; display: flex; align-items: center; -webkit-app-region: no-drag; }
-        .tb-reindex {
-          display: inline-flex; align-items: center; gap: 6px;
-          height: 22px; padding: 0 10px;
-          border-radius: var(--radius-sm);
-          background: transparent;
-          border: 1px solid var(--border-variant);
-          color: var(--text-muted);
-          font-family: var(--font-mono); font-size: 11px;
-        }
-        .tb-reindex:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
-        .tb-reindex:disabled { opacity: 0.8; }
-        .tb-reindex-dot {
-          width: 6px; height: 6px; border-radius: 50%;
-          background: var(--text-tertiary);
-        }
-        .tb-reindex--busy .tb-reindex-dot {
-          background: var(--primary);
-          animation: dot-pulse 1.4s ease-in-out infinite;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .tb-reindex--busy .tb-reindex-dot { animation: none; }
-        }
       `}</style>
     </div>
   );

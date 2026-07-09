@@ -1,22 +1,36 @@
 //! forge-index — the feature model: load/save, pins, path→feature classifier,
 //! and the headless-`claude` cold-start indexer.
 //!
-//! Storage (per repo, committable): `.featureforge/features.json` (human-readable
-//! JSON array of [`Feature`]) and `.featureforge/docs/<slug>.md` (living docs).
+//! Storage (per repo, committable): `.codeforge/features.json` (human-readable
+//! JSON array of [`Feature`]) and `.codeforge/docs/<slug>.md` (living docs).
 
 mod classify;
 mod headless;
 mod indexer;
 mod merge;
+mod meta;
 mod parse;
 mod prompt;
 
 pub use indexer::{DocReport, Indexer};
+pub use meta::{IndexMeta, IndexState, IndexStatus};
 
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use forge_core::{Feature, FeaturePatch};
+
+/// Index-format version. Bump when the indexing *technique* changes (prompt,
+/// derivation, meta shape) so a previously-written index reports `outdated` and
+/// the UI can prompt a re-index (FZ-2). Stored in `index-meta.json`.
+pub const INDEX_VERSION: u32 = 1;
+
+/// Pure staleness/version verdict for the on-disk index at `repo_root` (FZ-2).
+/// Reads `features.json` + `index-meta.json` and re-hashes the manifest files;
+/// never runs `claude` and never re-indexes.
+pub fn index_status(repo_root: &Path) -> Result<IndexStatus> {
+    meta::status(repo_root)
+}
 
 /// Index errors.
 #[derive(Debug, thiserror::Error)]
@@ -34,16 +48,16 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Index file location, relative to the repo root.
-const FEATURES_FILE: &str = ".featureforge/features.json";
+pub(crate) const FEATURES_FILE: &str = ".codeforge/features.json";
 
-/// In-memory feature index for one repo, backed by `.featureforge/features.json`.
+/// In-memory feature index for one repo, backed by `.codeforge/features.json`.
 pub struct FeatureIndex {
     repo_root: PathBuf,
     features: Vec<Feature>,
 }
 
 impl FeatureIndex {
-    /// Load `<repo_root>/.featureforge/features.json`. A missing file yields an
+    /// Load `<repo_root>/.codeforge/features.json`. A missing file yields an
     /// empty index (fresh repo, pre-index).
     pub fn load(repo_root: &Path) -> Result<Self> {
         let path = repo_root.join(FEATURES_FILE);
@@ -73,6 +87,13 @@ impl FeatureIndex {
         std::fs::write(&tmp, format!("{json}\n"))?;
         std::fs::rename(&tmp, &path)?;
         Ok(())
+    }
+
+    /// Rewrite `.codeforge/index-meta.json` from the current feature set:
+    /// the content-hash manifest + the current [`INDEX_VERSION`] (FZ-2). Call
+    /// after a successful index/save so [`index_status`] returns `fresh`.
+    pub fn write_meta(&self) -> Result<()> {
+        meta::write(&self.repo_root, &self.features)
     }
 
     /// All features, sorted by slug.
@@ -152,10 +173,10 @@ impl FeatureIndex {
         &self.repo_root
     }
 
-    /// Read the living doc `.featureforge/docs/<slug>.md`, if one has been
+    /// Read the living doc `.codeforge/docs/<slug>.md`, if one has been
     /// written. Returns `None` when the feature has no doc yet (pre-index).
     pub fn read_doc(&self, slug: &str) -> Result<Option<String>> {
-        let path = self.repo_root.join(".featureforge/docs").join(format!("{slug}.md"));
+        let path = self.repo_root.join(".codeforge/docs").join(format!("{slug}.md"));
         match std::fs::read_to_string(&path) {
             Ok(text) => Ok(Some(text)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -227,6 +248,7 @@ mod tests {
             confidence: 0.5,
             pinned,
             color: None,
+            group: None,
             updated_at: Utc::now(),
         }
     }
@@ -284,6 +306,31 @@ mod tests {
         assert_eq!(patched.tags, vec!["security".to_string()]);
         assert!(patched.pinned, "editing implies pinning");
         assert!(index.get("auth").unwrap().pinned);
+    }
+
+    #[test]
+    fn merge_reindex_preserves_group_on_both_paths() {
+        let tmp = TempDir::new("group-merge");
+        let mut index = FeatureIndex::load(tmp.path()).expect("load");
+
+        // A pinned feature with a hand-edited group, and an unpinned one.
+        let mut pinned = feature("pinned", true);
+        pinned.group = Some("hand/edited".into());
+        let mut unpinned = feature("unpinned", false);
+        unpinned.group = Some("old".into());
+        index.upsert(pinned);
+        index.upsert(unpinned);
+
+        // Re-index: the pinned feature's incoming group must be ignored; the
+        // unpinned feature adopts the fresh group.
+        let mut fresh_pinned = feature("pinned", false);
+        fresh_pinned.group = Some("SHOULD NOT WIN".into());
+        let mut fresh_unpinned = feature("unpinned", false);
+        fresh_unpinned.group = Some("crates/forge-index".into());
+        index.merge_reindex(vec![fresh_pinned, fresh_unpinned]);
+
+        assert_eq!(index.get("pinned").unwrap().group.as_deref(), Some("hand/edited"));
+        assert_eq!(index.get("unpinned").unwrap().group.as_deref(), Some("crates/forge-index"));
     }
 
     #[test]
