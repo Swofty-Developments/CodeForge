@@ -9,7 +9,7 @@ import { createStore } from "solid-js/store";
 import * as ipc from "../ipc";
 import type {
   ActiveView,
-  DaemonStatus,
+  DaemonState,
   DiffByFeature,
   ErrorToast,
   Feature,
@@ -42,7 +42,7 @@ export interface AppStore {
   sessions: SessionUi[];
   activeSessionId: string | null;
   indexProgress: IndexProgress | null;
-  daemon: DaemonStatus | null;
+  daemon: DaemonState | null;
   paletteOpen: boolean;
   sidebarWidth: number;
   sessionPaneOpen: boolean;
@@ -194,11 +194,17 @@ function createAppStore() {
   }
 
   async function refreshDaemon(): Promise<void> {
-    if (!store.repo) return;
+    if (!store.repo) {
+      setStore("daemon", null);
+      return;
+    }
     try {
-      setStore("daemon", await ipc.daemonStatus(store.repo.path));
-    } catch {
-      setStore("daemon", { running: false, port: null });
+      const status = await ipc.daemonStatus(store.repo.path);
+      // running / offline are the two answers the backend can give; an errored
+      // probe becomes `unknown` (below), never a definitive `offline`.
+      setStore("daemon", status.running ? { kind: "running", port: status.port } : { kind: "offline" });
+    } catch (e) {
+      setStore("daemon", { kind: "unknown", error: String(e) });
     }
   }
 

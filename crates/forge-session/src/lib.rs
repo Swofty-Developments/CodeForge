@@ -8,6 +8,7 @@
 mod claude;
 mod locate;
 mod manager;
+mod mode;
 mod payload;
 mod protocol;
 pub mod shell_env;
@@ -15,6 +16,7 @@ mod types;
 
 pub use claude::ClaudeSession;
 pub use manager::SessionManager;
+pub use mode::SessionMode;
 pub use payload::AgentEventPayload;
 pub use types::AgentEvent;
 
@@ -29,6 +31,8 @@ pub enum Error {
     NotFound(String),
     #[error("sidecar error: {0}")]
     Sidecar(String),
+    #[error("{0}")]
+    NodeNotFound(String),
     #[error("{0}")]
     Other(String),
 }

@@ -197,7 +197,7 @@ async fn unborn_head_diffs_staged_file_as_added() {
 }
 
 #[tokio::test]
-async fn binary_untracked_is_skipped() {
+async fn binary_untracked_shown_as_binary_marker() {
     let f = Fixture::init();
     f.write("seed.txt", "x\n");
     f.commit_all("init");
@@ -206,7 +206,28 @@ async fn binary_untracked_is_skipped() {
 
     let files = collect_file_diffs(f.path()).await.unwrap();
     assert!(files.iter().any(|d| d.path == "text.txt"));
-    assert!(!files.iter().any(|d| d.path == "bin.dat"));
+    let bin = find(&files, "bin.dat");
+    assert!(bin.binary, "binary untracked file appears with binary:true, not dropped");
+    assert!(bin.hunks.is_empty());
+    assert_eq!((bin.additions, bin.deletions), (0, 0));
+}
+
+#[tokio::test]
+async fn oversized_diff_is_truncated_once_centrally() {
+    let f = Fixture::init();
+    f.write("seed.txt", "x\n");
+    f.commit_all("init");
+    // An untracked file well over the cap: additions carry the true total, but
+    // rendered lines are capped and `truncated` is set exactly once.
+    let body: String = (1..=2500).map(|i| format!("line {i}\n")).collect();
+    f.write("big.txt", &body);
+
+    let files = collect_file_diffs(f.path()).await.unwrap();
+    let fd = find(&files, "big.txt");
+    assert!(fd.truncated, "capped file carries the typed truncated flag");
+    assert_eq!(fd.additions, 2500, "true total preserved on additions");
+    let shown: usize = fd.hunks.iter().map(|h| h.lines.len()).sum();
+    assert_eq!(shown, 2000, "rendered lines capped at the single authoritative limit");
 }
 
 #[tokio::test]

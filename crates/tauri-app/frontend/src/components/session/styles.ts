@@ -241,6 +241,7 @@ const CSS = `
 .sp-chevron { flex-shrink: 0; color: var(--text-tertiary); transition: transform 0.18s ease; }
 .sp-chevron--open { transform: rotate(90deg); }
 .tc-name { font-size: 12px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; flex-shrink: 0; }
+.tc-name--unknown { color: var(--text-tertiary); font-weight: 500; font-style: italic; }
 .tc--active .tc-name { color: var(--amber); }
 .tc--done .tc-name { color: var(--text); }
 .tc--error .tc-name { color: var(--red); }
@@ -336,6 +337,7 @@ const CSS = `
   background: var(--bg-accent);
   padding: 2px 7px; border-radius: var(--radius-pill);
 }
+.ac-tool--unknown { font-style: italic; color: var(--text-tertiary); }
 .ac-input {
   font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
   color: var(--text-secondary);

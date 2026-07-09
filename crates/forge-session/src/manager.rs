@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use forge_core::{SessionInfo, SessionStatus, StartSessionOpts};
 use tokio::sync::mpsc;
-use tracing::warn;
 use uuid::Uuid;
 
-use crate::{AgentEvent, ClaudeSession, Result};
+use crate::{AgentEvent, ClaudeSession, Result, SessionMode};
 
 /// Registry entry: the live session plus display metadata for `list()`.
 struct SessionEntry {
@@ -30,32 +29,30 @@ impl SessionManager {
         Self::default()
     }
 
-    /// Spawn a session per `opts` (resume when `opts.resume_session_id` is set,
-    /// with fresh-session fallback). Events flow to `event_tx`; the caller
-    /// forwards them to the frontend as `agent-event` payloads.
+    /// Spawn a session engaging the SDK from an explicit, caller-decided
+    /// [`SessionMode`] (Fresh or Resume — decided from the app DB). No hidden
+    /// resume→fresh fallback: a failed resume surfaces as a
+    /// `session_resume_failed` event on the stream, not a silent downgrade here.
+    /// Events flow to `event_tx`; the caller forwards them to the frontend.
     pub async fn start_session(
         &mut self,
         opts: StartSessionOpts,
+        mode: SessionMode,
         event_tx: mpsc::Sender<AgentEvent>,
     ) -> Result<SessionInfo> {
         let id = Uuid::new_v4();
-        let mut thread_hint = opts.resume_session_id.clone();
-
-        let session = match &opts.resume_session_id {
-            Some(resume_id) => {
-                match ClaudeSession::resume(&opts.repo_path, resume_id, opts.model.as_deref(), event_tx.clone())
-                    .await
-                {
-                    Ok(s) => s,
-                    Err(e) => {
-                        warn!("failed to resume claude session {resume_id}, starting fresh: {e}");
-                        thread_hint = None;
-                        Self::start_fresh(&opts, event_tx).await?
-                    }
-                }
-            }
-            None => Self::start_fresh(&opts, event_tx).await?,
+        let thread_hint = match &mode {
+            SessionMode::Resume { claude_session_id } => Some(claude_session_id.clone()),
+            _ => None,
         };
+        // permission_mode intentionally not carried across resume (CodeForge parity).
+        let permission_mode = match &mode {
+            SessionMode::Resume { .. } => None,
+            _ => opts.permission_mode.as_deref(),
+        };
+
+        let session =
+            ClaudeSession::spawn(&opts.repo_path, mode, opts.model.as_deref(), permission_mode, event_tx).await?;
 
         self.next_seq += 1;
         let title = format!("Session {}", self.next_seq);
@@ -114,16 +111,6 @@ impl SessionManager {
                 }
             })
             .collect()
-    }
-
-    async fn start_fresh(opts: &StartSessionOpts, event_tx: mpsc::Sender<AgentEvent>) -> Result<ClaudeSession> {
-        ClaudeSession::start(
-            &opts.repo_path,
-            opts.model.as_deref(),
-            opts.permission_mode.as_deref(),
-            event_tx,
-        )
-        .await
     }
 
     fn get(&self, id: &str) -> Result<&ClaudeSession> {

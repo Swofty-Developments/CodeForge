@@ -54,6 +54,30 @@ pub fn set_repo_indexed_at(conn: &Connection, repo_id: &str, indexed_at: &str) -
     Ok(())
 }
 
+/// Read a repo's `indexed_at` (RFC3339 string). `None` ⇔ never indexed —
+/// CONTRACT-3's single source of truth for the cold-start decision.
+pub fn get_repo_indexed_at(conn: &Connection, repo_id: &str) -> anyhow::Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT indexed_at FROM repos WHERE id = ?1", params![repo_id], |r| {
+            r.get::<_, Option<String>>(0)
+        })
+        .optional()?
+        .flatten())
+}
+
+/// Whether any session row records this SDK session id — the resume
+/// precondition (Rust reads back `sessions.claude_session_id` to decide mode).
+pub fn claude_session_exists(conn: &Connection, claude_session_id: &str) -> anyhow::Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sessions WHERE claude_session_id = ?1 LIMIT 1",
+            params![claude_session_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 /// Look up a repo row id by canonical path.
 pub fn get_repo_id_by_path(conn: &Connection, path: &str) -> anyhow::Result<Option<String>> {
     Ok(conn

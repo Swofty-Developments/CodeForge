@@ -9,8 +9,9 @@ use crate::AgentEvent;
 /// `event_type` values are the snake_case [`AgentEvent`] variant names:
 /// `content_delta | thinking_delta | turn_started | turn_completed |
 ///  turn_aborted | approval_required | session_ready | slash_commands |
-///  session_error | usage_report | tool_use_start | tool_input_delta |
-///  tool_use_end | tool_result`.
+///  session_error | session_resume_failed | usage_report | tool_use_start |
+///  tool_input_delta | tool_use_end | tool_result`, plus the Rust-originated
+/// `session_persistence_degraded` (see [`AgentEventPayload::persistence_degraded`]).
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentEventPayload {
@@ -103,6 +104,11 @@ impl AgentEventPayload {
                 p.event_type = "session_error".into();
                 p.message = Some(message.clone());
             }
+            AgentEvent::SessionResumeFailed { claude_session_id } => {
+                p.event_type = "session_resume_failed".into();
+                // `message` carries the SDK session id that could not be resumed.
+                p.message = Some(claude_session_id.clone());
+            }
             AgentEvent::UsageReport {
                 input_tokens,
                 output_tokens,
@@ -142,6 +148,19 @@ impl AgentEventPayload {
             }
         }
         p
+    }
+
+    /// Rust-originated event (not a sidecar out-event): a durable persistence
+    /// write for this session failed. The session keeps running but its stored
+    /// history/usage may be incomplete — surfaced, never swallowed.
+    pub fn persistence_degraded(session_id: &str, thread_id: &str, message: &str) -> Self {
+        AgentEventPayload {
+            session_id: session_id.to_string(),
+            thread_id: thread_id.to_string(),
+            event_type: "session_persistence_degraded".into(),
+            message: Some(message.to_string()),
+            ..Default::default()
+        }
     }
 }
 

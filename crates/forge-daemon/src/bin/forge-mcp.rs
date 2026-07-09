@@ -16,7 +16,12 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-const DAEMON_DOWN: &str = "FeatureForge daemon is not running (open the repo in FeatureForge)";
+/// Repo isn't tracked by FeatureForge (no manifest) — the user should open it.
+const MSG_NO_MANIFEST: &str =
+    "FeatureForge is not tracking this repo yet — open it in FeatureForge.";
+/// A manifest exists but the daemon is corrupt/unreachable — reopen the repo.
+const MSG_STALE: &str =
+    "FeatureForge is not reachable — the app exited uncleanly; reopen the repo in FeatureForge.";
 
 fn main() {
     let stdin = std::io::stdin();
@@ -125,17 +130,32 @@ fn handle_tool_call(params: &Value) -> Result<Value, Value> {
         other => return Err(invalid_params(format!("unknown tool: {other}"))),
     };
 
-    let Some(port) = discover_daemon_port() else {
-        return Ok(text_result(DAEMON_DOWN.into(), true));
+    let port = match discover_daemon() {
+        DaemonLocation::Port(port) => port,
+        DaemonLocation::NoManifest => return Ok(text_result(MSG_NO_MANIFEST.into(), true)),
+        DaemonLocation::StaleManifest => return Ok(text_result(MSG_STALE.into(), true)),
     };
     match proxy_to_daemon(port, request) {
         Ok(ProxyOutcome::Ok(body)) => Ok(text_result(body, false)),
         Ok(ProxyOutcome::HttpError(status, body)) => {
             Ok(text_result(format!("daemon returned {status}: {body}"), true))
         }
-        Ok(ProxyOutcome::Unreachable) => Ok(text_result(DAEMON_DOWN.into(), true)),
+        // The manifest advertised a port but nothing answered: stale port from an
+        // uncleanly-exited app, not a "never opened" state.
+        Ok(ProxyOutcome::Unreachable) => Ok(text_result(MSG_STALE.into(), true)),
         Err(message) => Err(json!({ "code": -32603, "message": message })),
     }
+}
+
+/// Outcome of locating this repo's daemon manifest.
+enum DaemonLocation {
+    /// Repo root has a manifest advertising a usable `port`.
+    Port(u16),
+    /// A FeatureForge repo (`.featureforge/` present) with no daemon manifest —
+    /// never opened, or not currently open.
+    NoManifest,
+    /// Manifest present but corrupt/portless — the app exited uncleanly.
+    StaleManifest,
 }
 
 enum HttpCall {
@@ -150,25 +170,38 @@ enum ProxyOutcome {
     Unreachable,
 }
 
-/// Walk up from cwd looking for `.featureforge/runtime/daemon.json`.
-fn discover_daemon_port() -> Option<u16> {
-    let cwd = std::env::current_dir().ok()?;
+/// Walk up from cwd, stopping at the FIRST ancestor that contains a
+/// `.featureforge/` dir — that IS this repo's root. Its manifest alone decides
+/// the state; we never walk past a corrupt/portless manifest into a parent
+/// repo's daemon (which would silently answer for the wrong repo).
+fn discover_daemon() -> DaemonLocation {
+    let Ok(cwd) = std::env::current_dir() else {
+        return DaemonLocation::NoManifest;
+    };
     for dir in cwd.ancestors() {
+        if !dir.join(".featureforge").is_dir() {
+            continue;
+        }
         let manifest: PathBuf = dir.join(".featureforge").join("runtime").join("daemon.json");
         let Ok(text) = std::fs::read_to_string(&manifest) else {
-            continue;
+            return DaemonLocation::NoManifest;
         };
-        let port = serde_json::from_str::<Value>(&text)
-            .ok()
-            .as_ref()
-            .and_then(|v| v.get("port"))
-            .and_then(Value::as_u64)
-            .and_then(|p| u16::try_from(p).ok());
-        if port.is_some() {
-            return port;
-        }
+        return match parse_manifest_port(&text) {
+            Some(port) => DaemonLocation::Port(port),
+            None => DaemonLocation::StaleManifest,
+        };
     }
-    None
+    DaemonLocation::NoManifest
+}
+
+/// Extract the advertised `port` from a `daemon.json` body.
+fn parse_manifest_port(text: &str) -> Option<u16> {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.get("port"))
+        .and_then(Value::as_u64)
+        .and_then(|p| u16::try_from(p).ok())
 }
 
 /// Proxy one call to the daemon on a throwaway current-thread runtime.

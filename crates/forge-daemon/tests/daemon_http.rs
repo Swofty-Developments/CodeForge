@@ -116,6 +116,114 @@ async fn hook_post_lands_classified_timeline_row() {
 }
 
 #[tokio::test]
+async fn daemon_drains_spooled_payloads_on_start() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    seed_features_json(repo);
+
+    // Simulate forward.sh having spooled a payload while the app was closed.
+    let spool = repo.join(".featureforge/runtime/spool");
+    std::fs::create_dir_all(&spool).unwrap();
+    let edited = repo.join("src/auth/mod.rs");
+    std::fs::write(
+        spool.join("spool.aaaaaa"),
+        serde_json::json!({
+            "session_id": "spooled-1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Edit",
+            "tool_input": { "file_path": edited, "old_string": "a", "new_string": "b" }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    // A garbage payload must be quarantined, not silently dropped.
+    std::fs::write(spool.join("spool.bbbbbb"), "not json at all").unwrap();
+
+    // start_daemon (via Daemon::start) drains the spool before serving.
+    let index = FeatureIndex::load(repo).unwrap();
+    let timeline = TimelineStore::open(repo).unwrap();
+    let deps = DaemonDeps {
+        repo_root: repo.to_path_buf(),
+        index: Arc::new(RwLock::new(index)),
+        timeline: Arc::new(timeline),
+    };
+    let handle = Daemon::start(repo, deps).await.unwrap();
+    let base = format!("http://127.0.0.1:{}", handle.port);
+    let client = reqwest::Client::new();
+
+    let events: Vec<forge_core::TimelineEvent> = client
+        .get(format!("{base}/api/timeline"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let drained = events
+        .iter()
+        .find(|e| e.session_id.as_deref() == Some("spooled-1"))
+        .expect("spooled payload replayed onto the timeline");
+    assert_eq!(drained.kind, forge_core::EventKind::FileEdited);
+    assert_eq!(drained.feature_slugs, vec!["auth-flow".to_string()]);
+
+    // Valid file removed; garbage quarantined under rejected/.
+    assert!(!spool.join("spool.aaaaaa").exists());
+    assert!(spool.join("rejected/spool.bbbbbb").exists());
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn unclassified_file_edit_marks_event_and_enqueues() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let handle = start_daemon(repo).await; // seeds only the src/auth/* feature
+    let base = format!("http://127.0.0.1:{}", handle.port);
+    let client = reqwest::Client::new();
+
+    // Edit a path that shares no directory with any indexed feature → the daemon
+    // cannot classify it. This is the "stale index / new file" state, distinct
+    // from a non-file event.
+    let edited = repo.join("notes/scratch.md");
+    let hook = serde_json::json!({
+        "session_id": "sess-x",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Write",
+        "tool_input": { "file_path": edited, "content": "hello" }
+    });
+    let resp = client.post(format!("{base}/hooks/event")).json(&hook).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // The event is stored with empty slugs but EXPLICITLY marked unclassified,
+    // so the timeline UI can show "edit to an unindexed file — re-index pending".
+    let events: Vec<forge_core::TimelineEvent> = client
+        .get(format!("{base}/api/timeline"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let edit = events
+        .iter()
+        .find(|e| e.kind == forge_core::EventKind::FileEdited)
+        .expect("file edit recorded");
+    assert!(edit.feature_slugs.is_empty());
+    assert_eq!(edit.payload["unclassified"], serde_json::json!(true));
+
+    // …and the path is queued on the server-side reindex queue for a later
+    // reindex to resolve, rather than losing the file→feature link forever.
+    let queue = forge_daemon::ReindexQueue::open(repo).unwrap();
+    let pending = queue.pending().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].path, "notes/scratch.md");
+    assert_eq!(pending[0].event_id, edit.id);
+    assert_eq!(pending[0].session_id.as_deref(), Some("sess-x"));
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
 async fn feature_and_health_and_note_routes() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path();

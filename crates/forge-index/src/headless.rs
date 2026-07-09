@@ -1,6 +1,6 @@
 //! Headless `claude -p` invocation + CLI JSON envelope handling.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -20,8 +20,16 @@ const STDERR_SNIPPET_LEN: usize = 500;
 /// extracted result text. The binary resolves via the login-shell PATH so
 /// desktop-launched apps find the right install.
 pub(crate) async fn run_headless_claude(repo_root: &Path, prompt: &str) -> Result<String> {
-    let claude = forge_session::shell_env::which("claude")
-        .unwrap_or_else(|| PathBuf::from("claude"));
+    // `which` checks the login-shell PATH first, then the process PATH; a `None`
+    // here is definitive — there is no `claude` to fall back to. Name it rather
+    // than spawning a bare "claude" that would fail with a confusing ENOENT.
+    let claude = forge_session::shell_env::which("claude").ok_or_else(|| {
+        Error::Indexer(
+            "Claude CLI not found on PATH — install Claude Code (https://claude.com/claude-code) \
+             and ensure `claude` is on your login shell PATH"
+                .into(),
+        )
+    })?;
 
     let mut cmd = tokio::process::Command::new(&claude);
     // The prompt is piped on stdin, not passed as a positional arg: `--allowedTools`

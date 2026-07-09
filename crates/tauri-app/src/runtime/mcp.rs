@@ -9,23 +9,35 @@ use std::path::{Path, PathBuf};
 
 const MCP_BIN: &str = "forge-mcp";
 
-/// Ensure `~/.featureforge/bin/forge-mcp` reflects the built binary; return its
-/// path (the path is returned even when no source was found, so kit install can
-/// still register it for a later build).
+/// Ensure `~/.featureforge/bin/forge-mcp` reflects the built binary and return
+/// its path. Returns `Ok(path)` only when a usable binary is present there — a
+/// freshly copied build or a valid pre-existing copy. When no source can be
+/// found and no existing copy exists, returns `Err` so `open_repo` surfaces
+/// "MCP integration unavailable" instead of registering a path to nothing.
 pub fn ensure_mcp_binary() -> anyhow::Result<PathBuf> {
     let dest_dir = home_dir()?.join(".featureforge").join("bin");
     std::fs::create_dir_all(&dest_dir)?;
     let dest = dest_dir.join(MCP_BIN);
 
     match locate_source() {
-        Some(src) if src != dest => copy_if_newer(&src, &dest)?,
-        Some(_) => {}
+        Some(src) if src != dest => {
+            copy_if_newer(&src, &dest)?;
+            Ok(dest)
+        }
+        // Source resolved to the canonical copy itself (already in place).
+        Some(_) => Ok(dest),
+        // No fresh source, but a previous build is still installed — usable.
         None if dest.exists() => {
             tracing::warn!(dest = %dest.display(), "forge-mcp source not found; using existing copy");
+            Ok(dest)
         }
-        None => tracing::warn!("forge-mcp binary not found; MCP tools unavailable until it is built"),
+        // No source and no existing copy: MCP genuinely unavailable — say so.
+        None => Err(anyhow::anyhow!(
+            "MCP integration unavailable: forge-mcp not built (no binary beside the app or under \
+             target/{{debug,release}}, and no existing copy at {})",
+            dest.display()
+        )),
     }
-    Ok(dest)
 }
 
 fn home_dir() -> anyhow::Result<PathBuf> {
@@ -40,24 +52,32 @@ fn locate_source() -> Option<PathBuf> {
     find_mcp_binary(exe.parent()?)
 }
 
-/// Look for `forge-mcp` next to `start_dir`, then in any
-/// `target/{debug,release}/forge-mcp` found while walking up from `start_dir`.
+/// Look for `forge-mcp` next to `start_dir`, plus every
+/// `target/{debug,release}/forge-mcp` found while walking up from `start_dir`,
+/// and pick the newest by mtime. Deterministic: never silently favours a stale
+/// debug build over a fresher release one (or vice versa).
 fn find_mcp_binary(start_dir: &Path) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
     let sibling = start_dir.join(MCP_BIN);
     if sibling.is_file() {
-        return Some(sibling);
+        candidates.push(sibling);
     }
     let mut dir = Some(start_dir);
     while let Some(d) = dir {
         for profile in ["debug", "release"] {
             let cand = d.join("target").join(profile).join(MCP_BIN);
             if cand.is_file() {
-                return Some(cand);
+                candidates.push(cand);
             }
         }
         dir = d.parent();
     }
-    None
+
+    let chosen = candidates
+        .into_iter()
+        .max_by_key(|p| mtime(p).unwrap_or(std::time::UNIX_EPOCH))?;
+    tracing::info!(chosen = %chosen.display(), "selected forge-mcp build (newest by mtime)");
+    Some(chosen)
 }
 
 fn copy_if_newer(src: &Path, dest: &Path) -> anyhow::Result<()> {

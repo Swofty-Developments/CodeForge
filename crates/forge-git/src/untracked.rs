@@ -4,13 +4,17 @@ use std::path::Path;
 
 use forge_core::{DiffHunk, DiffLine, FileDiff};
 
-const MAX_LINES: usize = 2000;
 const SNIFF_BYTES: usize = 8192;
 
 /// Read an untracked file and present it as a single all-added hunk.
-/// `None` for binary files (NUL byte in the first 8 KiB) and unreadable ones.
+/// `None` only when the file is unreadable. Binary files (NUL byte in the first
+/// 8 KiB) come back as a zero-hunk `binary: true` marker — the same shape a
+/// tracked binary gets — so the review can show "binary, not shown" instead of
+/// silently omitting the file. Over-long diffs are capped once, centrally, in
+/// `collect_file_diffs`.
 pub(crate) fn synthesize(repo_root: &Path, rel: &Path) -> Option<FileDiff> {
     let abs = repo_root.join(rel);
+    let path = rel.to_string_lossy().into_owned();
     let bytes = match std::fs::read(&abs) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -19,14 +23,21 @@ pub(crate) fn synthesize(repo_root: &Path, rel: &Path) -> Option<FileDiff> {
         }
     };
     if bytes[..bytes.len().min(SNIFF_BYTES)].contains(&0) {
-        return None;
+        return Some(FileDiff {
+            path,
+            status: "untracked".into(),
+            hunks: Vec::new(),
+            additions: 0,
+            deletions: 0,
+            binary: true,
+            truncated: false,
+        });
     }
 
     let text = String::from_utf8_lossy(&bytes);
     let total = text.lines().count();
-    let mut lines: Vec<DiffLine> = text
+    let lines: Vec<DiffLine> = text
         .lines()
-        .take(MAX_LINES)
         .enumerate()
         .map(|(i, l)| DiffLine {
             origin: '+',
@@ -35,25 +46,19 @@ pub(crate) fn synthesize(repo_root: &Path, rel: &Path) -> Option<FileDiff> {
             new_no: Some(i as u32 + 1),
         })
         .collect();
-    if total > MAX_LINES {
-        lines.push(DiffLine {
-            origin: ' ',
-            content: format!("… truncated: {} more lines", total - MAX_LINES),
-            old_no: None,
-            new_no: None,
-        });
-    }
     let hunks = if lines.is_empty() {
         Vec::new()
     } else {
         vec![DiffHunk { header: format!("@@ -0,0 +1,{total} @@"), lines }]
     };
     Some(FileDiff {
-        path: rel.to_string_lossy().into_owned(),
+        path,
         status: "untracked".into(),
         hunks,
         additions: total as u32,
         deletions: 0,
+        binary: false,
+        truncated: false,
     })
 }
 
@@ -80,26 +85,29 @@ mod tests {
     }
 
     #[test]
-    fn binary_file_skipped() {
+    fn binary_file_shown_as_binary_marker() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "bin.dat", b"\x00\x01\x02payload");
-        assert!(synthesize(dir.path(), Path::new("bin.dat")).is_none());
+        let fd = synthesize(dir.path(), Path::new("bin.dat")).unwrap();
+        assert_eq!(fd.status, "untracked");
+        assert!(fd.binary);
+        assert!(fd.hunks.is_empty());
+        assert_eq!((fd.additions, fd.deletions), (0, 0));
+        assert!(!fd.truncated);
     }
 
     #[test]
-    fn long_file_capped_with_marker() {
+    fn long_file_synthesized_in_full_truncation_is_central() {
+        // synthesize no longer caps; the single authoritative cap lives in
+        // `truncate::cap_file_diffs` (applied by `collect_file_diffs`).
         let dir = tempfile::tempdir().unwrap();
         let body: String = (1..=2050).map(|i| format!("line {i}\n")).collect();
         write(dir.path(), "big.txt", body.as_bytes());
         let fd = synthesize(dir.path(), Path::new("big.txt")).unwrap();
         assert_eq!(fd.additions, 2050);
-        let lines = &fd.hunks[0].lines;
-        assert_eq!(lines.len(), 2001);
-        assert_eq!(lines[1999].new_no, Some(2000));
-        let marker = &lines[2000];
-        assert_eq!(marker.origin, ' ');
-        assert!(marker.content.contains("truncated: 50 more lines"));
-        assert_eq!((marker.old_no, marker.new_no), (None, None));
+        assert!(!fd.truncated, "synthesize does not set truncated");
+        assert_eq!(fd.hunks[0].lines.len(), 2050);
+        assert_eq!(fd.hunks[0].lines[2049].new_no, Some(2050));
     }
 
     #[test]
@@ -109,6 +117,7 @@ mod tests {
         let fd = synthesize(dir.path(), Path::new("empty.txt")).unwrap();
         assert!(fd.hunks.is_empty());
         assert_eq!(fd.additions, 0);
+        assert!(!fd.binary);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 /* Timeline-event presentation helpers for the feature-detail recent-activity
- * list: a semantic accent per kind and a best-effort one-line summary from the
- * (untyped) payload. */
+ * list: a semantic accent per kind and a one-line summary read from the typed,
+ * kind-discriminated payload — exactly one field per kind, no key guessing. */
 
 import type { EventKind, TimelineEvent } from "../../types";
 
@@ -32,45 +32,32 @@ export function kindLabel(kind: EventKind): string {
   return kind.replace(/_/g, " ");
 }
 
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim() ? v.trim() : null;
-}
-
-/** Best-effort one-line summary from the kind + loosely-typed payload. */
+/** One-line summary read from the kind-discriminated typed payload. Each branch
+ *  reads exactly the field(s) the backend writes for that kind. */
 export function summarize(ev: TimelineEvent): string {
-  const p = (ev.payload ?? {}) as Record<string, unknown>;
   switch (ev.kind) {
-    case "file_edited": {
-      const path = str(p.path) ?? str(p.file);
-      if (path) return path;
-      if (Array.isArray(p.files) && p.files.length) return `${p.files.length} files edited`;
-      return "file edited";
-    }
+    case "file_edited":
+      return ev.payload.path || kindLabel(ev.kind);
     case "command_run":
-      return str(p.command) ?? str(p.cmd) ?? "command run";
-    case "tests_run": {
-      const summary = str(p.summary);
-      if (summary) return summary;
-      const passed = typeof p.passed === "number" ? p.passed : null;
-      const failed = typeof p.failed === "number" ? p.failed : null;
-      if (passed !== null || failed !== null) return `${passed ?? 0} passed · ${failed ?? 0} failed`;
-      return "tests run";
-    }
+      return ev.payload.command || kindLabel(ev.kind);
     case "note":
-      return str(p.text) ?? str(p.note) ?? "note";
+      return ev.payload.text || kindLabel(ev.kind);
     case "session_started":
-      return str(p.prompt) ?? "session started";
+      return ev.payload.source ? `session started (${ev.payload.source})` : "session started";
     case "session_ended":
-      return str(p.reason) ?? "session ended";
+      return "session ended";
     case "feature_pinned":
-      return p.pinned === false ? "unpinned" : "pinned";
+      return ev.payload.pinned ? "pinned" : "unpinned";
     case "feature_edited":
-      return str(p.field) ? `edited ${str(p.field)}` : "feature edited";
+      return `edited ${ev.payload.name}`;
     case "index_started":
       return "indexing started";
     case "index_completed":
-      return str(p.summary) ?? "indexing completed";
-    default:
+      return "error" in ev.payload
+        ? `indexing failed: ${ev.payload.error}`
+        : `indexed ${ev.payload.features} feature${ev.payload.features === 1 ? "" : "s"}`;
+    case "tests_run":
+      // The backend does not yet emit a payload for this kind (see contractNotes).
       return kindLabel(ev.kind);
   }
 }

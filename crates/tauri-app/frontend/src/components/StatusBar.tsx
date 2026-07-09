@@ -1,7 +1,22 @@
 /* Status bar — 24px chrome: daemon dot, repo name, index age; right: sessions. */
 
-import { Show } from "solid-js";
+import { Show, createMemo } from "solid-js";
 import { appStore } from "../stores/app-store";
+import type { DaemonState } from "../types";
+
+/** Dot class + label + hover title for each named daemon state. `unknown` (an
+ *  errored probe) is amber/indeterminate — never the definitive red "offline". */
+function daemonView(d: DaemonState | null): { cls: string; label: string; title?: string } {
+  if (!d) return { cls: "", label: "no daemon" };
+  switch (d.kind) {
+    case "running":
+      return { cls: "status-dot--ready", label: d.port != null ? `daemon :${d.port}` : "daemon on" };
+    case "offline":
+      return { cls: "status-dot--error", label: "daemon off" };
+    case "unknown":
+      return { cls: "status-dot--waiting", label: "daemon status unknown", title: d.error };
+  }
+}
 
 function indexAge(indexedAt: string | null): string {
   if (!indexedAt) return "not indexed";
@@ -17,6 +32,7 @@ function indexAge(indexedAt: string | null): string {
 export function StatusBar() {
   const { store } = appStore;
   const generating = () => store.sessions.some((s) => s.runState === "generating");
+  const daemon = createMemo(() => daemonView(store.daemon));
 
   return (
     <>
@@ -26,15 +42,9 @@ export function StatusBar() {
       />
       <div class="status-bar">
         <div class="sb-group">
-          <span
-            class="status-dot"
-            classList={{
-              "status-dot--ready": !!store.daemon?.running,
-              "status-dot--error": !!store.repo && !store.daemon?.running,
-            }}
-          />
-          <span class="sb-label sb-mono">
-            {store.daemon?.running ? `daemon :${store.daemon.port}` : "daemon off"}
+          <span class={`status-dot ${daemon().cls}`} />
+          <span class="sb-label sb-mono" title={daemon().title}>
+            {daemon().label}
           </span>
         </div>
         <div class="sb-group">

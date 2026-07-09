@@ -7,7 +7,11 @@
  * Communicates with the Rust backend (forge-session) via NDJSON over stdin/stdout.
  *
  * Stdin commands:
- *   { type: "query", prompt, cwd, model?, permissionMode?, sessionId?, allowedTools? }
+ *   { type: "query", prompt, cwd, model?, permissionMode?, mode, resumeSessionId?, allowedTools? }
+ *     mode is decided DB-authoritatively by Rust: "fresh" | "resume" | "continue".
+ *     The sidecar sets exactly one of options.resume / options.continue / neither
+ *     from it — it NEVER infers resumability from prior-query state or SDK error
+ *     strings.
  *   { type: "approval_response", requestId, decision, message? }
  *   { type: "abort" }
  *
@@ -25,6 +29,7 @@
  *   { type: "turn_started" }
  *   { type: "turn_completed", sessionId }
  *   { type: "usage", inputTokens, outputTokens, cacheRead, cacheWrite, costUsd, model }
+ *   { type: "session_resume_failed", claudeSessionId }
  *   { type: "error", message }
  */
 
@@ -51,10 +56,6 @@ let currentAbort = null;
 
 // Counter for generating unique approval request IDs.
 let approvalCounter = 0;
-
-// Track whether we've completed at least one query (for continue support).
-let hasCompletedQuery = false;
-let lastSessionId = null;
 
 // Incremental streaming state — the SDK yields full message snapshots,
 // so we diff against the previous lengths to emit only new characters.
@@ -104,7 +105,7 @@ rl.on("close", () => {
 // ── Command handlers ─────────────────────────────────────────────────────────
 
 async function handleQuery(cmd) {
-  const { prompt, cwd, model, permissionMode, sessionId, allowedTools } = cmd;
+  const { prompt, cwd, model, permissionMode, mode, resumeSessionId, allowedTools } = cmd;
 
   // Change to the requested working directory.
   if (cwd) {
@@ -134,14 +135,18 @@ async function handleQuery(cmd) {
 
   if (model) options.model = model;
 
-  // Session continuity:
-  // - If we have a sessionId from a previous app launch, resume it
-  // - If we already completed a query in this sidecar process, continue it
-  if (sessionId && !hasCompletedQuery) {
-    options.resume = sessionId;
-  } else if (hasCompletedQuery) {
+  // Named, Rust-decided engagement mode. Exactly one of resume/continue/neither
+  // — no inference from process state, no error-string sniffing.
+  if (mode === "resume") {
+    if (!resumeSessionId) {
+      emit({ type: "error", message: "resume mode requires resumeSessionId" });
+      return;
+    }
+    options.resume = resumeSessionId;
+  } else if (mode === "continue") {
     options.continue = true;
   }
+  // mode === "fresh" (or unset) → neither resume nor continue.
 
   // canUseTool callback — sends approval requests to Rust, waits for response
   options.canUseTool = async (toolName, input) => {
@@ -183,8 +188,11 @@ async function handleQuery(cmd) {
   currentAbort = abort;
   options.signal = abort.signal;
 
-  let capturedSessionId = sessionId || null;
+  let capturedSessionId = resumeSessionId || null;
   const expectedResumeId = options.resume || null;
+  // Resolve the resume outcome (success or failure) exactly once — the single
+  // named detector, replacing the old three try-catch resume sniffers.
+  let resumeReported = false;
   let turnEmitted = false;
 
   // Reset incremental streaming counters for new query.
@@ -195,21 +203,7 @@ async function handleQuery(cmd) {
   emit({ type: "turn_started" });
 
   try {
-    let queryIter;
-    try {
-      queryIter = query({ prompt, options });
-    } catch (resumeErr) {
-      // Resume failed (session not found on disk) — retry without resume
-      if (options.resume) {
-        emit({ type: "error", message: "Session not found, starting fresh" });
-        delete options.resume;
-        delete options.continue;
-        queryIter = query({ prompt, options });
-      } else {
-        throw resumeErr;
-      }
-    }
-    for await (const message of queryIter) {
+    for await (const message of query({ prompt, options })) {
       // Abort was requested while iterating.
       if (abort.signal.aborted) break;
 
@@ -219,9 +213,13 @@ async function handleQuery(cmd) {
       if (msgType === "system") {
         if (message.subtype === "init" && message.session_id) {
           capturedSessionId = message.session_id;
-          // Detect resume failure: expected to resume a specific session but got a different one
-          if (expectedResumeId && message.session_id !== expectedResumeId) {
-            emit({ type: "error", message: "Session resume failed, starting fresh" });
+          // Named resume-failure state: we asked to resume a specific session
+          // but the SDK handed back a different one. Surfaced, not disguised.
+          if (expectedResumeId && !resumeReported) {
+            if (message.session_id !== expectedResumeId) {
+              emit({ type: "session_resume_failed", claudeSessionId: expectedResumeId });
+            }
+            resumeReported = true;
           }
           const confirmedModel = message.model || model || null;
           emit({ type: "session_ready", sessionId: message.session_id, model: confirmedModel });
@@ -277,8 +275,6 @@ async function handleQuery(cmd) {
           });
         }
 
-        hasCompletedQuery = true;
-        lastSessionId = capturedSessionId;
         lastTextLen = 0;
         lastThinkingLen = 0;
         emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
@@ -353,37 +349,11 @@ async function handleQuery(cmd) {
   } catch (err) {
     if (abort.signal.aborted) {
       // Intentional abort — not an error.
-    } else if (options.resume && String(err?.message ?? "").includes("conversation")) {
-      // Session resume failed (session file not found) — retry without resume
-      emit({ type: "error", message: "Previous session not found, starting fresh" });
-      delete options.resume;
-      delete options.continue;
-      try {
-        for await (const message of query({ prompt, options })) {
-          if (abort.signal.aborted) break;
-          // Re-process messages with the same handler logic
-          const msgType = message.type;
-          if (msgType === "system" && message.subtype === "init") {
-            capturedSessionId = message.session_id;
-            emit({ type: "session_ready", sessionId: message.session_id, model: message.model || model || null });
-          } else if (msgType === "assistant" && message.message?.content) {
-            for (const block of message.message.content) {
-              if (block.type === "text" && block.text) {
-                const newText = block.text.slice(lastTextLen);
-                if (newText) emit({ type: "text_delta", text: newText });
-                lastTextLen = block.text.length;
-              }
-            }
-          } else if (msgType === "result" || "result" in message) {
-            hasCompletedQuery = true;
-            lastSessionId = capturedSessionId;
-            emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
-            turnEmitted = true;
-          }
-        }
-      } catch (retryErr) {
-        emit({ type: "error", message: String(retryErr?.message ?? retryErr) });
-      }
+    } else if (expectedResumeId && !resumeReported) {
+      // A resume that threw before we could confirm it: one named, surfaced
+      // resume-failure state — never a silent retry-fresh downgrade.
+      emit({ type: "session_resume_failed", claudeSessionId: expectedResumeId });
+      resumeReported = true;
     } else {
       emit({ type: "error", message: String(err?.message ?? err) });
     }
@@ -392,8 +362,6 @@ async function handleQuery(cmd) {
 
     // Make sure we always emit turn_completed so the Rust side knows we're done.
     if (!turnEmitted) {
-      hasCompletedQuery = true;
-      lastSessionId = capturedSessionId;
       emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
     }
   }

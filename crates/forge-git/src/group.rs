@@ -34,18 +34,19 @@ pub(crate) fn group_by_feature(
     let mut groups: Vec<FeatureDiffGroup> = buckets
         .into_iter()
         .map(|(slug, (files, shared))| {
-            let name = if slug == UNMAPPED_SLUG {
+            let unmapped = slug == UNMAPPED_SLUG;
+            let name = if unmapped {
                 UNMAPPED_NAME.to_string()
             } else {
                 name_of(&slug).unwrap_or_else(|| slug.clone())
             };
-            FeatureDiffGroup { slug, name, shared, files }
+            FeatureDiffGroup { slug, name, shared, unmapped, files }
         })
         .collect();
     groups.sort_by(|a, b| {
-        let unmapped = |g: &FeatureDiffGroup| g.slug == UNMAPPED_SLUG;
-        unmapped(a)
-            .cmp(&unmapped(b))
+        // Order by the typed flag, not by sniffing the slug string.
+        a.unmapped
+            .cmp(&b.unmapped)
             .then_with(|| changed_lines(b).cmp(&changed_lines(a)))
             .then_with(|| a.slug.cmp(&b.slug))
     });
@@ -67,6 +68,8 @@ mod tests {
             hunks: Vec::new(),
             additions,
             deletions,
+            binary: false,
+            truncated: false,
         }
     }
 
@@ -112,10 +115,12 @@ mod tests {
         let last = d.groups.last().unwrap();
         assert_eq!(last.slug, "unmapped");
         assert_eq!(last.name, "Unmapped");
+        assert!(last.unmapped, "synthetic bucket carries the typed unmapped flag");
         assert!(!last.shared);
         assert_eq!(last.files[0].path, "mystery.txt");
         // unmapped stays last even with the most changed lines
         assert_eq!(d.groups[0].slug, "auth");
+        assert!(!d.groups[0].unmapped);
     }
 
     #[test]

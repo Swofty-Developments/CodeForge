@@ -7,10 +7,14 @@
 
 mod hooks;
 mod http;
+mod ingest;
 mod kit;
+mod kit_assets;
+mod reindex_queue;
 
 pub use http::build_router;
 pub use kit::{install_kit, KitReport};
+pub use reindex_queue::{PendingReindex, ReindexQueue};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,6 +34,8 @@ pub enum Error {
     Timeline(#[from] forge_timeline::Error),
     #[error("index error: {0}")]
     Index(#[from] forge_index::Error),
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
     #[error("{0}")]
     Other(String),
 }
@@ -92,7 +98,11 @@ impl Daemon {
         });
         std::fs::write(&daemon_json, format!("{:#}\n", manifest))?;
 
-        let router = http::build_router_with_info(deps, port, started_at);
+        let reindex_queue = Arc::new(ReindexQueue::open(repo_root)?);
+        // Replay hook payloads forward.sh spooled while the daemon was down,
+        // before we start serving live ones (drain borrows deps; router moves it).
+        ingest::drain_spool(&deps, &reindex_queue).await;
+        let router = http::build_router_with_info(deps, port, started_at, reindex_queue);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let task = tokio::spawn(async move {
             let serve = axum::serve(listener, router).with_graceful_shutdown(async move {

@@ -11,7 +11,7 @@ mod merge;
 mod parse;
 mod prompt;
 
-pub use indexer::Indexer;
+pub use indexer::{DocReport, Indexer};
 
 use std::path::{Path, PathBuf};
 

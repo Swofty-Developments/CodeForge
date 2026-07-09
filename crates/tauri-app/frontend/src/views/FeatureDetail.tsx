@@ -51,10 +51,11 @@ export function FeatureDetail() {
   }
 
   const recent = createMemo(() => store.selectedFeatureTimeline.slice(0, RECENT_LIMIT));
-  // Prefer the generated living doc (.featureforge/docs/<slug>.md); fall back to
-  // the feature description until an index run has written one.
+  // The living doc (.featureforge/docs/<slug>.md) is the single source of truth,
+  // written during indexing. Absent = "not indexed yet" (an honest empty state,
+  // shown by the Show fallback below), never the description standing in for it.
   const livingDoc = createMemo(() => {
-    const md = store.selectedFeatureDoc ?? feature()?.description ?? "";
+    const md = store.selectedFeatureDoc;
     return md ? (marked.parse(md) as string) : "";
   });
 
@@ -182,14 +183,20 @@ export function FeatureDetail() {
               </Show>
             </CollapsibleSection>
 
-            {/* ── Living doc (falls back to description; see note) ── */}
+            {/* ── Living doc — the generated .featureforge/docs/<slug>.md ── */}
             <CollapsibleSection label="Living doc">
-              <Show when={livingDoc()} fallback={<div class="fd-hint">No living doc yet.</div>}>
+              <Show
+                when={livingDoc()}
+                fallback={
+                  <div class="fd-doc-empty">
+                    <div class="fd-hint">This feature has no living doc yet.</div>
+                    <button class="fd-doc-index" onClick={() => void appStore.reindex()}>
+                      Generate docs
+                    </button>
+                  </div>
+                }
+              >
                 <div class="fd-doc md-render" innerHTML={livingDoc()} />
-                <div class="fd-doc-note">
-                  Rendered from the description — the per-feature doc
-                  (.featureforge/docs/{f().slug}.md) is not exposed in the feature payload yet.
-                </div>
               </Show>
             </CollapsibleSection>
 
@@ -298,11 +305,15 @@ export function FeatureDetail() {
           color: var(--hljs-inline-code);
         }
         .fd-doc a { color: var(--primary); }
-        .fd-doc-note {
-          margin-top: var(--space-2);
-          font-size: 10px; font-family: var(--font-mono); line-height: 1.5;
-          color: var(--text-tertiary);
+        .fd-doc-empty { display: flex; align-items: center; gap: var(--space-3); }
+        .fd-doc-index {
+          font-size: 11px; font-weight: 500; font-family: var(--font-mono);
+          padding: 3px 10px; border-radius: var(--radius-sm);
+          color: var(--primary); background: var(--bg-accent);
+          border: 1px solid var(--border-glow);
+          transition: background 0.15s;
         }
+        .fd-doc-index:hover { background: var(--primary-glow); }
       `}</style>
     </div>
   );

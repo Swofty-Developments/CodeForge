@@ -6,7 +6,7 @@
 
 // ── Features ────────────────────────────────────────────────────────────────
 
-export type FileRole = "core" | "support" | "test" | "config";
+export type FileRole = "core" | "support" | "test" | "config" | "unknown";
 
 export interface FeatureFile {
   path: string;
@@ -48,15 +48,56 @@ export type EventKind =
   | "feature_edited"
   | "note";
 
-export interface TimelineEvent {
+/** Per-kind timeline payloads. The backend writes these exact keys
+ *  (forge-daemon/src/hooks.rs, tauri-app command handlers); each `summarize`
+ *  branch reads exactly one shape rather than OR-ing guessed key spellings. */
+export interface FileEditedPayload {
+  tool: string;
+  path: string;
+}
+export interface CommandRunPayload {
+  command: string;
+  description: string | null;
+}
+export interface NotePayload {
+  text: string;
+}
+export interface SessionStartedPayload {
+  source?: string;
+}
+export interface IndexStartedPayload {
+  force: boolean;
+}
+/** IndexCompleted is either a success (feature count) or a named failure. */
+export type IndexCompletedPayload = { features: number } | { error: string };
+export interface FeaturePinnedPayload {
+  pinned: boolean;
+}
+export interface FeatureEditedPayload {
+  name: string;
+  tags: string[];
+}
+
+interface TimelineEventBase {
   id: number;
   ts: string; // RFC3339
   sessionId: string | null;
   actor: Actor;
-  kind: EventKind;
   featureSlugs: string[];
-  payload: unknown;
 }
+
+/** Discriminated on `kind` so a payload narrows to one concrete shape. */
+export type TimelineEvent =
+  | (TimelineEventBase & { kind: "file_edited"; payload: FileEditedPayload })
+  | (TimelineEventBase & { kind: "command_run"; payload: CommandRunPayload })
+  | (TimelineEventBase & { kind: "note"; payload: NotePayload })
+  | (TimelineEventBase & { kind: "session_started"; payload: SessionStartedPayload })
+  | (TimelineEventBase & { kind: "session_ended"; payload: Record<string, never> })
+  | (TimelineEventBase & { kind: "index_started"; payload: IndexStartedPayload })
+  | (TimelineEventBase & { kind: "index_completed"; payload: IndexCompletedPayload })
+  | (TimelineEventBase & { kind: "feature_pinned"; payload: FeaturePinnedPayload })
+  | (TimelineEventBase & { kind: "feature_edited"; payload: FeatureEditedPayload })
+  | (TimelineEventBase & { kind: "tests_run"; payload: unknown });
 
 export interface TimelineFilter {
   featureSlug?: string;
@@ -100,10 +141,19 @@ export interface StartSessionOpts {
   resumeSessionId?: string;
 }
 
+/** Wire shape returned by the `daemon_status` IPC command. */
 export interface DaemonStatus {
   running: boolean;
   port: number | null;
 }
+
+/** Store-side daemon model — three explicit, separately-painted states. An
+ *  errored probe is `unknown`, never collapsed into a definitive `offline`.
+ *  `null` = not probed yet (no repo open). */
+export type DaemonState =
+  | { kind: "running"; port: number | null }
+  | { kind: "offline" }
+  | { kind: "unknown"; error: string };
 
 // ── Diff review ─────────────────────────────────────────────────────────────
 
@@ -121,18 +171,28 @@ export interface DiffHunk {
   lines: DiffLine[];
 }
 
+/** The closed set of git statuses the backend emits. */
+export type FileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
+
 export interface FileDiff {
   path: string;
-  status: string; // "modified" | "added" | "deleted" | "renamed" | "untracked"
+  status: FileStatus;
   hunks: DiffHunk[];
   additions: number;
   deletions: number;
+  /** Binary file: `hunks` is empty and the review shows "binary, not shown". */
+  binary: boolean;
+  /** Backend capped the diff at the server line limit (the single, authoritative
+   *  truncation). The UI shows an explicit marker; it never re-truncates. */
+  truncated: boolean;
 }
 
 export interface FeatureDiffGroup {
   slug: string;
   name: string;
   shared: boolean;
+  /** True only for the synthetic bucket of files that matched no feature. */
+  unmapped: boolean;
   files: FileDiff[];
 }
 
@@ -156,7 +216,11 @@ export type AgentEventType =
   | "tool_use_start"
   | "tool_input_delta"
   | "tool_use_end"
-  | "tool_result";
+  | "tool_result"
+  // Added by Agent A (forge-session). Speculative until its contractNotes land:
+  // both are assumed to carry human-readable detail in `message` (see reducer).
+  | "session_resume_failed"
+  | "session_persistence_degraded";
 
 /** Flat union payload; fields present depend on eventType. Demux by sessionId. */
 export interface AgentEventPayload {
@@ -215,6 +279,8 @@ export interface SessionMessage {
   content: string;
   blocks: ContentBlock[];
   meta?: MessageMeta;
+  /** System messages only: severity that tints the centered pill. */
+  level?: "info" | "warn" | "error";
 }
 
 /** Token/cost totals accumulated across a session's turns. */
@@ -231,12 +297,11 @@ export interface ErrorToast {
   message: string;
 }
 
-/** A session as rendered in the right-hand session pane. */
+/** A session as rendered in the right-hand session pane. `messages` is the
+ *  single source of truth; the stream renders straight from it. */
 export interface SessionUi {
   info: SessionInfo;
   runState: RunState;
-  /** Flat mirror of every streamed agent block; block objects are shared with `messages`. */
-  blocks: ContentBlock[];
   messages: SessionMessage[];
   pendingApproval: { requestId: string; description: string } | null;
   slashCommands: string[];

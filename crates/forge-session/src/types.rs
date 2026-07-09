@@ -34,6 +34,10 @@ pub enum AgentEvent {
     SlashCommands { commands: Vec<String> },
     /// An error occurred in the session.
     SessionError { message: String },
+    /// A `Resume` of a recorded SDK session id could not be honored — the SDK
+    /// reported a different session or the resume threw. Named + surfaced, never
+    /// a silent downgrade to a fresh session.
+    SessionResumeFailed { claude_session_id: String },
     /// Usage/cost report for a completed turn.
     UsageReport {
         input_tokens: u64,

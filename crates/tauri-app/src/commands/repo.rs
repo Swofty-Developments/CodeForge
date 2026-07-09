@@ -1,6 +1,7 @@
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Utc};
 use forge_core::RepoState;
 use forge_daemon::{Daemon, DaemonDeps};
 use forge_index::FeatureIndex;
@@ -10,6 +11,7 @@ use tauri::{Emitter, State};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::RwLock;
 
+use crate::db::Database;
 use crate::runtime::indexing::{self, ReindexCtx};
 use crate::runtime::{mcp, repo_util};
 use crate::state::{AppState, RepoRuntime};
@@ -45,7 +47,13 @@ pub async fn open_repo(
         let repos = state.repos.lock().await;
         if let Some(rt) = repos.get(&root) {
             let count = rt.index.read().await.features().len() as u32;
-            return Ok(repo_util::repo_state(&root, count, Some(rt.daemon.port)));
+            let port = rt.daemon.port;
+            let repo_id = rt.repo_id.clone();
+            drop(repos);
+            let indexed_at = read_indexed_at(&state.db, &repo_id).await?;
+            let mut rs = repo_util::repo_state(&root, count, Some(port));
+            rs.indexed_at = indexed_at; // CONTRACT-3: DB is source of truth
+            return Ok(rs);
         }
     }
 
@@ -63,17 +71,25 @@ pub async fn open_repo(
     let daemon = Daemon::start(&root, deps).await.map_err(|e| format!("{e}"))?;
     let port = daemon.port;
 
-    let repo_id = {
+    // Upsert the repo row and read its indexed_at in one round-trip. CONTRACT-3:
+    // `indexed_at IS NULL` ⇔ never indexed — this decides cold-start below, NOT
+    // features_count.
+    let (repo_id, indexed_at) = {
         let db = state.db.clone();
         let path_s = root.to_string_lossy().into_owned();
         let name = repo_util::repo_name(&root);
-        tokio::task::spawn_blocking(move || -> Result<String, String> {
+        tokio::task::spawn_blocking(move || -> Result<(String, Option<String>), String> {
             let db = db.lock().map_err(|e| e.to_string())?;
-            queries::upsert_repo(db.conn(), &path_s, &name).map_err(|e| e.to_string())
+            let conn = db.conn();
+            let id = queries::upsert_repo(conn, &path_s, &name).map_err(|e| e.to_string())?;
+            let indexed = queries::get_repo_indexed_at(conn, &id).map_err(|e| e.to_string())?;
+            Ok((id, indexed))
         })
         .await
         .map_err(|e| e.to_string())??
     };
+    let indexed_at = indexed_at.as_deref().and_then(parse_rfc3339);
+    let never_indexed = indexed_at.is_none();
 
     // Subscribe before spawning so events between open and first poll aren't lost.
     let mut rx = timeline.subscribe();
@@ -108,8 +124,9 @@ pub async fn open_repo(
         );
     }
 
-    // Never indexed → kick off cold-start (progress + completion arrive as events).
-    if features_count == 0 {
+    // Never indexed (CONTRACT-3: indexed_at IS NULL) → kick off cold-start
+    // (progress + completion arrive as events).
+    if never_indexed {
         let ctx = ReindexCtx {
             app: app.clone(),
             db: state.db.clone(),
@@ -126,12 +143,35 @@ pub async fn open_repo(
         }
     }
 
-    let repo_state = repo_util::repo_state(&root, features_count, Some(port));
+    let mut repo_state = repo_util::repo_state(&root, features_count, Some(port));
+    repo_state.indexed_at = indexed_at; // CONTRACT-3: DB is source of truth
     let _ = app.emit(events::REPO_CHANGED, &repo_state);
     Ok(repo_state)
 }
 
-/// Close a repository: shut down its daemon, drop the runtime.
+/// Parse a stored RFC3339 `indexed_at` into a UTC timestamp.
+fn parse_rfc3339(s: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(s).ok().map(|dt| dt.with_timezone(&Utc))
+}
+
+/// Read `repos.indexed_at` for an open repo (CONTRACT-3 source of truth).
+async fn read_indexed_at(
+    db: &Arc<Mutex<Database>>,
+    repo_id: &str,
+) -> Result<Option<DateTime<Utc>>, String> {
+    let db = db.clone();
+    let repo_id = repo_id.to_string();
+    let raw = tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+        let db = db.lock().map_err(|e| e.to_string())?;
+        queries::get_repo_indexed_at(db.conn(), &repo_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(raw.as_deref().and_then(parse_rfc3339))
+}
+
+/// Close a repository: tear down every session rooted here (a session can't
+/// outlive its repo), shut down its daemon, drop the runtime.
 #[tauri::command]
 pub async fn close_repo(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let root = repo_util::canonical(&path)?;
@@ -140,6 +180,26 @@ pub async fn close_repo(state: State<'_, AppState>, path: String) -> Result<(), 
         repos.remove(&root)
     };
     let RepoRuntime { daemon, forwarder_task, .. } = runtime.ok_or("repo is not open")?;
+
+    // Fix 4: `session_repos` is read here — stop every session mapped to this
+    // repo root, so no sidecar keeps running against a closed repo.
+    let session_ids: Vec<String> = {
+        let map = state.session_repos.lock().await;
+        map.iter().filter(|&(_, r)| r == &root).map(|(id, _)| id.clone()).collect()
+    };
+    if !session_ids.is_empty() {
+        let mut mgr = state.sessions.lock().await;
+        for id in &session_ids {
+            if let Err(e) = mgr.stop(id).await {
+                tracing::warn!(session = %id, "stopping session on repo close failed: {e}");
+            }
+        }
+        let mut map = state.session_repos.lock().await;
+        for id in &session_ids {
+            map.remove(id);
+        }
+    }
+
     forwarder_task.abort();
     daemon.shutdown().await;
     Ok(())

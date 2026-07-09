@@ -8,7 +8,7 @@
 //! - `POST /api/notes`            — `{text, featureSlugs}` → appended Note event
 //! - `GET  /api/classify`         — `?path=` → feature slugs (serves forge-mcp `which_features`)
 
-use std::path::{Path as FsPath, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -21,8 +21,7 @@ use forge_timeline::{NewEvent, TimelineStore};
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 
-use crate::hooks::parse_hook_event;
-use crate::DaemonDeps;
+use crate::{ingest, DaemonDeps, ReindexQueue};
 
 /// Router state: shared deps + runtime identity for `/api/health`.
 #[derive(Clone)]
@@ -30,6 +29,8 @@ struct AppState {
     deps: DaemonDeps,
     port: u16,
     started_at: DateTime<Utc>,
+    /// Durable queue of edits that classified to no feature (see [`ReindexQueue`]).
+    reindex_queue: Arc<ReindexQueue>,
 }
 
 /// Query params for `GET /api/timeline`.
@@ -56,9 +57,10 @@ pub struct NoteBody {
     pub feature_slugs: Vec<String>,
 }
 
-/// Build the daemon router (also used by tests without binding a port).
-pub fn build_router(deps: DaemonDeps) -> Router {
-    build_router_with_info(deps, 0, Utc::now())
+/// Build the daemon router (also used by tests without binding a port). The
+/// caller supplies the [`ReindexQueue`] so it can be shared with spool draining.
+pub fn build_router(deps: DaemonDeps, reindex_queue: Arc<ReindexQueue>) -> Router {
+    build_router_with_info(deps, 0, Utc::now(), reindex_queue)
 }
 
 /// Same router, carrying the bound port + start time for `/api/health`.
@@ -66,11 +68,13 @@ pub(crate) fn build_router_with_info(
     deps: DaemonDeps,
     port: u16,
     started_at: DateTime<Utc>,
+    reindex_queue: Arc<ReindexQueue>,
 ) -> Router {
     let state = AppState {
         deps,
         port,
         started_at,
+        reindex_queue,
     };
     Router::new()
         .route("/hooks/event", post(hooks_event))
@@ -101,18 +105,10 @@ async fn append_event(
         })
 }
 
-/// Classify paths against the index, relativized to the repo root (features
-/// store repo-relative paths; hooks send absolute ones).
-async fn classify_paths(state: &AppState, paths: &[PathBuf]) -> Vec<String> {
-    let relative: Vec<PathBuf> = paths
-        .iter()
-        .map(|p| {
-            p.strip_prefix(&state.deps.repo_root)
-                .map(FsPath::to_path_buf)
-                .unwrap_or_else(|_| p.clone())
-        })
-        .collect();
-    state.deps.index.read().await.classify_paths(&relative)
+/// Classify paths against the index, relativized to the repo root.
+async fn classify_paths(deps: &DaemonDeps, paths: &[PathBuf]) -> Vec<String> {
+    let relative = ingest::relativize(&deps.repo_root, paths);
+    deps.index.read().await.classify_paths(&relative)
 }
 
 /// Receives raw Claude Code hook JSON. Always replies 200 `{}` fast; the hook
@@ -121,23 +117,7 @@ async fn hooks_event(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    let Some(parsed) = parse_hook_event(&payload) else {
-        tracing::debug!(payload = %payload, "ignoring unrecognized hook event");
-        return Json(serde_json::json!({}));
-    };
-
-    let feature_slugs = classify_paths(&state, &parsed.edited_paths).await;
-    let event = NewEvent {
-        session_id: parsed.session_id,
-        actor: Actor::Agent,
-        kind: parsed.kind,
-        feature_slugs,
-        payload: parsed.payload,
-    };
-    // TimelineStore::append broadcasts to subscribers — that is the live-update path.
-    if let Err(status) = append_event(state.deps.timeline.clone(), event).await {
-        tracing::warn!("hook event dropped: append failed ({status})");
-    }
+    ingest::process_hook(&state.deps, &state.reindex_queue, payload).await;
     Json(serde_json::json!({}))
 }
 
@@ -220,6 +200,6 @@ async fn classify(
     State(state): State<AppState>,
     Query(params): Query<ClassifyParams>,
 ) -> Json<serde_json::Value> {
-    let slugs = classify_paths(&state, &[PathBuf::from(&params.path)]).await;
+    let slugs = classify_paths(&state.deps, &[PathBuf::from(&params.path)]).await;
     Json(serde_json::json!({ "path": params.path, "featureSlugs": slugs }))
 }

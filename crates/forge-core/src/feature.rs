@@ -33,7 +33,8 @@ pub struct FeatureFile {
     pub pinned: bool,
 }
 
-/// The role a file plays within a feature.
+/// The role a file plays within a feature. `Unknown` is a distinct, visible
+/// state for a role the indexer did not classify — never conflated with `Support`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FileRole {
@@ -41,6 +42,7 @@ pub enum FileRole {
     Support,
     Test,
     Config,
+    Unknown,
 }
 
 /// Partial human edit to a feature (`update_feature` IPC command). `None` = leave unchanged.

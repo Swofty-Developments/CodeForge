@@ -11,6 +11,7 @@ pub(crate) fn role_label(role: FileRole) -> &'static str {
         FileRole::Support => "support",
         FileRole::Test => "test",
         FileRole::Config => "config",
+        FileRole::Unknown => "unknown",
     }
 }
 

@@ -9,13 +9,17 @@ pub struct DiffByFeature {
 
 /// One accordion group in the diff review view. Files belonging to N features
 /// appear under each of them with `shared: true`. Files matching no feature
-/// fall under a synthetic "Unmapped" group (`slug: "unmapped"`).
+/// fall under the synthetic "Unmapped" group, distinguished by `unmapped: true`
+/// (not by sniffing the slug string).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureDiffGroup {
     pub slug: String,
     pub name: String,
     pub shared: bool,
+    /// True only for the synthetic bucket of files that matched no feature.
+    #[serde(default)]
+    pub unmapped: bool,
     pub files: Vec<FileDiff>,
 }
 
@@ -30,6 +34,14 @@ pub struct FileDiff {
     pub hunks: Vec<DiffHunk>,
     pub additions: u32,
     pub deletions: u32,
+    /// Binary file: `hunks` is empty and the review shows "binary, not shown"
+    /// rather than silently omitting the file.
+    #[serde(default)]
+    pub binary: bool,
+    /// The diff was capped at the server-side line limit; the UI shows an
+    /// explicit truncation marker. The single, authoritative truncation.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 /// One `@@ … @@` hunk.
@@ -62,6 +74,7 @@ mod tests {
                 slug: "auth-flow".into(),
                 name: "Auth flow".into(),
                 shared: true,
+                unmapped: false,
                 files: vec![FileDiff {
                     path: "src/auth/mod.rs".into(),
                     status: "modified".into(),
@@ -75,6 +88,8 @@ mod tests {
                     }],
                     additions: 1,
                     deletions: 1,
+                    binary: false,
+                    truncated: false,
                 }],
             }],
         };

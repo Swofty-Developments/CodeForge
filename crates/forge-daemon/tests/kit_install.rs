@@ -146,6 +146,57 @@ fn claude_md_section_appends_then_repairs() {
 }
 
 #[test]
+fn claude_md_lone_marker_is_repaired_without_duplicating() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    // A lone START marker with no END: the catch-all used to append a second
+    // section, duplicating on every re-install. Repair must converge to exactly
+    // one well-formed section.
+    std::fs::write(
+        repo.join("CLAUDE.md"),
+        "# Project\n\n<!-- featureforge:start -->\nstale half-section\n",
+    )
+    .unwrap();
+
+    let report = install_kit(repo, Path::new(MCP_BIN)).unwrap();
+    assert!(report.claude_md_updated);
+    let text = std::fs::read_to_string(repo.join("CLAUDE.md")).unwrap();
+    assert!(text.starts_with("# Project"), "user text preserved");
+    assert_eq!(text.matches("<!-- featureforge:start -->").count(), 1);
+    assert_eq!(text.matches("<!-- featureforge:end -->").count(), 1);
+    assert!(text.contains("record_note"));
+
+    // Re-install is now idempotent (healthy ordered markers → replace in place).
+    let second = install_kit(repo, Path::new(MCP_BIN)).unwrap();
+    assert!(!second.claude_md_updated);
+    let again = std::fs::read_to_string(repo.join("CLAUDE.md")).unwrap();
+    assert_eq!(again.matches("<!-- featureforge:start -->").count(), 1);
+    assert_eq!(again, text);
+}
+
+#[test]
+fn claude_md_reversed_markers_are_repaired() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    // END before START — the section can't be located; repair strips both.
+    std::fs::write(
+        repo.join("CLAUDE.md"),
+        "# Project\n<!-- featureforge:end -->\nmiddle\n<!-- featureforge:start -->\n",
+    )
+    .unwrap();
+
+    install_kit(repo, Path::new(MCP_BIN)).unwrap();
+    let text = std::fs::read_to_string(repo.join("CLAUDE.md")).unwrap();
+    assert_eq!(text.matches("<!-- featureforge:start -->").count(), 1);
+    assert_eq!(text.matches("<!-- featureforge:end -->").count(), 1);
+    // Ordered: start precedes end.
+    assert!(
+        text.find("<!-- featureforge:start -->") < text.find("<!-- featureforge:end -->"),
+        "repaired markers must be ordered"
+    );
+}
+
+#[test]
 fn gitignore_ignores_runtime() {
     let tmp = tempfile::tempdir().unwrap();
     install_kit(tmp.path(), Path::new(MCP_BIN)).unwrap();

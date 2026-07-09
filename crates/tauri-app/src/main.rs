@@ -17,11 +17,14 @@ use forge_session::SessionManager;
 use crate::db::Database;
 use crate::state::AppState;
 
-fn db_path() -> PathBuf {
+/// Locate the app DB under the user's home. A missing home is a real,
+/// surfaced error — never a silent `.` fallback that scatters the DB into
+/// whatever cwd the app happened to launch from.
+fn db_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".featureforge").join("featureforge.db")
+        .map_err(|_| "cannot locate home directory (neither HOME nor USERPROFILE is set)".to_string())?;
+    Ok(PathBuf::from(home).join(".featureforge").join("featureforge.db"))
 }
 
 fn main() {
@@ -32,7 +35,13 @@ fn main() {
         )
         .init();
 
-    let db_path = db_path();
+    let db_path = match db_path() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("featureforge: {e}");
+            std::process::exit(1);
+        }
+    };
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }

@@ -70,9 +70,11 @@ pub async fn pin_feature(
         feature_slugs: vec![slug],
         payload: serde_json::json!({ "pinned": pinned }),
     };
-    if let Err(e) = timeline.append(event) {
-        tracing::warn!("timeline append (pin) failed: {e}");
-    }
+    // The timeline is the durable audit log; a lost append is a real failure,
+    // surfaced to the caller rather than reduced to a log line.
+    timeline
+        .append(event)
+        .map_err(|e| format!("pin persisted but timeline append failed: {e}"))?;
     Ok(())
 }
 
@@ -102,8 +104,10 @@ pub async fn update_feature(
         feature_slugs: vec![slug],
         payload: serde_json::json!({ "name": feature.name, "tags": feature.tags }),
     };
-    if let Err(e) = timeline.append(event) {
-        tracing::warn!("timeline append (edit) failed: {e}");
-    }
+    // The timeline is the durable audit log; a lost append is a real failure,
+    // surfaced to the caller rather than reduced to a log line.
+    timeline
+        .append(event)
+        .map_err(|e| format!("edit persisted but timeline append failed: {e}"))?;
     Ok(feature)
 }

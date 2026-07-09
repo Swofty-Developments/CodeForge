@@ -3,7 +3,6 @@
 
 import { Show, createMemo, createSignal } from "solid-js";
 import { appStore } from "../../stores/app-store";
-import { clearApproval } from "./local";
 import type { ContentBlock } from "../../types";
 
 const SUMMARY_KEYS = ["file_path", "path", "command", "pattern", "query", "url", "description", "prompt"];
@@ -65,7 +64,9 @@ export function ToolCard(props: { block: ContentBlock }) {
     >
       <button class="tc-header" onClick={() => setOpen(!open())}>
         <Chevron open={open()} />
-        <span class="tc-name">{props.block.toolName ?? "tool"}</span>
+        <span class="tc-name" classList={{ "tc-name--unknown": !props.block.toolName }}>
+          {props.block.toolName ?? "unknown tool"}
+        </span>
         <span class="tc-summary">{toolSummary(props.block.toolInput)}</span>
         <Show when={active()}>
           <span class="tc-pulse" />
@@ -135,20 +136,21 @@ export function ApprovalCard(props: {
   approval: { requestId: string; description: string };
 }) {
   const [busy, setBusy] = createSignal(false);
-  // Rust formats the description as "ToolName: {pretty input json}".
+  // Rust formats the description as "ToolName: {pretty input json}"; a missing
+  // colon is a distinct "no tool name" state, not a fabricated one.
   const parsed = createMemo(() => {
     const d = props.approval.description;
     const i = d.indexOf(":");
     return i > 0 && i < 40
-      ? { tool: d.slice(0, i), input: d.slice(i + 1).trim() }
-      : { tool: "tool", input: d };
+      ? { tool: d.slice(0, i) as string | null, input: d.slice(i + 1).trim() }
+      : { tool: null as string | null, input: d };
   });
 
   async function respond(approve: boolean): Promise<void> {
     if (busy()) return;
     setBusy(true);
+    // approveRequest clears pendingApproval itself; no second clear here.
     await appStore.approveRequest(props.sessionId, props.approval.requestId, approve);
-    clearApproval(props.sessionId);
   }
 
   return (
@@ -159,7 +161,9 @@ export function ApprovalCard(props: {
           <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
         <span class="ac-title">Permission required</span>
-        <span class="ac-tool">{parsed().tool}</span>
+        <span class="ac-tool" classList={{ "ac-tool--unknown": !parsed().tool }}>
+          {parsed().tool ?? "unknown tool"}
+        </span>
       </div>
       <pre class="ac-input">{parsed().input}</pre>
       <div class="ac-actions">

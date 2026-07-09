@@ -46,7 +46,11 @@ pub(crate) fn parse_features(text: &str) -> Result<Vec<RawFeature>> {
                 (Some(s), Some(e)) if s < e => (s, e),
                 _ => return Err(Error::Json(first_err)),
             };
-            serde_json::from_str(&body[start..=end]).map_err(Error::Json)
+            let recovered = serde_json::from_str(&body[start..=end]).map_err(Error::Json)?;
+            // The prompt demands a bare JSON array; recovering one from prose means
+            // the model disobeyed. Name it rather than silently normalizing.
+            tracing::warn!("model returned prose-wrapped JSON; recovered the array slice");
+            Ok(recovered)
         }
     }
 }
@@ -149,17 +153,20 @@ fn sanitize_slug(raw: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
+/// Map the model's role string to a [`FileRole`]. An absent or blank role is a
+/// genuinely unspecified role → `Support`; a non-empty string the classifier
+/// does not recognise is its own named state → `Unknown` (never conflated with
+/// the deliberate `Support` default).
 fn parse_role(role: Option<&str>) -> FileRole {
     match role.map(|r| r.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("") => FileRole::Support,
         Some("core") => FileRole::Core,
         Some("support") => FileRole::Support,
         Some("test") | Some("tests") => FileRole::Test,
         Some("config") => FileRole::Config,
-        other => {
-            if let Some(unknown) = other {
-                tracing::debug!(role = %unknown, "unknown file role, defaulting to support");
-            }
-            FileRole::Support
+        Some(unknown) => {
+            tracing::warn!(role = %unknown, "unrecognized file role, mapping to Unknown");
+            FileRole::Unknown
         }
     }
 }
@@ -234,9 +241,21 @@ mod tests {
         assert_eq!(f.entry_points, vec![PathBuf::from("src/a.rs")]);
         let paths: Vec<_> = f.files.iter().map(|x| x.path.clone()).collect();
         assert_eq!(paths, vec![PathBuf::from("src/a.rs"), PathBuf::from("README.md")]);
-        assert_eq!(f.files[1].role, FileRole::Support); // unknown role defaults
+        assert_eq!(f.files[1].role, FileRole::Unknown); // unrecognized role → named Unknown state
         assert_eq!(f.confidence, 1.0);
         assert!(!f.pinned);
+    }
+
+    #[test]
+    fn parse_role_names_absent_blank_and_unrecognized_states() {
+        // Absent or blank role is a genuinely unspecified role → Support.
+        assert_eq!(parse_role(None), FileRole::Support);
+        assert_eq!(parse_role(Some("   ")), FileRole::Support);
+        // Known roles map through (case/whitespace-insensitive).
+        assert_eq!(parse_role(Some(" Core ")), FileRole::Core);
+        assert_eq!(parse_role(Some("tests")), FileRole::Test);
+        // A non-empty string we don't recognise is its own Unknown state.
+        assert_eq!(parse_role(Some("whatever")), FileRole::Unknown);
     }
 
     #[test]

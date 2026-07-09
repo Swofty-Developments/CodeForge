@@ -1,8 +1,10 @@
 /**
  * Session slice — start/send/approve/stop actions plus the `agent-event`
  * reducer (CodeForge streaming model, docs/ARCHITECTURE.md §Sessions).
- * Demux: payload.sessionId matches SessionInfo.id; payload.threadId carries
- * the Claude SDK session id and matches claudeSessionId as a fallback.
+ * Demux: payload.sessionId is the routing key (CONTRACT-1) — the backend stamps
+ * it on every event. threadId carries the Claude SDK session id for display /
+ * resume bookkeeping only and is never used for routing.
+ * `messages` is the single source of truth; there is no parallel block mirror.
  */
 
 import { produce, type SetStoreFunction } from "solid-js/store";
@@ -20,7 +22,6 @@ function newSessionUi(info: SessionInfo): SessionUi {
   return {
     info,
     runState: "starting",
-    blocks: [],
     messages: [],
     pendingApproval: null,
     slashCommands: [],
@@ -46,19 +47,17 @@ function ensureLiveAssistant(s: SessionUi): SessionMessage {
   return msg;
 }
 
-/** Backwards scan; an empty toolId matches the most recent tool block. */
-function findToolBlock(blocks: ContentBlock[], toolId: string | undefined): ContentBlock | null {
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b.type === "tool_use" && (!toolId || b.toolId === toolId)) return b;
+/** Backwards scan across messages; an empty toolId matches the most recent
+ *  tool block. Tool blocks live on the live assistant message. */
+function findToolBlock(s: SessionUi, toolId: string | undefined): ContentBlock | null {
+  for (let mi = s.messages.length - 1; mi >= 0; mi--) {
+    const blocks = s.messages[mi].blocks;
+    for (let bi = blocks.length - 1; bi >= 0; bi--) {
+      const b = blocks[bi];
+      if (b.type === "tool_use" && (!toolId || b.toolId === toolId)) return b;
+    }
   }
   return null;
-}
-
-/** Push into both the message and the session-wide flat mirror (shared object). */
-function pushBlock(s: SessionUi, msg: SessionMessage, block: ContentBlock): void {
-  msg.blocks.push(block);
-  s.blocks.push(block);
 }
 
 function finalizeLiveAssistant(s: SessionUi, toolOutcome: "completed" | "error"): void {
@@ -74,8 +73,8 @@ function finalizeLiveAssistant(s: SessionUi, toolOutcome: "completed" | "error")
   msg.id = `done-${crypto.randomUUID()}`;
 }
 
-function pushSystemMessage(s: SessionUi, content: string): void {
-  s.messages.push({ id: `done-${crypto.randomUUID()}`, role: "system", content, blocks: [] });
+function pushSystemMessage(s: SessionUi, content: string, level: "info" | "warn" | "error" = "info"): void {
+  s.messages.push({ id: `done-${crypto.randomUUID()}`, role: "system", content, blocks: [], level });
 }
 
 export function createSessionSlice(
@@ -157,11 +156,8 @@ export function createSessionSlice(
   }
 
   function handleAgentEvent(payload: AgentEventPayload): void {
-    const idx = store.sessions.findIndex(
-      (s) =>
-        s.info.id === payload.sessionId ||
-        (!!payload.threadId && s.claudeSessionId === payload.threadId),
-    );
+    // CONTRACT-1: route strictly by sessionId (stamped on every event).
+    const idx = store.sessions.findIndex((s) => s.info.id === payload.sessionId);
     if (idx < 0) return;
     const mutate = (fn: (s: SessionUi) => void) => setStore("sessions", idx, produce(fn));
 
@@ -173,7 +169,7 @@ export function createSessionSlice(
           const msg = ensureLiveAssistant(s);
           const last = msg.blocks[msg.blocks.length - 1];
           if (last && last.type === "text") last.content += text;
-          else pushBlock(s, msg, { type: "text", content: text });
+          else msg.blocks.push({ type: "text", content: text });
           msg.content += text;
         });
         break;
@@ -185,17 +181,19 @@ export function createSessionSlice(
           const msg = ensureLiveAssistant(s);
           const last = msg.blocks[msg.blocks.length - 1];
           if (last && last.type === "thinking") last.content += text;
-          else pushBlock(s, msg, { type: "thinking", content: text });
+          else msg.blocks.push({ type: "thinking", content: text });
         });
         break;
       }
       case "tool_use_start":
         mutate((s) =>
-          pushBlock(s, ensureLiveAssistant(s), {
+          ensureLiveAssistant(s).blocks.push({
             type: "tool_use",
             content: "",
             toolId: payload.toolId ?? "",
-            toolName: payload.toolName ?? "tool",
+            // Keep nullable — the UI renders an explicit "unknown tool" affordance
+            // rather than fabricating a name.
+            toolName: payload.toolName,
             toolInput: "",
             toolStatus: "generating",
           }),
@@ -203,19 +201,19 @@ export function createSessionSlice(
         break;
       case "tool_input_delta":
         mutate((s) => {
-          const b = findToolBlock(s.blocks, payload.toolId);
+          const b = findToolBlock(s, payload.toolId);
           if (b) b.toolInput = (b.toolInput ?? "") + (payload.inputJson ?? "");
         });
         break;
       case "tool_use_end":
         mutate((s) => {
-          const b = findToolBlock(s.blocks, payload.toolId);
+          const b = findToolBlock(s, payload.toolId);
           if (b) b.toolStatus = "running";
         });
         break;
       case "tool_result":
         mutate((s) => {
-          const b = findToolBlock(s.blocks, payload.toolId);
+          const b = findToolBlock(s, payload.toolId);
           if (!b) return;
           b.toolOutput = payload.toolOutput ?? "";
           b.toolStatus = payload.isError ? "error" : "completed";
@@ -239,7 +237,7 @@ export function createSessionSlice(
       case "turn_aborted":
         mutate((s) => {
           finalizeLiveAssistant(s, "error");
-          pushSystemMessage(s, `Aborted: ${payload.reason ?? "unknown"}`);
+          pushSystemMessage(s, `Aborted: ${payload.reason ?? "unknown"}`, "warn");
           s.runState = "ready";
         });
         break;
@@ -281,9 +279,25 @@ export function createSessionSlice(
       case "session_error":
         mutate((s) => {
           s.runState = "error";
-          pushSystemMessage(s, `Error: ${payload.message ?? "unknown"}`);
+          pushSystemMessage(s, `Error: ${payload.message ?? "unknown"}`, "error");
         });
         pushError(payload.message ?? "Session error");
+        break;
+      // A resume attempt failed — a distinct, surfaced state (not a silent
+      // fall-through to a fresh session). Agent A emits the detail in `message`.
+      case "session_resume_failed":
+        mutate((s) => {
+          s.runState = "error";
+          pushSystemMessage(s, `Resume failed: ${payload.message ?? "unknown"}`, "error");
+        });
+        pushError(`Session resume failed: ${payload.message ?? "unknown"}`);
+        break;
+      // The session runs, but server-side persistence is degraded — shown
+      // honestly rather than hidden behind the happy path.
+      case "session_persistence_degraded":
+        mutate((s) => {
+          pushSystemMessage(s, `Persistence degraded: ${payload.message ?? "unknown"}`, "warn");
+        });
         break;
       case "approval_required":
         mutate((s) => {

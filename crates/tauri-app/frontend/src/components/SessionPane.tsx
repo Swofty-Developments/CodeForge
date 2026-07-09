@@ -5,7 +5,7 @@
 import { For, Show, createEffect, createSignal } from "solid-js";
 import { appStore } from "../stores/app-store";
 import { MessageStream } from "./session/MessageStream";
-import { closeSession, recordUserEntry, selectSession, startSessionWithModel } from "./session/local";
+import { closeSession, selectSession, startSessionWithModel } from "./session/local";
 import { injectSessionStyles } from "./session/styles";
 import type { RunState, SessionUi } from "../types";
 
@@ -62,12 +62,8 @@ export function SessionPane() {
     if (!text || !store.repo) return;
     setInput("");
     if (taRef) autosize(taRef);
-    let id = store.activeSessionId;
-    if (!id) {
-      await appStore.startSession();
-      id = store.activeSessionId;
-    }
-    if (id) recordUserEntry(id, text);
+    if (!store.activeSessionId) await appStore.startSession();
+    // sendSessionInput pushes the user message into session.messages itself.
     await appStore.sendSessionInput(text);
   }
 

@@ -1,7 +1,7 @@
 //! One Claude Code session = one spawned `node agent-sidecar/index.mjs` process.
 //!
 //! Protocol (NDJSON over stdio):
-//! - in: `{type:"query", prompt, cwd, model?, permissionMode?, sessionId?}` ·
+//! - in: `{type:"query", prompt, cwd, model?, permissionMode?, mode, resumeSessionId?}` ·
 //!   `{type:"approval_response", requestId, decision:"allow"|"deny", message?}` ·
 //!   `{type:"abort"}`
 //! - out: see [`crate::AgentEvent`].
@@ -9,11 +9,12 @@
 //! Mechanics (per docs/ARCHITECTURE.md §Sessions): spawn via
 //! `shell_env::which("node")` + `shell_env::apply`, `kill_on_drop(true)`,
 //! 4 tokio tasks (stdin writer / stdout NDJSON parser / stderr collector /
-//! first-query augmenter injecting cwd/model/permissionMode/sessionId), bounded
-//! channels (stdin 256, events 1024 caller-side), claude session id captured
-//! from `session_ready` into a `OnceLock`.
+//! augmenter injecting cwd/model/permissionMode on the first query and the
+//! [`SessionMode`] `mode` on every query), bounded channels (stdin 256, events
+//! 1024 caller-side), claude session id captured from `session_ready` into a
+//! `OnceLock`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -23,7 +24,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use crate::protocol::{self, SidecarInitParams};
-use crate::{locate, shell_env, AgentEvent, Result};
+use crate::{locate, shell_env, AgentEvent, Result, SessionMode};
 
 /// Path to the agent sidecar script, relative to the workspace root (dev mode).
 /// Bundled resolution order: macOS `exe_dir/../Resources/agent-sidecar/index.mjs`,
@@ -46,10 +47,12 @@ pub struct ClaudeSession {
 }
 
 impl ClaudeSession {
-    /// Spawn a fresh session (sidecar process + reader/writer tasks). Events are
-    /// forwarded to `event_tx`.
-    pub async fn start(
+    /// Spawn a session (sidecar process + reader/writer tasks) engaging the SDK
+    /// from an explicit [`SessionMode`] — the mode is carried down the protocol,
+    /// never inferred sidecar-side. Events are forwarded to `event_tx`.
+    pub async fn spawn(
         cwd: &Path,
+        mode: SessionMode,
         model: Option<&str>,
         permission_mode: Option<&str>,
         event_tx: mpsc::Sender<AgentEvent>,
@@ -58,27 +61,32 @@ impl ClaudeSession {
             cwd: cwd.to_string_lossy().into_owned(),
             model: model.map(str::to_string),
             permission_mode: permission_mode.map(str::to_string),
-            session_id: None,
+            mode,
         };
         Self::spawn_sidecar(cwd, init, event_tx).await
     }
 
-    /// Spawn a session resuming a previous Claude session id (SDK `resume`),
-    /// with fresh/continue fallback handled sidecar-side.
+    /// Spawn a fresh session ([`SessionMode::Fresh`]).
+    pub async fn start(
+        cwd: &Path,
+        model: Option<&str>,
+        permission_mode: Option<&str>,
+        event_tx: mpsc::Sender<AgentEvent>,
+    ) -> Result<Self> {
+        Self::spawn(cwd, SessionMode::Fresh, model, permission_mode, event_tx).await
+    }
+
+    /// Spawn a session resuming a recorded SDK session id
+    /// ([`SessionMode::Resume`]). permission_mode intentionally not carried
+    /// across resume (CodeForge parity).
     pub async fn resume(
         cwd: &Path,
         claude_session_id: &str,
         model: Option<&str>,
         event_tx: mpsc::Sender<AgentEvent>,
     ) -> Result<Self> {
-        // permission_mode intentionally not carried across resume (CodeForge parity).
-        let init = SidecarInitParams {
-            cwd: cwd.to_string_lossy().into_owned(),
-            model: model.map(str::to_string),
-            permission_mode: None,
-            session_id: Some(claude_session_id.to_string()),
-        };
-        Self::spawn_sidecar(cwd, init, event_tx).await
+        let mode = SessionMode::Resume { claude_session_id: claude_session_id.to_string() };
+        Self::spawn(cwd, mode, model, None, event_tx).await
     }
 
     /// The SDK session id, once `session_ready` has been observed.
@@ -145,7 +153,9 @@ impl ClaudeSession {
             )
         })?;
         // Login-shell PATH: desktop-launched apps otherwise miss nvm/fnm node.
-        let node = shell_env::which("node").unwrap_or_else(|| PathBuf::from("node"));
+        // A miss is a named, surfaced error — never a bare "node" spawn that
+        // fails later with a confusing ENOENT.
+        let node = shell_env::which("node").ok_or_else(node_not_found_error)?;
         debug!(node = %node.display(), sidecar = %sidecar.display(), cwd = %cwd.display(), "spawning agent sidecar");
 
         let mut cmd = Command::new(&node);
@@ -247,6 +257,24 @@ impl ClaudeSession {
             claude_session_id,
             tasks: vec![augment_task, writer_task, stdout_task, stderr_task],
         })
+    }
+}
+
+/// Named error for a missing `node`, explaining WHY the PATH search failed:
+/// an unresolved login-shell env means only a minimal PATH was searched.
+fn node_not_found_error() -> crate::Error {
+    if shell_env::is_resolved() {
+        crate::Error::NodeNotFound(
+            "node not found on your login-shell PATH — install Node.js or ensure `node` is on PATH"
+                .into(),
+        )
+    } else {
+        crate::Error::NodeNotFound(
+            "node not found: your login shell environment could not be resolved (shell probes \
+             failed), so only a minimal process PATH was searched — install Node.js or fix your \
+             shell startup files"
+                .into(),
+        )
     }
 }
 

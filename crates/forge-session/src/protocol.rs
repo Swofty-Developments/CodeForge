@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use serde_json::{Map, Value};
 use tracing::debug;
 
-use crate::AgentEvent;
+use crate::{AgentEvent, SessionMode};
 
 /// Parameters captured at session creation time, injected into the first
 /// `query` command sent to the sidecar (consumed exactly once).
@@ -15,12 +15,25 @@ pub(crate) struct SidecarInitParams {
     pub cwd: String,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
-    pub session_id: Option<String>,
+    /// The DB-authoritative engagement mode for the FIRST query (Fresh/Resume).
+    pub mode: SessionMode,
 }
 
-/// If `msg` is a `{"type":"query",...}` command and the init params haven't
-/// been consumed yet, splice cwd/model/permissionMode/sessionId into it.
-/// Explicit fields already present in the command win (except cwd).
+/// Stamp `{ mode, resumeSessionId? }` onto a `query` command object so the
+/// sidecar engages the SDK from a named mode rather than inferring it.
+fn stamp_mode(obj: &mut Map<String, Value>, mode: &SessionMode) {
+    obj.insert("mode".into(), Value::String(mode.wire().to_string()));
+    if let SessionMode::Resume { claude_session_id } = mode {
+        obj.insert("resumeSessionId".into(), Value::String(claude_session_id.clone()));
+    }
+}
+
+/// For a `{"type":"query",...}` command, stamp the engagement mode. The FIRST
+/// query also gets cwd/model/permissionMode from the (once-consumed) init
+/// params and its DB-decided mode; every subsequent query is
+/// [`SessionMode::ContinueInProcess`]. Explicit model/permissionMode already on
+/// the command win; cwd and mode are always set by us. Non-`query` lines pass
+/// through untouched.
 pub(crate) fn augment_query_if_needed(msg: &str, init: &Mutex<Option<SidecarInitParams>>) -> String {
     let mut parsed: Value = match serde_json::from_str(msg) {
         Ok(v) => v,
@@ -35,22 +48,26 @@ pub(crate) fn augment_query_if_needed(msg: &str, init: &Mutex<Option<SidecarInit
         guard.take()
     };
 
-    if let Some(p) = params {
-        if let Some(obj) = parsed.as_object_mut() {
-            obj.insert("cwd".into(), Value::String(p.cwd));
-            if let Some(m) = p.model {
-                obj.entry("model").or_insert(Value::String(m));
+    if let Some(obj) = parsed.as_object_mut() {
+        match params {
+            Some(p) => {
+                obj.insert("cwd".into(), Value::String(p.cwd));
+                if let Some(m) = p.model {
+                    obj.entry("model").or_insert(Value::String(m));
+                }
+                if let Some(pm) = p.permission_mode {
+                    obj.entry("permissionMode").or_insert(Value::String(pm));
+                }
+                stamp_mode(obj, &p.mode);
             }
-            if let Some(pm) = p.permission_mode {
-                obj.entry("permissionMode").or_insert(Value::String(pm));
-            }
-            if let Some(sid) = p.session_id {
-                obj.entry("sessionId").or_insert(Value::String(sid));
-            }
+            // Init already consumed → this is a follow-up query in the same
+            // live sidecar: continue the in-process SDK conversation.
+            None => stamp_mode(obj, &SessionMode::ContinueInProcess),
         }
     }
 
-    serde_json::to_string(&parsed).unwrap_or_else(|_| msg.to_string())
+    // Infallible: `parsed` came from valid JSON and we only inserted strings.
+    serde_json::to_string(&parsed).expect("re-serializing an augmented query cannot fail")
 }
 
 /// Parse one sidecar stdout NDJSON line into zero or more [`AgentEvent`]s.
@@ -142,6 +159,9 @@ pub(crate) fn parse_sidecar_line(line: &str) -> Vec<AgentEvent> {
             model: str_or(obj, "model", "unknown"),
         }],
         "error" => vec![AgentEvent::SessionError { message: str_or(obj, "message", "Unknown error") }],
+        "session_resume_failed" => vec![AgentEvent::SessionResumeFailed {
+            claude_session_id: str_of(obj, "claudeSessionId"),
+        }],
         other => {
             debug!("unhandled sidecar event type: {other}");
             Vec::new()
@@ -253,6 +273,10 @@ mod tests {
             one(r#"{"type":"error","message":"boom"}"#),
             AgentEvent::SessionError { message } if message == "boom"
         ));
+        assert!(matches!(
+            one(r#"{"type":"session_resume_failed","claudeSessionId":"abc-123"}"#),
+            AgentEvent::SessionResumeFailed { claude_session_id } if claude_session_id == "abc-123"
+        ));
     }
 
     #[test]
@@ -279,24 +303,41 @@ mod tests {
             cwd: "/repo".into(),
             model: Some("haiku".into()),
             permission_mode: Some("bypassPermissions".into()),
-            session_id: Some("sid-1".into()),
+            mode: SessionMode::Resume { claude_session_id: "sid-1".into() },
         }))
     }
 
     #[test]
-    fn augments_only_the_first_query() {
+    fn first_query_gets_init_mode_then_follow_ups_continue() {
         let slot = init_slot();
         let first = augment_query_if_needed(r#"{"type":"query","prompt":"hi"}"#, &slot);
         let v: Value = serde_json::from_str(&first).unwrap();
         assert_eq!(v["cwd"], "/repo");
         assert_eq!(v["model"], "haiku");
         assert_eq!(v["permissionMode"], "bypassPermissions");
-        assert_eq!(v["sessionId"], "sid-1");
+        assert_eq!(v["mode"], "resume");
+        assert_eq!(v["resumeSessionId"], "sid-1");
 
+        // Init consumed → follow-up query continues the in-process conversation.
         let second = augment_query_if_needed(r#"{"type":"query","prompt":"again"}"#, &slot);
         let v: Value = serde_json::from_str(&second).unwrap();
         assert_eq!(v["prompt"], "again");
-        assert!(v.get("cwd").is_none() && v.get("model").is_none() && v.get("sessionId").is_none());
+        assert_eq!(v["mode"], "continue");
+        assert!(v.get("cwd").is_none() && v.get("model").is_none() && v.get("resumeSessionId").is_none());
+    }
+
+    #[test]
+    fn fresh_mode_stamps_neither_resume_nor_continue_on_first() {
+        let slot = Mutex::new(Some(SidecarInitParams {
+            cwd: "/repo".into(),
+            model: None,
+            permission_mode: None,
+            mode: SessionMode::Fresh,
+        }));
+        let first = augment_query_if_needed(r#"{"type":"query","prompt":"hi"}"#, &slot);
+        let v: Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(v["mode"], "fresh");
+        assert!(v.get("resumeSessionId").is_none());
     }
 
     #[test]
@@ -308,6 +349,7 @@ mod tests {
         let first = augment_query_if_needed(r#"{"type":"query","prompt":"hi"}"#, &slot);
         let v: Value = serde_json::from_str(&first).unwrap();
         assert_eq!(v["cwd"], "/repo");
+        assert_eq!(v["mode"], "resume");
     }
 
     #[test]

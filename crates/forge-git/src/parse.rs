@@ -9,16 +9,16 @@ pub(crate) fn parse_unified_diff(text: &str) -> Vec<FileDiff> {
     let mut cur: Option<PendingFile> = None;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
-            if let Some(done) = cur.take() {
-                out.push(done.finish());
+            if let Some(fd) = cur.take().and_then(PendingFile::finish) {
+                out.push(fd);
             }
             cur = Some(PendingFile::new(rest));
         } else if let Some(file) = cur.as_mut() {
             file.feed(line);
         }
     }
-    if let Some(done) = cur.take() {
-        out.push(done.finish());
+    if let Some(fd) = cur.take().and_then(PendingFile::finish) {
+        out.push(fd);
     }
     out
 }
@@ -28,6 +28,8 @@ struct PendingFile {
     old_path: Option<String>,
     new_path: Option<String>,
     status: &'static str,
+    /// `Binary files … differ` seen — rendered with zero hunks and `binary: true`.
+    binary: bool,
     hunks: Vec<DiffHunk>,
     hunk: Option<OpenHunk>,
 }
@@ -48,6 +50,7 @@ impl PendingFile {
             old_path: None,
             new_path: None,
             status: "modified",
+            binary: false,
             hunks: Vec::new(),
             hunk: None,
         }
@@ -102,9 +105,12 @@ impl PendingFile {
             if p != "/dev/null" {
                 self.new_path = Some(strip_side(p, "b/"));
             }
+        } else if line.starts_with("Binary files ") {
+            // "Binary files a/x and b/x differ": no hunks to render — flag it so
+            // the review shows "binary, not shown" rather than an empty file.
+            self.binary = true;
         }
-        // index/mode/similarity lines and "Binary files … differ" carry nothing
-        // we render — binary files simply keep zero hunks.
+        // index/mode/similarity lines carry nothing we render.
     }
 
     fn close_hunk(&mut self) {
@@ -113,13 +119,19 @@ impl PendingFile {
         }
     }
 
-    fn finish(mut self) -> FileDiff {
+    /// `None` when the section carries no derivable path (no `---`/`+++`/rename
+    /// header and an unparseable `diff --git` line) — dropped rather than faked.
+    fn finish(mut self) -> Option<FileDiff> {
         self.close_hunk();
         let path = match self.status {
             "deleted" => self.old_path.or(self.new_path),
             _ => self.new_path.or(self.old_path),
         }
-        .unwrap_or_else(|| guess_path(&self.git_line));
+        .or_else(|| guess_path(&self.git_line));
+        let Some(path) = path else {
+            tracing::warn!(git_line = %self.git_line, "unparseable diff --git header, dropping section");
+            return None;
+        };
         let (mut additions, mut deletions) = (0u32, 0u32);
         for hunk in &self.hunks {
             for l in &hunk.lines {
@@ -130,7 +142,16 @@ impl PendingFile {
                 }
             }
         }
-        FileDiff { path, status: self.status.into(), hunks: self.hunks, additions, deletions }
+        Some(FileDiff {
+            path,
+            status: self.status.into(),
+            hunks: self.hunks,
+            additions,
+            deletions,
+            binary: self.binary,
+            // Truncation is applied once, centrally, in `collect_file_diffs`.
+            truncated: false,
+        })
     }
 }
 
@@ -196,13 +217,12 @@ fn strip_side(p: &str, prefix: &str) -> String {
     }
 }
 
-/// Best-effort path from a `diff --git a/<p> b/<p>` line — fallback for
-/// sections without `---`/`+++`/rename headers (e.g. mode-only changes).
-fn guess_path(git_line: &str) -> String {
-    git_line
-        .rfind(" b/")
-        .map(|i| unquote(&git_line[i + 3..]))
-        .unwrap_or_else(|| git_line.to_string())
+/// Path from the `diff --git a/<p> b/<p>` line for sections without
+/// `---`/`+++`/rename headers (e.g. mode-only changes). `None` when the load-
+/// bearing ` b/` marker is absent — the caller drops the section rather than
+/// synthesize a phantom path from the raw header.
+fn guess_path(git_line: &str) -> Option<String> {
+    git_line.rfind(" b/").map(|i| unquote(&git_line[i + 3..]))
 }
 
 /// Undo git's C-style path quoting (`"pa\ttern"`), including octal byte escapes.
@@ -239,4 +259,40 @@ fn unquote(s: &str) -> String {
         }
     }
     String::from_utf8_lossy(&bytes).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_only_change_keeps_path_via_b_marker() {
+        // No ---/+++ headers; path comes from the ` b/` marker of the git line.
+        let text = "diff --git a/tool.sh b/tool.sh\nold mode 100644\nnew mode 100755\n";
+        let files = parse_unified_diff(text);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "tool.sh");
+        assert_eq!(files[0].status, "modified");
+        assert!(files[0].hunks.is_empty());
+    }
+
+    #[test]
+    fn unparseable_header_is_dropped_not_faked() {
+        // Header without a ` b/` marker and no ---/+++ headers → cannot derive a
+        // path, so the section is dropped rather than turned into a phantom file.
+        let text = "diff --git garbage-without-b-marker\nold mode 100644\nnew mode 100755\n";
+        let files = parse_unified_diff(text);
+        assert!(files.is_empty(), "unparseable section must not synthesize a path");
+    }
+
+    #[test]
+    fn binary_tracked_file_flagged_binary_with_no_hunks() {
+        let text = "diff --git a/logo.png b/logo.png\nindex a1..b2 100644\nBinary files a/logo.png and b/logo.png differ\n";
+        let files = parse_unified_diff(text);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "logo.png");
+        assert!(files[0].binary);
+        assert!(files[0].hunks.is_empty());
+        assert!(!files[0].truncated);
+    }
 }

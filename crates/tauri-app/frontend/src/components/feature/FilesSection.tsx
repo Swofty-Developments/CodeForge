@@ -5,12 +5,15 @@
 import { For, Show, createMemo } from "solid-js";
 import type { Feature, FeatureFile, FileRole } from "../../types";
 
-const ROLE_ORDER: FileRole[] = ["core", "support", "test", "config"];
+// "unknown" is a distinct, visible role (the indexer didn't classify the file) —
+// listed and tinted separately, never folded into "support".
+const ROLE_ORDER: FileRole[] = ["core", "support", "test", "config", "unknown"];
 const ROLE_TINT: Record<FileRole, string> = {
   core: "tint-primary",
   support: "tint-sky",
   test: "tint-green",
   config: "tint-amber",
+  unknown: "role-unknown",
 };
 
 export function FilesSection(props: {
@@ -99,6 +102,9 @@ export function FilesSection(props: {
           font-size: 9px; font-weight: 500; font-family: var(--font-mono);
           padding: 1px 6px; border-radius: var(--radius-pill);
           text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        .fd-chip.role-unknown {
+          background: var(--bg-muted); border: 1px solid var(--border); color: var(--text-tertiary);
         }
       `}</style>
     </div>

@@ -10,11 +10,20 @@ use tokio::task::JoinSet;
 
 use crate::headless::run_headless_claude;
 use crate::prompt::{decomposition_prompt, doc_prompt, DOC_MAX_LINES};
-use crate::{parse, Result};
+use crate::{parse, Error, Result};
 
 /// Max concurrent per-feature doc passes.
 const DOC_CONCURRENCY: usize = 3;
 const DOCS_DIR: &str = ".featureforge/docs";
+
+/// Outcome of the per-feature doc pass. `written` and `failed` are distinct,
+/// named states — a doc that failed to generate is never silently counted as
+/// written. `failed` holds the slugs whose doc generation errored.
+#[derive(Debug, Default, Clone)]
+pub struct DocReport {
+    pub written: u32,
+    pub failed: Vec<String>,
+}
 
 /// Cold-start / incremental repository indexer.
 ///
@@ -49,6 +58,12 @@ impl Indexer {
         )
         .await;
         let features = parse::validate_features(repo_root, raw)?;
+        // A real repository always decomposes into ≥1 feature. An empty kept-set
+        // means the model whiffed or every candidate was invalid — a named failure,
+        // NOT an empty success the caller would merge (which would drop the index).
+        if features.is_empty() {
+            return Err(Error::Indexer("decomposition produced no features".into()));
+        }
         progress(
             &progress_tx,
             "validate",
@@ -64,12 +79,15 @@ impl Indexer {
     /// Write/update `.featureforge/docs/<slug>.md` for each feature via a
     /// concurrency-capped headless claude doc pass. This crate (not claude) writes
     /// the returned markdown to disk. Pinned features are skipped so human-edited
-    /// docs survive verbatim. Emits `docs` progress per feature, then `done`.
+    /// docs survive verbatim. Emits `docs` progress per feature, then a terminal
+    /// `done` reporting "N written, K failed". Returns a [`DocReport`] so the
+    /// caller can surface the failed slugs — a swallowed doc failure would let
+    /// progress claim "docs complete" over a doc that was never written.
     pub async fn write_feature_docs(
         repo_root: &Path,
         features: &[Feature],
         progress_tx: mpsc::Sender<IndexProgress>,
-    ) -> Result<()> {
+    ) -> Result<DocReport> {
         let docs_dir = repo_root.join(DOCS_DIR);
         tokio::fs::create_dir_all(&docs_dir).await?;
 
@@ -77,7 +95,7 @@ impl Indexer {
         let total = targets.len() as u32;
         if total == 0 {
             progress(&progress_tx, "done", "no docs to write", 0, 0).await;
-            return Ok(());
+            return Ok(DocReport::default());
         }
 
         let sem = Arc::new(Semaphore::new(DOC_CONCURRENCY));
@@ -89,19 +107,46 @@ impl Indexer {
             let tx = progress_tx.clone();
             let root = repo_root.to_path_buf();
             let docs_dir = docs_dir.clone();
+            // Each task reports its own outcome: the failed slug, or None on success.
             set.spawn(async move {
                 let _permit = sem.acquire_owned().await;
-                if let Err(e) = write_one_doc(&root, &docs_dir, &feature).await {
-                    tracing::warn!(slug = %feature.slug, error = %e, "feature doc generation failed");
-                }
+                let outcome = match write_one_doc(&root, &docs_dir, &feature).await {
+                    Ok(()) => None,
+                    Err(e) => {
+                        tracing::warn!(slug = %feature.slug, error = %e, "feature doc generation failed");
+                        Some(feature.slug.clone())
+                    }
+                };
                 let n = done.fetch_add(1, Ordering::SeqCst) + 1;
                 progress(&tx, "docs", &feature.slug, n, total).await;
+                outcome
             });
         }
-        while set.join_next().await.is_some() {}
 
-        progress(&progress_tx, "done", "docs complete", total, total).await;
-        Ok(())
+        let mut failed: Vec<String> = Vec::new();
+        while let Some(joined) = set.join_next().await {
+            match joined {
+                Ok(Some(slug)) => failed.push(slug),
+                Ok(None) => {}
+                // A panicked doc task is a real failure; count it, don't hide it.
+                Err(e) => {
+                    tracing::warn!(error = %e, "feature doc task panicked");
+                    failed.push(format!("<panicked task: {e}>"));
+                }
+            }
+        }
+        failed.sort();
+
+        let written = total - failed.len() as u32;
+        progress(
+            &progress_tx,
+            "done",
+            &format!("{written} written, {} failed", failed.len()),
+            total,
+            total,
+        )
+        .await;
+        Ok(DocReport { written, failed })
     }
 }
 

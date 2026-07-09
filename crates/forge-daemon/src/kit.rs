@@ -15,44 +15,11 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
+use crate::kit_assets::{
+    CLAUDE_MD_BODY, CLAUDE_MD_END, CLAUDE_MD_START, FORWARD_SH, HOOK_COMMAND, HOOK_MARKER,
+    POST_TOOL_USE_MATCHER,
+};
 use crate::Result;
-
-/// Markers delimiting the FeatureForge-owned section of CLAUDE.md.
-pub const CLAUDE_MD_START: &str = "<!-- featureforge:start -->";
-pub const CLAUDE_MD_END: &str = "<!-- featureforge:end -->";
-
-/// Hook command installed into `.claude/settings.json`. `$CLAUDE_PROJECT_DIR`
-/// is expanded by Claude Code at hook time.
-const HOOK_COMMAND: &str = "\"$CLAUDE_PROJECT_DIR\"/.featureforge/hooks/forward.sh";
-/// Substring identifying our hook entries across re-installs.
-const HOOK_MARKER: &str = ".featureforge/hooks/forward.sh";
-const POST_TOOL_USE_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash";
-
-const FORWARD_SH: &str = r#"#!/bin/sh
-# FeatureForge hook forwarder: pipes Claude Code hook JSON (stdin) to the local
-# daemon. Always exits 0 so hooks never block Claude when the app is closed.
-ROOT="${CLAUDE_PROJECT_DIR:-.}"
-RUNTIME="$ROOT/.featureforge/runtime/daemon.json"
-[ -f "$RUNTIME" ] || exit 0
-PORT=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$RUNTIME" | head -n 1)
-[ -n "$PORT" ] || exit 0
-curl -s --max-time 2 -X POST -H "Content-Type: application/json" \
-  --data-binary @- "http://127.0.0.1:$PORT/hooks/event" >/dev/null 2>&1 || true
-exit 0
-"#;
-
-const CLAUDE_MD_BODY: &str = r#"## FeatureForge
-
-This repository is indexed by FeatureForge. **Before exploring the codebase**, consult the
-`featureforge` MCP tools — they are faster and more accurate than searching from scratch:
-
-- `list_features` — every feature in this repo with a short description
-- `get_feature(slug)` — one feature's description, entry points, and key files
-- `which_features(path)` — which features a file path belongs to
-- `feature_timeline(slug)` — recent changes to a feature, newest first
-
-Record significant decisions and findings as you work via `record_note(text, feature_slugs)`
-so they land on the repo timeline for future sessions."#;
 
 /// What the installer did (all false = everything was already in place).
 #[derive(Debug, Clone, Default, Serialize)]
@@ -197,7 +164,46 @@ fn install_mcp_json(repo_root: &Path, mcp_bin_path: &Path, report: &mut KitRepor
     write_json(&path, root, report)
 }
 
+/// Where CLAUDE.md's FeatureForge markers stand — a named state, not a guess.
+enum MarkerState {
+    /// Exactly one ordered START…END pair: replace the section in place.
+    Healthy { start: usize, end: usize },
+    /// No markers at all: append (or seed an empty file).
+    Absent,
+    /// Lone, reversed, or duplicated markers: the section cannot be located
+    /// safely, so we repair (strip + re-append one clean section) rather than
+    /// blindly appending and duplicating on every re-install.
+    Corrupt(&'static str),
+}
+
+fn marker_state(text: &str) -> MarkerState {
+    if text.matches(CLAUDE_MD_START).count() > 1 || text.matches(CLAUDE_MD_END).count() > 1 {
+        return MarkerState::Corrupt("duplicate FeatureForge markers");
+    }
+    match (text.find(CLAUDE_MD_START), text.find(CLAUDE_MD_END)) {
+        (None, None) => MarkerState::Absent,
+        (Some(start), Some(end)) if end >= start => MarkerState::Healthy { start, end },
+        (Some(_), Some(_)) => MarkerState::Corrupt("end marker precedes start marker"),
+        _ => MarkerState::Corrupt("a start/end marker is missing its pair"),
+    }
+}
+
+/// Strip every FeatureForge-marked region (and any stray marker) so a corrupt
+/// file converges to exactly one clean section once re-appended.
+fn strip_ff_markers(text: &str) -> String {
+    let mut out = text.to_string();
+    while let (Some(start), Some(end)) = (out.find(CLAUDE_MD_START), out.find(CLAUDE_MD_END)) {
+        if end < start {
+            break;
+        }
+        let after = end + CLAUDE_MD_END.len();
+        out = format!("{}{}", &out[..start], &out[after..]);
+    }
+    out.replace(CLAUDE_MD_START, "").replace(CLAUDE_MD_END, "")
+}
+
 /// Append or replace the marker-delimited FeatureForge section of CLAUDE.md.
+/// Explicit about each marker state so re-installs never duplicate the section.
 fn install_claude_md(repo_root: &Path, report: &mut KitReport) -> Result<bool> {
     let path = repo_root.join("CLAUDE.md");
     let section = format!("{CLAUDE_MD_START}\n{CLAUDE_MD_BODY}\n{CLAUDE_MD_END}");
@@ -207,13 +213,27 @@ fn install_claude_md(repo_root: &Path, report: &mut KitReport) -> Result<bool> {
         Err(e) => return Err(e.into()),
     };
 
-    let updated = match (existing.find(CLAUDE_MD_START), existing.find(CLAUDE_MD_END)) {
-        (Some(start), Some(end)) if end >= start => {
+    let append_to = |base: &str| {
+        if base.trim().is_empty() {
+            format!("{section}\n")
+        } else {
+            format!("{}\n{section}\n", base.trim_end())
+        }
+    };
+    let updated = match marker_state(&existing) {
+        MarkerState::Healthy { start, end } => {
             let after = end + CLAUDE_MD_END.len();
             format!("{}{}{}", &existing[..start], section, &existing[after..])
         }
-        _ if existing.is_empty() => format!("{section}\n"),
-        _ => format!("{}\n{section}\n", existing.trim_end()),
+        MarkerState::Absent => append_to(&existing),
+        MarkerState::Corrupt(reason) => {
+            tracing::warn!(
+                reason,
+                path = %path.display(),
+                "CLAUDE.md FeatureForge markers are corrupt; repairing"
+            );
+            append_to(&strip_ff_markers(&existing))
+        }
     };
     write_if_changed(&path, &updated, report)
 }

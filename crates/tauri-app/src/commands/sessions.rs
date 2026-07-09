@@ -1,8 +1,7 @@
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use forge_core::{SessionInfo, StartSessionOpts};
-use forge_session::AgentEvent;
+use forge_session::{AgentEvent, SessionMode};
 use tauri::State;
 use tokio::sync::mpsc;
 
@@ -11,9 +10,12 @@ use crate::runtime::{repo_util, session_forward};
 use crate::state::AppState;
 use crate::queries;
 
-/// Start (or resume, when `opts.resume_session_id` is set) an embedded Claude
-/// Code session with cwd = repo root, and spawn the event forwarder that re-emits
-/// `AgentEvent`s on the `agent-event` channel (payload: `AgentEventPayload`).
+/// Start (or resume, when `opts.resume_session_id` names a recorded SDK session)
+/// an embedded Claude Code session with cwd = repo root, and spawn the event
+/// forwarder that re-emits `AgentEvent`s on the `agent-event` channel.
+///
+/// Precondition (CONTRACT-2): the repo must be OPEN — otherwise there is no
+/// repo row to anchor persistence, so this returns `Err("repo is not open")`.
 #[tauri::command]
 pub async fn start_session(
     app: tauri::AppHandle,
@@ -21,18 +23,40 @@ pub async fn start_session(
     opts: StartSessionOpts,
 ) -> Result<SessionInfo, String> {
     let repo_key = repo_util::canonical(&opts.repo_path)?;
-    let sdk_hint = opts.resume_session_id.clone();
+
+    // CONTRACT-2 precondition: the repo must be open (mirrors get_features). The
+    // open repo's row id anchors the thread — every started session has a repo
+    // + thread row by construction.
+    let repo_id = {
+        let repos = state.repos.lock().await;
+        repos.get(&repo_key).map(|rt| rt.repo_id.clone()).ok_or("repo is not open")?
+    };
+
+    // Fix 1: the engagement mode is decided here, from the DB — not discovered
+    // by a resume→fresh cascade. A resume target must be a recorded SDK session.
+    let mode = resolve_session_mode(&state.db, opts.resume_session_id.clone()).await?;
+    let sdk_hint = match &mode {
+        SessionMode::Resume { claude_session_id } => Some(claude_session_id.clone()),
+        _ => None,
+    };
 
     let (tx, rx) = mpsc::channel::<AgentEvent>(1024);
     let info = {
         let mut mgr = state.sessions.lock().await;
-        mgr.start_session(opts, tx).await.map_err(|e| format!("{e:#}"))?
+        mgr.start_session(opts, mode, tx).await.map_err(|e| format!("{e:#}"))?
+    };
+
+    // CONTRACT-2: a started session has a thread row by construction. If the
+    // rows can't be written, tear the session down rather than run it headless.
+    let app_thread_id = match create_thread_and_session(&state.db, &repo_id, &info).await {
+        Ok(tid) => tid,
+        Err(e) => {
+            let _ = state.sessions.lock().await.stop(&info.id).await;
+            return Err(format!("failed to persist session rows: {e:#}"));
+        }
     };
 
     state.session_repos.lock().await.insert(info.id.clone(), repo_key.clone());
-
-    // Best-effort persistence root: a thread+session row for this conversation.
-    let app_thread_id = create_thread_and_session(&state.db, &repo_key, &info).await;
 
     session_forward::spawn_forwarder(
         app,
@@ -44,6 +68,35 @@ pub async fn start_session(
     );
 
     Ok(info)
+}
+
+/// Decide the DB-authoritative [`SessionMode`]. `None` resume id → Fresh. A
+/// given id must be a recorded `sessions.claude_session_id`; an unrecorded id is
+/// a named error (surfaced), never a silent fresh start.
+async fn resolve_session_mode(
+    db: &Arc<Mutex<Database>>,
+    resume_session_id: Option<String>,
+) -> Result<SessionMode, String> {
+    let Some(claude_id) = resume_session_id else {
+        return Ok(SessionMode::Fresh);
+    };
+    if claude_session_exists(db, &claude_id).await? {
+        Ok(SessionMode::Resume { claude_session_id: claude_id })
+    } else {
+        Err(format!("cannot resume: no recorded Claude session {claude_id}"))
+    }
+}
+
+async fn claude_session_exists(db: &Arc<Mutex<Database>>, claude_id: &str) -> Result<bool, String> {
+    let db = db.clone();
+    let claude_id = claude_id.to_string();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+        let db = db.lock().map_err(|_| anyhow::anyhow!("app db mutex poisoned"))?;
+        queries::claude_session_exists(db.conn(), &claude_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("{e:#}"))
 }
 
 /// Queue a user prompt on a running session.
@@ -90,42 +143,30 @@ pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionInfo
     Ok(state.sessions.lock().await.list())
 }
 
-/// Create the DB thread + session rows for a session. Returns the thread id, or
-/// `None` when persistence can't proceed (e.g. the repo row is missing) — the
-/// session still runs, only its history isn't stored.
+/// Create the DB thread + session rows for a session, returning the new thread
+/// id. The repo is open (CONTRACT-2), so its row id is known and passed in; a
+/// failure here is real (surfaced by the caller), never swallowed.
 async fn create_thread_and_session(
     db: &Arc<Mutex<Database>>,
-    repo_key: &Path,
+    repo_id: &str,
     info: &SessionInfo,
-) -> Option<String> {
+) -> anyhow::Result<String> {
     let db = db.clone();
-    let path_s = repo_key.to_string_lossy().into_owned();
+    let repo_id = repo_id.to_string();
     let title = info.title.clone();
     let session_id = info.id.clone();
     let model = info.model.clone();
     let thread_id = uuid::Uuid::new_v4().to_string();
     let tid = thread_id.clone();
 
-    let joined = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         let db = db.lock().map_err(|_| anyhow::anyhow!("app db mutex poisoned"))?;
         let conn = db.conn();
-        let repo_id = queries::get_repo_id_by_path(conn, &path_s)?
-            .ok_or_else(|| anyhow::anyhow!("repo row not found for {path_s}"))?;
         queries::insert_thread(conn, &tid, &repo_id, &title)?;
         queries::insert_session(conn, &session_id, &tid, "ready", model.as_deref())?;
         Ok(())
     })
-    .await;
+    .await??;
 
-    match joined {
-        Ok(Ok(())) => Some(thread_id),
-        Ok(Err(e)) => {
-            tracing::warn!("session persistence skipped: {e}");
-            None
-        }
-        Err(e) => {
-            tracing::warn!("session persistence task join error: {e}");
-            None
-        }
-    }
+    Ok(thread_id)
 }

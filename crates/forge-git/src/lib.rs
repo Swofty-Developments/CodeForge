@@ -8,6 +8,7 @@ mod parse;
 mod status;
 #[cfg(test)]
 mod tests;
+mod truncate;
 mod untracked;
 
 use std::path::{Path, PathBuf};
@@ -126,6 +127,8 @@ pub(crate) async fn collect_file_diffs(repo_root: &Path) -> Result<Vec<FileDiff>
             files.push(fd);
         }
     }
+    // One authoritative truncation over tracked + untracked diffs alike.
+    truncate::cap_file_diffs(&mut files);
     tracing::debug!(files = files.len(), "collected pending diff");
     Ok(files)
 }

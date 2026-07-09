@@ -34,7 +34,9 @@ pub struct AppState {
     /// Open repos, keyed by canonical repo root.
     pub repos: tokio::sync::Mutex<HashMap<PathBuf, RepoRuntime>>,
     pub sessions: tokio::sync::Mutex<SessionManager>,
-    /// Session id → repo root, for routing session events and cleanup.
+    /// Session id → repo root. Read on `close_repo` to tear down every session
+    /// rooted at the closing repo (a session must not outlive its repo). NOT
+    /// used for event routing — that is by `sessionId` in the payload (CONTRACT-1).
     pub session_repos: tokio::sync::Mutex<HashMap<String, PathBuf>>,
 }
 

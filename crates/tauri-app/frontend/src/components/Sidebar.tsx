@@ -8,6 +8,20 @@ import { appStore } from "../stores/app-store";
 import { FeatureRow } from "./sidebar/FeatureRow";
 import { latestActivity, markSeen, seen, sortFeatures, unseenCounts } from "./sidebar/activity";
 import { createNow, formatAgo } from "./sidebar/time";
+import type { DaemonState } from "../types";
+
+/** Hover title per named daemon state; `unknown` surfaces the probe error. */
+function daemonTitle(d: DaemonState | null): string {
+  if (!d) return "daemon: no repo";
+  switch (d.kind) {
+    case "running":
+      return d.port != null ? `daemon on :${d.port}` : "daemon on";
+    case "offline":
+      return "daemon offline";
+    case "unknown":
+      return `daemon status unknown: ${d.error}`;
+  }
+}
 
 export function Sidebar() {
   const { store } = appStore;
@@ -32,7 +46,7 @@ export function Sidebar() {
     appStore.selectFeature(slug);
   }
 
-  const daemonRunning = () => !!store.daemon?.running;
+  const daemonKind = () => store.daemon?.kind;
   const indexing = () => !!store.indexProgress;
 
   return (
@@ -47,11 +61,11 @@ export function Sidebar() {
               class="status-dot"
               classList={{
                 "status-dot--busy": indexing(),
-                "status-dot--ready": !indexing() && daemonRunning(),
+                "status-dot--ready": !indexing() && daemonKind() === "running",
+                "status-dot--error": !indexing() && daemonKind() === "offline",
+                "status-dot--waiting": !indexing() && daemonKind() === "unknown",
               }}
-              title={
-                daemonRunning() ? `daemon on :${store.daemon?.port ?? "?"}` : "daemon offline"
-              }
+              title={daemonTitle(store.daemon)}
             />
           </Show>
         </div>

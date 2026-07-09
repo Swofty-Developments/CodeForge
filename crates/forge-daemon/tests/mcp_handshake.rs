@@ -98,8 +98,9 @@ fn handshake_and_tool_surface() {
     }));
     assert_eq!(call["id"], 3);
     assert_eq!(call["result"]["isError"], true);
+    // No `.featureforge/` up-tree from the tempdir → the "not tracked" state.
     let text = call["result"]["content"][0]["text"].as_str().unwrap_or_default();
-    assert!(text.contains("daemon is not running"), "unexpected error text: {text}");
+    assert!(text.contains("open it in FeatureForge"), "unexpected error text: {text}");
 
     // Unknown method → JSON-RPC -32601.
     let unknown = mcp.request(&json!({ "jsonrpc": "2.0", "id": 4, "method": "does/not/exist" }));

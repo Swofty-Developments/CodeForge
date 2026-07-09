@@ -1,15 +1,17 @@
 /* Pure helpers for diff review: feature-group ordering, unique-file counts,
  * status glyph/tint mapping, extension→hljs language, and per-line highlighted
- * render rows with a truncation budget for very large files. */
+ * render rows. Truncation is the backend's single decision (FileDiff.truncated);
+ * this module never re-caps. */
 
 import hljs from "highlight.js";
 import type { FeatureDiffGroup, FileDiff } from "../../types";
 
 // ── Feature groups ────────────────────────────────────────────────────────────
 
+/** The synthetic bucket of files that matched no feature — a named backend
+ *  flag (CONTRACT-4), not a slug-string sniff. */
 export function isUnmapped(group: FeatureDiffGroup): boolean {
-  const slug = (group.slug ?? "").toLowerCase();
-  return slug === "" || slug === "unmapped" || slug === "__unmapped__" || (group.name ?? "").toLowerCase() === "unmapped";
+  return group.unmapped;
 }
 
 /** Drop empty groups; keep given order but force the unmapped group last. */
@@ -57,20 +59,23 @@ export function totalCounts(groups: FeatureDiffGroup[]): Counts {
 
 interface StatusMeta {
   letter: string;
-  cls: "modified" | "added" | "deleted" | "renamed";
+  cls: "modified" | "added" | "deleted" | "renamed" | "untracked" | "unknown";
   label: string;
 }
 
+// All five backend statuses mapped exhaustively; each has its own chip tint.
 const STATUS: Record<string, StatusMeta> = {
   modified: { letter: "M", cls: "modified", label: "Modified" },
   added: { letter: "A", cls: "added", label: "Added" },
   deleted: { letter: "D", cls: "deleted", label: "Deleted" },
   renamed: { letter: "R", cls: "renamed", label: "Renamed" },
-  untracked: { letter: "U", cls: "renamed", label: "Untracked" },
+  untracked: { letter: "U", cls: "untracked", label: "Untracked" },
 };
 
+/** A status the backend didn't emit resolves to an explicit neutral "unknown"
+ *  chip — never silently painted as "modified". */
 export function statusMeta(status: string): StatusMeta {
-  return STATUS[status] ?? { letter: (status[0] ?? "?").toUpperCase(), cls: "modified", label: status };
+  return STATUS[status] ?? { letter: "?", cls: "unknown", label: "Unknown" };
 }
 
 export function splitPath(path: string): { dir: string; base: string } {
@@ -120,30 +125,20 @@ function highlight(content: string, lang: string | undefined): string {
   return escapeHtml(content);
 }
 
-// ── Render rows (flattened hunks with a truncation budget) ────────────────────
-
-/** Max diff lines rendered per file before a truncation marker is shown. */
-export const MAX_FILE_LINES = 600;
+// ── Render rows (flattened hunks; no re-truncation) ───────────────────────────
 
 export type DiffRow =
   | { t: "header"; key: string; header: string }
-  | { t: "line"; key: string; origin: "+" | "-" | " "; oldNo: number | null; newNo: number | null; html: string }
-  | { t: "trunc"; key: string; remaining: number };
+  | { t: "line"; key: string; origin: "+" | "-" | " "; oldNo: number | null; newNo: number | null; html: string };
 
-export function buildRows(file: FileDiff, lang: string | undefined, max = MAX_FILE_LINES): DiffRow[] {
+/** Flatten a file's hunks into render rows. Renders every line the backend
+ *  sent — the backend already capped at its line limit (FileDiff.truncated). */
+export function buildRows(file: FileDiff, lang: string | undefined): DiffRow[] {
   const rows: DiffRow[] = [];
-  let lineCount = 0;
-  let total = 0;
-  for (const h of file.hunks) total += h.lines.length;
-
-  outer: for (let hi = 0; hi < file.hunks.length; hi++) {
+  for (let hi = 0; hi < file.hunks.length; hi++) {
     const hunk = file.hunks[hi];
     rows.push({ t: "header", key: `h${hi}`, header: hunk.header });
     for (let li = 0; li < hunk.lines.length; li++) {
-      if (lineCount >= max) {
-        rows.push({ t: "trunc", key: "trunc", remaining: total - lineCount });
-        break outer;
-      }
       const line = hunk.lines[li];
       rows.push({
         t: "line",
@@ -153,7 +148,6 @@ export function buildRows(file: FileDiff, lang: string | undefined, max = MAX_FI
         newNo: line.newNo,
         html: highlight(line.content, lang),
       });
-      lineCount++;
     }
   }
   return rows;
@@ -245,6 +239,8 @@ const DIFF_CSS = `
 .dfr-status--added { background: rgba(var(--green-rgb), 0.15); color: var(--green); }
 .dfr-status--deleted { background: rgba(var(--red-rgb), 0.15); color: var(--red); }
 .dfr-status--renamed { background: rgba(245, 148, 60, 0.15); color: var(--orange); }
+.dfr-status--untracked { background: rgba(120, 170, 255, 0.15); color: var(--sky); }
+.dfr-status--unknown { background: var(--bg-muted); color: var(--text-tertiary); }
 .dfr-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dfr-dir { color: var(--text-tertiary); }
 .dfr-base { color: var(--text); }
@@ -285,6 +281,12 @@ const DIFF_CSS = `
   font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
   background: var(--bg-muted); border: 1px solid var(--border);
   border-radius: var(--radius-pill); padding: 3px 12px;
+}
+.dh-binary {
+  padding: 10px 12px;
+  font-family: var(--font-mono); font-size: 11px; font-style: italic;
+  color: var(--text-tertiary);
+  background: var(--bg-base); border-top: 1px solid var(--border);
 }
 
 /* hljs token colors route through the theme vars (same mapping as markdown) */
