@@ -25,12 +25,25 @@ npm run tauri:dev
 Prefer two terminals? Run `npm run dev` inside `crates/tauri-app/frontend`, then
 `cargo tauri dev` from the repo root (`beforeDevCommand` is intentionally empty).
 
+If port 5173 is taken, change `server.port` in `crates/tauri-app/frontend/vite.config.ts`
+and `build.devUrl` in `crates/tauri-app/tauri.conf.json` to match.
+
+## Build a standalone app
+
+```bash
+cd crates/tauri-app
+frontend/node_modules/.bin/tauri build --bundles app
+open target/release/bundle/macos/FeatureForge.app
+```
+
+The Tauri CLI ships with the frontend dev dependencies, so no global install is needed.
+
 ## Requirements
 
 - Claude Code CLI installed and authenticated (`claude` on PATH)
 - Node.js 18+
 - Rust 1.75+
-- `cargo install tauri-cli` (v2) for `cargo tauri dev`
+- Tauri CLI v2 — bundled as a frontend dev dependency (or `cargo install tauri-cli`)
 
 ## Architecture
 
