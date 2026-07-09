@@ -6,15 +6,31 @@
 //! - `GET  /api/timeline`         — query params: `feature`, `since`, `limit`
 //! - `GET  /api/health`           — liveness + repo identity
 //! - `POST /api/notes`            — `{text, featureSlugs}` → appended Note event
+//! - `GET  /api/classify`         — `?path=` → feature slugs (serves forge-mcp `which_features`)
+
+use std::path::{Path as FsPath, PathBuf};
+use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use forge_core::{Feature, TimelineEvent};
+use chrono::{DateTime, Utc};
+use forge_core::{Actor, EventKind, Feature, TimelineEvent, TimelineFilter};
+use forge_timeline::{NewEvent, TimelineStore};
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 
+use crate::hooks::parse_hook_event;
 use crate::DaemonDeps;
+
+/// Router state: shared deps + runtime identity for `/api/health`.
+#[derive(Clone)]
+struct AppState {
+    deps: DaemonDeps,
+    port: u16,
+    started_at: DateTime<Utc>,
+}
 
 /// Query params for `GET /api/timeline`.
 #[derive(Debug, Deserialize)]
@@ -23,6 +39,12 @@ pub struct TimelineParams {
     /// RFC3339 timestamp.
     pub since: Option<String>,
     pub limit: Option<u32>,
+}
+
+/// Query params for `GET /api/classify`.
+#[derive(Debug, Deserialize)]
+pub struct ClassifyParams {
+    pub path: String,
 }
 
 /// Body for `POST /api/notes`.
@@ -36,6 +58,20 @@ pub struct NoteBody {
 
 /// Build the daemon router (also used by tests without binding a port).
 pub fn build_router(deps: DaemonDeps) -> Router {
+    build_router_with_info(deps, 0, Utc::now())
+}
+
+/// Same router, carrying the bound port + start time for `/api/health`.
+pub(crate) fn build_router_with_info(
+    deps: DaemonDeps,
+    port: u16,
+    started_at: DateTime<Utc>,
+) -> Router {
+    let state = AppState {
+        deps,
+        port,
+        started_at,
+    };
     Router::new()
         .route("/hooks/event", post(hooks_event))
         .route("/api/features", get(list_features))
@@ -43,54 +79,147 @@ pub fn build_router(deps: DaemonDeps) -> Router {
         .route("/api/timeline", get(get_timeline))
         .route("/api/health", get(health))
         .route("/api/notes", post(post_note))
+        .route("/api/classify", get(classify))
         .layer(CorsLayer::permissive())
-        .with_state(deps)
+        .with_state(state)
 }
 
-/// Receives raw Claude Code hook JSON. Must return 200 fast — parse, append the
-/// raw TimelineEvent, then classify + broadcast asynchronously.
-async fn hooks_event(State(deps): State<DaemonDeps>, Json(payload): Json<serde_json::Value>) {
-    let _ = (deps, payload);
-    // IMPLEMENT(agent): map hook_event_name (PostToolUse/Stop/SessionStart) to
-    // EventKind, append NewEvent, spawn async classification of touched paths.
-    todo!("daemon hooks_event")
+/// Append an event on the blocking pool (rusqlite behind a sync Mutex).
+async fn append_event(
+    store: Arc<TimelineStore>,
+    event: NewEvent,
+) -> Result<TimelineEvent, StatusCode> {
+    tokio::task::spawn_blocking(move || store.append(event))
+        .await
+        .map_err(|e| {
+            tracing::error!("timeline append task failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .map_err(|e| {
+            tracing::error!("timeline append failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
-async fn list_features(State(deps): State<DaemonDeps>) -> Json<Vec<Feature>> {
-    let _ = deps;
-    // IMPLEMENT(agent): deps.index.read().await.features().to_vec()
-    todo!("daemon list_features")
+/// Classify paths against the index, relativized to the repo root (features
+/// store repo-relative paths; hooks send absolute ones).
+async fn classify_paths(state: &AppState, paths: &[PathBuf]) -> Vec<String> {
+    let relative: Vec<PathBuf> = paths
+        .iter()
+        .map(|p| {
+            p.strip_prefix(&state.deps.repo_root)
+                .map(FsPath::to_path_buf)
+                .unwrap_or_else(|_| p.clone())
+        })
+        .collect();
+    state.deps.index.read().await.classify_paths(&relative)
+}
+
+/// Receives raw Claude Code hook JSON. Always replies 200 `{}` fast; the hook
+/// script must never block Claude. Unrecognized events are logged at debug.
+async fn hooks_event(
+    State(state): State<AppState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let Some(parsed) = parse_hook_event(&payload) else {
+        tracing::debug!(payload = %payload, "ignoring unrecognized hook event");
+        return Json(serde_json::json!({}));
+    };
+
+    let feature_slugs = classify_paths(&state, &parsed.edited_paths).await;
+    let event = NewEvent {
+        session_id: parsed.session_id,
+        actor: Actor::Agent,
+        kind: parsed.kind,
+        feature_slugs,
+        payload: parsed.payload,
+    };
+    // TimelineStore::append broadcasts to subscribers — that is the live-update path.
+    if let Err(status) = append_event(state.deps.timeline.clone(), event).await {
+        tracing::warn!("hook event dropped: append failed ({status})");
+    }
+    Json(serde_json::json!({}))
+}
+
+async fn list_features(State(state): State<AppState>) -> Json<Vec<Feature>> {
+    Json(state.deps.index.read().await.features().to_vec())
 }
 
 async fn get_feature(
-    State(deps): State<DaemonDeps>,
+    State(state): State<AppState>,
     Path(slug): Path<String>,
-) -> Result<Json<Feature>, axum::http::StatusCode> {
-    let _ = (deps, slug);
-    // IMPLEMENT(agent): 404 on unknown slug.
-    todo!("daemon get_feature")
+) -> Result<Json<Feature>, StatusCode> {
+    state
+        .deps
+        .index
+        .read()
+        .await
+        .get(&slug)
+        .cloned()
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 async fn get_timeline(
-    State(deps): State<DaemonDeps>,
+    State(state): State<AppState>,
     Query(params): Query<TimelineParams>,
-) -> Json<Vec<TimelineEvent>> {
-    let _ = (deps, params);
-    // IMPLEMENT(agent): map params into forge_core::TimelineFilter, query store.
-    todo!("daemon get_timeline")
+) -> Result<Json<Vec<TimelineEvent>>, StatusCode> {
+    let since = match params.since.as_deref() {
+        Some(s) => Some(
+            DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|_| StatusCode::BAD_REQUEST)?,
+        ),
+        None => None,
+    };
+    let filter = TimelineFilter {
+        feature_slug: params.feature,
+        actor: None,
+        kinds: None,
+        since,
+        limit: params.limit,
+    };
+    let store = state.deps.timeline.clone();
+    tokio::task::spawn_blocking(move || store.query(&filter))
+        .await
+        .map_err(|e| {
+            tracing::error!("timeline query task failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .map(Json)
+        .map_err(|e| {
+            tracing::error!("timeline query failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
-async fn health(State(deps): State<DaemonDeps>) -> Json<serde_json::Value> {
+async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
-        "ok": true,
-        "repo": deps.repo_root,
-        "pid": std::process::id(),
+        "status": "ok",
+        "repo": state.deps.repo_root,
+        "port": state.port,
+        "uptime": (Utc::now() - state.started_at).num_seconds(),
     }))
 }
 
-async fn post_note(State(deps): State<DaemonDeps>, Json(body): Json<NoteBody>) -> Json<TimelineEvent> {
-    let _ = (deps, body);
-    // IMPLEMENT(agent): append Note event (actor Agent when session header
-    // present, else System) and return it.
-    todo!("daemon post_note")
+async fn post_note(
+    State(state): State<AppState>,
+    Json(body): Json<NoteBody>,
+) -> Result<Json<TimelineEvent>, StatusCode> {
+    let event = NewEvent {
+        session_id: None,
+        actor: Actor::Agent,
+        kind: EventKind::Note,
+        feature_slugs: body.feature_slugs,
+        payload: serde_json::json!({ "text": body.text }),
+    };
+    append_event(state.deps.timeline.clone(), event).await.map(Json)
+}
+
+async fn classify(
+    State(state): State<AppState>,
+    Query(params): Query<ClassifyParams>,
+) -> Json<serde_json::Value> {
+    let slugs = classify_paths(&state, &[PathBuf::from(&params.path)]).await;
+    Json(serde_json::json!({ "path": params.path, "featureSlugs": slugs }))
 }

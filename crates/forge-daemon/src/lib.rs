@@ -5,8 +5,7 @@
 //! reachable externally: axum bound to `127.0.0.1:0`, actual port written to
 //! `<repo>/.featureforge/runtime/daemon.json` (`{port, pid, started_at}`).
 
-#![allow(dead_code)] // scaffold: fields are consumed once bodies are implemented
-
+mod hooks;
 mod http;
 mod kit;
 
@@ -58,8 +57,15 @@ impl DaemonHandle {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
-        if let Some(task) = self.task.take() {
-            task.abort();
+        if let Some(mut task) = self.task.take() {
+            // Graceful drain should be near-instant; abort as a backstop.
+            if tokio::time::timeout(std::time::Duration::from_secs(5), &mut task)
+                .await
+                .is_err()
+            {
+                tracing::warn!("daemon did not shut down within 5s; aborting task");
+                task.abort();
+            }
         }
     }
 }
@@ -72,10 +78,41 @@ impl Daemon {
     /// `.featureforge/runtime/daemon.json`, and return the handle with the
     /// actual port.
     pub async fn start(repo_root: &Path, deps: DaemonDeps) -> Result<DaemonHandle> {
-        let _ = (repo_root, deps);
-        // IMPLEMENT(agent): TcpListener::bind("127.0.0.1:0"), spawn
-        // axum::serve(listener, build_router(deps)) with oneshot shutdown,
-        // write daemon.json {port, pid, started_at}.
-        todo!("Daemon::start")
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let started_at = chrono::Utc::now();
+
+        let runtime_dir = repo_root.join(".featureforge").join("runtime");
+        std::fs::create_dir_all(&runtime_dir)?;
+        let daemon_json = runtime_dir.join("daemon.json");
+        let manifest = serde_json::json!({
+            "port": port,
+            "pid": std::process::id(),
+            "started_at": started_at.to_rfc3339(),
+        });
+        std::fs::write(&daemon_json, format!("{:#}\n", manifest))?;
+
+        let router = http::build_router_with_info(deps, port, started_at);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            });
+            if let Err(e) = serve.await {
+                tracing::error!("daemon serve error: {e}");
+            }
+            if let Err(e) = std::fs::remove_file(&daemon_json) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!("failed to remove daemon.json: {e}");
+                }
+            }
+        });
+
+        tracing::info!(port, "featureforge daemon listening");
+        Ok(DaemonHandle {
+            port,
+            shutdown_tx: Some(shutdown_tx),
+            task: Some(task),
+        })
     }
 }

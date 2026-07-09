@@ -54,6 +54,70 @@ pub fn set_repo_indexed_at(conn: &Connection, repo_id: &str, indexed_at: &str) -
     Ok(())
 }
 
+/// Look up a repo row id by canonical path.
+pub fn get_repo_id_by_path(conn: &Connection, path: &str) -> anyhow::Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT id FROM repos WHERE path = ?1", params![path], |r| {
+            r.get::<_, String>(0)
+        })
+        .optional()?)
+}
+
+/// Insert a conversation thread row for a session.
+pub fn insert_thread(conn: &Connection, id: &str, repo_id: &str, title: &str) -> anyhow::Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO threads (id, repo_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![id, repo_id, title, now],
+    )?;
+    Ok(())
+}
+
+/// Insert a session row (`claude_session_id` filled in later on session_ready).
+pub fn insert_session(
+    conn: &Connection,
+    id: &str,
+    thread_id: &str,
+    status: &str,
+    model: Option<&str>,
+) -> anyhow::Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO sessions (id, thread_id, status, model, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, thread_id, status, model, now],
+    )?;
+    Ok(())
+}
+
+/// Record the SDK session id for a session (enables `--resume`).
+pub fn update_session_claude_id(
+    conn: &Connection,
+    session_id: &str,
+    claude_session_id: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE sessions SET claude_session_id = ?1 WHERE id = ?2",
+        params![claude_session_id, session_id],
+    )?;
+    Ok(())
+}
+
+/// Insert a message row (only final assistant text is persisted).
+pub fn insert_message(
+    conn: &Connection,
+    id: &str,
+    thread_id: &str,
+    role: &str,
+    content: &str,
+) -> anyhow::Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO messages (id, thread_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, thread_id, role, content, now],
+    )?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn insert_usage_log(
     conn: &Connection,

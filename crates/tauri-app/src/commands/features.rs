@@ -1,14 +1,17 @@
-use forge_core::{Feature, FeaturePatch};
+use forge_core::{Actor, EventKind, Feature, FeaturePatch};
+use forge_timeline::NewEvent;
 use tauri::State;
 
+use crate::runtime::repo_util;
 use crate::state::AppState;
 
 /// All features of an open repo (sidebar feature tree).
 #[tauri::command]
 pub async fn get_features(state: State<'_, AppState>, repo_path: String) -> Result<Vec<Feature>, String> {
-    let _ = (state, repo_path);
-    // IMPLEMENT(agent): state.repos[repo_path].index.read().await.features().to_vec()
-    Err("not implemented: get_features".into())
+    let root = repo_util::canonical(&repo_path)?;
+    let index = state.index(&root).await.ok_or("repo is not open")?;
+    let features = index.read().await.features().to_vec();
+    Ok(features)
 }
 
 /// One feature by slug (feature detail view).
@@ -18,9 +21,28 @@ pub async fn get_feature(
     repo_path: String,
     slug: String,
 ) -> Result<Feature, String> {
-    let _ = (state, repo_path, slug);
-    // IMPLEMENT(agent): index.get(slug) cloned, Err on unknown slug.
-    Err("not implemented: get_feature".into())
+    let root = repo_util::canonical(&repo_path)?;
+    let index = state.index(&root).await.ok_or("repo is not open")?;
+    let guard = index.read().await;
+    guard
+        .get(&slug)
+        .cloned()
+        .ok_or_else(|| format!("unknown feature: {slug}"))
+}
+
+/// The living doc markdown for a feature (`.featureforge/docs/<slug>.md`), or
+/// `None` if it has not been generated yet. Feature detail renders this above
+/// the description.
+#[tauri::command]
+pub async fn get_feature_doc(
+    state: State<'_, AppState>,
+    repo_path: String,
+    slug: String,
+) -> Result<Option<String>, String> {
+    let root = repo_util::canonical(&repo_path)?;
+    let index = state.index(&root).await.ok_or("repo is not open")?;
+    let guard = index.read().await;
+    guard.read_doc(&slug).map_err(|e| format!("{e}"))
 }
 
 /// Pin/unpin a feature (pinned features survive re-index verbatim). Appends a
@@ -32,9 +54,26 @@ pub async fn pin_feature(
     slug: String,
     pinned: bool,
 ) -> Result<(), String> {
-    let _ = (state, repo_path, slug, pinned);
-    // IMPLEMENT(agent): index.write().await.pin(...) + save + timeline append.
-    Err("not implemented: pin_feature".into())
+    let root = repo_util::canonical(&repo_path)?;
+    let (index, timeline) = state.index_and_timeline(&root).await.ok_or("repo is not open")?;
+
+    {
+        let mut guard = index.write().await;
+        guard.pin(&slug, pinned).map_err(|e| format!("{e}"))?;
+        guard.save().map_err(|e| format!("{e}"))?;
+    }
+
+    let event = NewEvent {
+        session_id: None,
+        actor: Actor::Human,
+        kind: EventKind::FeaturePinned,
+        feature_slugs: vec![slug],
+        payload: serde_json::json!({ "pinned": pinned }),
+    };
+    if let Err(e) = timeline.append(event) {
+        tracing::warn!("timeline append (pin) failed: {e}");
+    }
+    Ok(())
 }
 
 /// Apply a human edit to a feature (implies pinning). Appends a FeatureEdited
@@ -46,7 +85,25 @@ pub async fn update_feature(
     slug: String,
     patch: FeaturePatch,
 ) -> Result<Feature, String> {
-    let _ = (state, repo_path, slug, patch);
-    // IMPLEMENT(agent): index.write().await.apply_patch(...) + save + timeline append.
-    Err("not implemented: update_feature".into())
+    let root = repo_util::canonical(&repo_path)?;
+    let (index, timeline) = state.index_and_timeline(&root).await.ok_or("repo is not open")?;
+
+    let feature = {
+        let mut guard = index.write().await;
+        let feature = guard.apply_patch(&slug, patch).map_err(|e| format!("{e}"))?;
+        guard.save().map_err(|e| format!("{e}"))?;
+        feature
+    };
+
+    let event = NewEvent {
+        session_id: None,
+        actor: Actor::Human,
+        kind: EventKind::FeatureEdited,
+        feature_slugs: vec![slug],
+        payload: serde_json::json!({ "name": feature.name, "tags": feature.tags }),
+    };
+    if let Err(e) = timeline.append(event) {
+        tracing::warn!("timeline append (edit) failed: {e}");
+    }
+    Ok(feature)
 }

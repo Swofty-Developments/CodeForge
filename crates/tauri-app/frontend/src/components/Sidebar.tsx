@@ -1,50 +1,99 @@
-/* Sidebar — the feature tree (features, not files): pin icons, confidence-dim
- * rows, tag badges, index-status footer. */
+/* Sidebar — the feature tree (features, not files). Repo header with daemon
+ * status + index age · activity-sorted feature rows with unseen badges, pins and
+ * confidence bars · index-status footer with Reindex. Width is driven by the
+ * shell's resize handle via store.sidebarWidth. */
 
-import { For, Show } from "solid-js";
+import { For, Show, createEffect, createMemo } from "solid-js";
 import { appStore } from "../stores/app-store";
+import { FeatureRow } from "./sidebar/FeatureRow";
+import { latestActivity, markSeen, seen, sortFeatures, unseenCounts } from "./sidebar/activity";
+import { createNow, formatAgo } from "./sidebar/time";
 
 export function Sidebar() {
   const { store } = appStore;
+  const now = createNow();
+
+  const maxEventId = () => store.timeline.reduce((m, e) => Math.max(m, e.id), 0);
+
+  // Baseline each feature's watermark to the current head so badges count only
+  // activity that lands after the repo is open, then clear on selection.
+  createEffect(() => {
+    const head = maxEventId();
+    for (const f of store.features) {
+      if (seen[f.slug] === undefined) markSeen(f.slug, head);
+    }
+  });
+
+  const ordered = createMemo(() => sortFeatures(store.features, latestActivity(store.timeline)));
+  const activity = createMemo(() => unseenCounts(store.timeline, seen));
+
+  function onSelect(slug: string): void {
+    markSeen(slug, maxEventId());
+    appStore.selectFeature(slug);
+  }
+
+  const daemonRunning = () => !!store.daemon?.running;
+  const indexing = () => !!store.indexProgress;
 
   return (
     <div class="sidebar" style={{ width: `${store.sidebarWidth}px` }}>
       <div class="sidebar-header">
-        <span class="sidebar-title">FeatureForge</span>
-        <Show when={store.featuresArePlaceholder}>
-          <span class="sidebar-demo-badge">preview</span>
+        <div class="sb-repo-line">
+          <span class="sb-repo-name" title={store.repo?.path ?? undefined}>
+            {store.repo ? store.repo.name : "FeatureForge"}
+          </span>
+          <Show when={store.repo}>
+            <span
+              class="status-dot"
+              classList={{
+                "status-dot--busy": indexing(),
+                "status-dot--ready": !indexing() && daemonRunning(),
+              }}
+              title={
+                daemonRunning() ? `daemon on :${store.daemon?.port ?? "?"}` : "daemon offline"
+              }
+            />
+          </Show>
+        </div>
+        <Show when={store.repo}>
+          <div class="sb-meta">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+              <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" />
+            </svg>
+            <span>{formatAgo(store.repo!.indexedAt, now())}</span>
+          </div>
         </Show>
       </div>
 
-      <div class="section-label" style={{ padding: "0 16px 6px" }}>
-        Features
-      </div>
+      <div class="section-label sb-section-label">Features</div>
 
       <div class="sidebar-content">
-        <For each={store.features}>
-          {(feature, i) => (
-            <button
-              class="ft-row"
-              classList={{ "ft-row--active": store.selectedFeature === feature.slug }}
-              style={{ "animation-delay": `${i() * 30}ms` }}
-              onClick={() => appStore.selectFeature(feature.slug)}
-            >
-              <span
-                class="ft-dot"
-                style={{ opacity: String(0.35 + feature.confidence * 0.65) }}
-              />
-              <span class="ft-name">{feature.name}</span>
-              <span class="ft-count">{feature.files.length}</span>
-              <Show when={feature.pinned}>
-                <svg class="ft-pin" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M16 3v2l-1 1v5l3 3v2h-5v6l-1 1-1-1v-6H6v-2l3-3V6L8 5V3h8z" />
-                </svg>
-              </Show>
-            </button>
-          )}
-        </For>
-        <Show when={store.features.length === 0}>
-          <div class="ft-empty">No features yet — open a repo to index it.</div>
+        <Show
+          when={store.repo}
+          fallback={
+            <div class="sb-blank">
+              <span class="sb-blank-title">No repository open</span>
+              <span class="sb-blank-sub">Open a repo to see its feature tree.</span>
+            </div>
+          }
+        >
+          <Show
+            when={ordered().length > 0}
+            fallback={<div class="sb-blank"><span class="sb-blank-sub">No features indexed yet.</span></div>}
+          >
+            <For each={ordered()}>
+              {(feature, i) => (
+                <FeatureRow
+                  feature={feature}
+                  active={store.selectedFeature === feature.slug}
+                  activity={activity().get(feature.slug) ?? 0}
+                  index={i()}
+                  onSelect={onSelect}
+                  onTogglePin={(slug, pinned) => void appStore.pinFeature(slug, pinned)}
+                />
+              )}
+            </For>
+          </Show>
         </Show>
       </div>
 
@@ -52,25 +101,39 @@ export function Sidebar() {
         <Show
           when={store.indexProgress}
           fallback={
-            <div class="ft-index-status">
-              <span
-                class="status-dot"
-                classList={{ "status-dot--ready": !!store.repo && !store.featuresArePlaceholder }}
-              />
-              <span>
-                {store.repo
-                  ? `${store.features.length} features indexed`
-                  : "No repository open"}
-              </span>
+            <div class="sb-foot-row">
+              <div class="sb-index-status">
+                <span
+                  class="status-dot"
+                  classList={{ "status-dot--ready": !!store.repo }}
+                />
+                <span class="sb-mono">
+                  {store.repo ? `indexed ${formatAgo(store.repo.indexedAt, now())}` : "no repo"}
+                </span>
+              </div>
+              <button
+                class="sb-reindex"
+                disabled={!store.repo}
+                title="Re-index this repository"
+                onClick={() => void appStore.reindex(false)}
+              >
+                Reindex
+              </button>
             </div>
           }
         >
           {(p) => (
-            <div class="ft-index-status">
-              <span class="status-dot status-dot--busy" />
-              <span>
-                Indexing {p().stage} · {p().done}/{p().total}
-              </span>
+            <div class="sb-progress">
+              <div class="sb-progress-head">
+                <span class="sb-mono sb-progress-stage">{p().stage}</span>
+                <span class="sb-mono sb-progress-count">
+                  {p().done}/{p().total}
+                </span>
+              </div>
+              <div class="sb-shimmer" />
+              <Show when={p().detail}>
+                <span class="sb-progress-detail">{p().detail}</span>
+              </Show>
             </div>
           )}
         </Show>
@@ -84,56 +147,82 @@ export function Sidebar() {
           border-right: 1px solid var(--border);
           flex-shrink: 0;
           height: 100vh;
+          min-width: 0;
         }
         .sidebar-header {
           display: flex;
-          align-items: center;
-          gap: var(--space-2);
+          flex-direction: column;
+          gap: 3px;
           padding: var(--space-4) var(--space-4) var(--space-3);
         }
-        .sidebar-title { font-size: 14px; font-weight: 700; letter-spacing: -0.3px; color: var(--text); }
-        .sidebar-demo-badge {
-          font-size: 9px; font-weight: 500; font-family: var(--font-mono);
-          padding: 0 var(--space-1); border-radius: 3px; line-height: 1.5;
-          color: var(--amber); background: rgba(var(--amber-rgb), 0.1);
-        }
-        .sidebar-content { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 var(--space-1); }
-        .sidebar-footer { padding: var(--space-3); border-top: 1px solid var(--border); }
-
-        .ft-row {
-          display: flex; align-items: center; gap: var(--space-2);
-          width: calc(100% - 8px);
-          padding: 6px var(--space-3);
-          margin: 1px var(--space-1);
-          border-radius: var(--radius-sm);
-          cursor: pointer;
-          text-align: left;
-          transition: background 0.15s, box-shadow 0.2s;
-          position: relative;
-          animation: row-stagger-in 0.2s ease-out both;
-        }
-        .ft-row:hover { background: var(--bg-hover); }
-        .ft-row--active { background: var(--bg-accent); box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15); }
-        .ft-row--active::before {
-          content: ""; position: absolute; left: 0; top: 6px; bottom: 6px;
-          width: 2px; border-radius: 1px; background: var(--primary);
-        }
-        .ft-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
-        .ft-name {
-          flex: 1; min-width: 0;
-          font-size: 12px; color: var(--text-secondary);
+        .sb-repo-line { display: flex; align-items: center; gap: var(--space-2); }
+        .sb-repo-name {
+          font-size: 14px; font-weight: 700; letter-spacing: -0.3px; color: var(--text);
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .ft-row--active .ft-name { color: var(--text); font-weight: 500; }
-        .ft-count {
-          font-size: 9px; font-weight: 500; font-family: var(--font-mono);
+        .sb-meta {
+          display: flex; align-items: center; gap: 4px;
+          font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary);
+        }
+        .sb-meta svg { opacity: 0.7; flex-shrink: 0; }
+
+        .sb-section-label { padding: 0 var(--space-4) 6px; }
+
+        .sidebar-content { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 var(--space-1); }
+        .sb-blank {
+          display: flex; flex-direction: column; gap: 4px;
+          align-items: center; text-align: center;
+          margin: auto; padding: var(--space-8) var(--space-4);
           color: var(--text-tertiary);
         }
-        .ft-pin { color: var(--amber); flex-shrink: 0; }
-        .ft-empty { padding: var(--space-4); font-size: 12px; color: var(--text-tertiary); }
-        .ft-index-status {
+        .sb-blank-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+        .sb-blank-sub { font-size: 11px; line-height: 1.5; }
+
+        .sidebar-footer { padding: var(--space-3); border-top: 1px solid var(--border); }
+        .sb-foot-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+        .sb-index-status {
           display: flex; align-items: center; gap: var(--space-2);
-          font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);
+          min-width: 0; font-size: 11px; color: var(--text-tertiary);
+        }
+        .sb-mono { font-family: var(--font-mono); }
+        .sb-index-status .sb-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .sb-reindex {
+          flex-shrink: 0;
+          font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+          letter-spacing: 0.02em;
+          color: var(--text-secondary);
+          padding: 3px 10px;
+          border-radius: var(--radius-sm);
+          transition: background 0.15s, color 0.15s;
+        }
+        .sb-reindex:hover { background: rgba(var(--primary-rgb), 0.1); color: var(--primary); }
+        .sb-reindex:disabled { opacity: 0.4; cursor: default; background: none; color: var(--text-tertiary); }
+
+        .sb-progress { display: flex; flex-direction: column; gap: 5px; }
+        .sb-progress-head { display: flex; align-items: baseline; justify-content: space-between; }
+        .sb-progress-stage { font-size: 10px; color: var(--sky); text-transform: capitalize; }
+        .sb-progress-count { font-size: 10px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .sb-shimmer {
+          height: 3px; border-radius: 2px; overflow: hidden;
+          background: linear-gradient(90deg,
+            rgba(var(--sky-rgb), 0.08) 0%,
+            rgba(var(--sky-rgb), 0.35) 45%,
+            rgba(var(--primary-rgb), 0.35) 55%,
+            rgba(var(--sky-rgb), 0.08) 100%);
+          background-size: 200% 100%;
+          animation: shimmer-flow 1.5s ease-in-out infinite;
+        }
+        .sb-progress-detail {
+          font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .sb-shimmer {
+            animation: none;
+            background: rgba(var(--sky-rgb), 0.2);
+          }
         }
       `}</style>
     </div>

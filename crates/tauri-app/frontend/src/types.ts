@@ -200,13 +200,48 @@ export interface ContentBlock {
 
 export type RunState = "idle" | "starting" | "ready" | "generating" | "interrupting" | "error";
 
+export interface MessageMeta {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+}
+
+/** One chat message. Id conventions: `opt-*` optimistic user send, plain uuid
+ *  live streaming assistant message, `done-*` finalized. */
+export interface SessionMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  blocks: ContentBlock[];
+  meta?: MessageMeta;
+}
+
+/** Token/cost totals accumulated across a session's turns. */
+export interface SessionUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+}
+
+export interface ErrorToast {
+  id: number;
+  message: string;
+}
+
 /** A session as rendered in the right-hand session pane. */
 export interface SessionUi {
   info: SessionInfo;
   runState: RunState;
+  /** Flat mirror of every streamed agent block; block objects are shared with `messages`. */
   blocks: ContentBlock[];
+  messages: SessionMessage[];
   pendingApproval: { requestId: string; description: string } | null;
   slashCommands: string[];
+  claudeSessionId: string | null;
+  usage: SessionUsage;
 }
 
 export type ActiveView = "welcome" | "feature" | "timeline" | "diff";

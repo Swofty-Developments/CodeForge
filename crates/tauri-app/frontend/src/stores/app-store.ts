@@ -1,7 +1,7 @@
 /**
  * THE single global store (createRoot(createStore) singleton, CodeForge-style).
- * The store SHAPE is the frozen contract; action bodies are minimal until the
- * backend commands are implemented.
+ * The store SHAPE is the frozen contract; session actions + the agent-event
+ * reducer live in session-slice.ts.
  */
 
 import { createRoot } from "solid-js";
@@ -9,25 +9,35 @@ import { createStore } from "solid-js/store";
 import * as ipc from "../ipc";
 import type {
   ActiveView,
-  AgentEventPayload,
   DaemonStatus,
   DiffByFeature,
+  ErrorToast,
   Feature,
+  FeaturePatch,
   IndexProgress,
   RepoState,
   SessionUi,
   TimelineEvent,
 } from "../types";
-import { PLACEHOLDER_FEATURES } from "./placeholder-data";
+import { createSessionSlice } from "./session-slice";
+
+const TIMELINE_CAP = 1000;
+const TOAST_DISMISS_MS = 5000;
 
 export interface AppStore {
   repo: RepoState | null;
   features: Feature[];
-  /** True while `features` holds scaffold placeholder data. */
+  /** Legacy scaffold flag — always false now that the backend is wired. */
   featuresArePlaceholder: boolean;
   selectedFeature: string | null;
+  /** Recent timeline slice for the selected feature (FeatureDetail). */
+  selectedFeatureTimeline: TimelineEvent[];
+  /** Living-doc markdown (.featureforge/docs/<slug>.md) for the selected feature. */
+  selectedFeatureDoc: string | null;
   activeView: ActiveView;
   timeline: TimelineEvent[];
+  /** Per-feature live event counters (sidebar activity badges). */
+  featureActivity: Record<string, number>;
   diff: DiffByFeature | null;
   sessions: SessionUi[];
   activeSessionId: string | null;
@@ -37,17 +47,23 @@ export interface AppStore {
   sidebarWidth: number;
   sessionPaneOpen: boolean;
   sessionPaneWidth: number;
+  /** Text waiting to be inserted into the session composer ("Ask Claude" flow). */
+  composerPrefill: string | null;
   lastError: string | null;
+  toasts: ErrorToast[];
 }
 
 function createAppStore() {
   const [store, setStore] = createStore<AppStore>({
     repo: null,
-    features: PLACEHOLDER_FEATURES,
-    featuresArePlaceholder: true,
+    features: [],
+    featuresArePlaceholder: false,
     selectedFeature: null,
+    selectedFeatureTimeline: [],
+    selectedFeatureDoc: null,
     activeView: "welcome",
     timeline: [],
+    featureActivity: {},
     diff: null,
     sessions: [],
     activeSessionId: null,
@@ -57,20 +73,36 @@ function createAppStore() {
     sidebarWidth: 260,
     sessionPaneOpen: true,
     sessionPaneWidth: 380,
+    composerPrefill: null,
     lastError: null,
+    toasts: [],
   });
+
+  // ── Error surface ─────────────────────────────────────────────────────────
+
+  let toastSeq = 0;
+
+  function pushError(message: string): void {
+    const id = ++toastSeq;
+    setStore("lastError", message);
+    setStore("toasts", (t) => [...t, { id, message }]);
+    setTimeout(() => dismissToast(id), TOAST_DISMISS_MS);
+  }
+
+  function dismissToast(id: number): void {
+    setStore("toasts", (t) => t.filter((x) => x.id !== id));
+  }
 
   // ── Repo lifecycle ────────────────────────────────────────────────────────
 
   async function openRepo(path: string): Promise<void> {
     try {
       const repo = await ipc.openRepo(path);
-      setStore("repo", repo);
-      setStore("lastError", null);
+      setStore({ repo, lastError: null, featureActivity: {}, selectedFeature: null, selectedFeatureTimeline: [] });
       await Promise.all([refreshFeatures(), refreshTimeline(), refreshDaemon()]);
       setStore("activeView", store.features.length > 0 ? "feature" : "timeline");
     } catch (e) {
-      setStore("lastError", String(e));
+      pushError(String(e));
     }
   }
 
@@ -80,27 +112,54 @@ function createAppStore() {
     try {
       await ipc.closeRepo(repo.path);
     } catch (e) {
-      setStore("lastError", String(e));
+      pushError(String(e));
     }
     setStore({
       repo: null,
-      features: PLACEHOLDER_FEATURES,
-      featuresArePlaceholder: true,
+      features: [],
       selectedFeature: null,
+      selectedFeatureTimeline: [],
       activeView: "welcome",
       timeline: [],
+      featureActivity: {},
       diff: null,
       daemon: null,
       indexProgress: null,
+      composerPrefill: null,
     });
   }
 
-  async function reindex(force: boolean): Promise<void> {
+  async function reindex(force = false): Promise<void> {
     if (!store.repo) return;
     try {
       await ipc.reindexRepo(store.repo.path, force);
     } catch (e) {
-      setStore("lastError", String(e));
+      pushError(String(e));
+    }
+  }
+
+  // ── Features ──────────────────────────────────────────────────────────────
+
+  async function pinFeature(slug: string, pinned: boolean): Promise<void> {
+    if (!store.repo) return;
+    const i = store.features.findIndex((f) => f.slug === slug);
+    if (i >= 0) setStore("features", i, "pinned", pinned); // optimistic
+    try {
+      await ipc.pinFeature(store.repo.path, slug, pinned);
+    } catch (e) {
+      if (i >= 0) setStore("features", i, "pinned", !pinned);
+      pushError(String(e));
+    }
+  }
+
+  async function updateFeature(slug: string, patch: FeaturePatch): Promise<void> {
+    if (!store.repo) return;
+    try {
+      const updated = await ipc.updateFeature(store.repo.path, slug, patch);
+      const i = store.features.findIndex((f) => f.slug === slug);
+      if (i >= 0) setStore("features", i, updated);
+    } catch (e) {
+      pushError(String(e));
     }
   }
 
@@ -112,7 +171,7 @@ function createAppStore() {
       const features = await ipc.getFeatures(store.repo.path);
       setStore({ features, featuresArePlaceholder: false });
     } catch (e) {
-      setStore("lastError", String(e));
+      pushError(String(e));
     }
   }
 
@@ -121,7 +180,7 @@ function createAppStore() {
     try {
       setStore("timeline", await ipc.getTimeline(store.repo.path, { limit: 200 }));
     } catch (e) {
-      setStore("lastError", String(e));
+      pushError(String(e));
     }
   }
 
@@ -130,7 +189,7 @@ function createAppStore() {
     try {
       setStore("diff", await ipc.getDiffByFeature(store.repo.path));
     } catch (e) {
-      setStore("lastError", String(e));
+      pushError(String(e));
     }
   }
 
@@ -146,8 +205,29 @@ function createAppStore() {
   // ── Navigation ────────────────────────────────────────────────────────────
 
   function selectFeature(slug: string | null): void {
-    setStore("selectedFeature", slug);
-    if (slug) setStore("activeView", "feature");
+    setStore({ selectedFeature: slug, selectedFeatureTimeline: [], selectedFeatureDoc: null });
+    if (!slug) return;
+    setStore("activeView", "feature");
+    const repo = store.repo;
+    if (!repo) return;
+    void (async () => {
+      try {
+        const [feature, events, doc] = await Promise.all([
+          ipc.getFeature(repo.path, slug),
+          ipc.getTimeline(repo.path, { featureSlug: slug, limit: 50 }),
+          ipc.getFeatureDoc(repo.path, slug),
+        ]);
+        const i = store.features.findIndex((f) => f.slug === slug);
+        if (i >= 0) setStore("features", i, feature);
+        // Stale-response guard: only apply if this feature is still selected.
+        if (store.selectedFeature === slug) {
+          setStore("selectedFeatureTimeline", events);
+          setStore("selectedFeatureDoc", doc);
+        }
+      } catch (e) {
+        pushError(String(e));
+      }
+    })();
   }
 
   function setActiveView(view: ActiveView): void {
@@ -164,116 +244,61 @@ function createAppStore() {
     setStore("sidebarWidth", Math.min(500, Math.max(180, px)));
   }
 
+  function setSessionPaneWidth(px: number): void {
+    setStore("sessionPaneWidth", Math.min(640, Math.max(280, px)));
+  }
+
   function toggleSessionPane(): void {
     setStore("sessionPaneOpen", !store.sessionPaneOpen);
   }
 
-  // ── Sessions ──────────────────────────────────────────────────────────────
+  // ── Sessions (see session-slice.ts) ───────────────────────────────────────
 
-  async function startSession(): Promise<void> {
-    if (!store.repo) return;
-    try {
-      const info = await ipc.startSession({ repoPath: store.repo.path });
-      setStore("sessions", store.sessions.length, {
-        info,
-        runState: "starting",
-        blocks: [],
-        pendingApproval: null,
-        slashCommands: [],
-      });
-      setStore("activeSessionId", info.id);
-    } catch (e) {
-      setStore("lastError", String(e));
-    }
-  }
+  const sessionSlice = createSessionSlice(store, setStore, pushError);
 
-  async function sendSessionInput(text: string): Promise<void> {
-    const id = store.activeSessionId;
-    if (!id) return;
-    try {
-      await ipc.sendSessionInput(id, text);
-    } catch (e) {
-      setStore("lastError", String(e));
-    }
-  }
-
-  async function approveRequest(sessionId: string, requestId: string, approve: boolean): Promise<void> {
-    try {
-      await ipc.approveSession(sessionId, requestId, approve);
-    } catch (e) {
-      setStore("lastError", String(e));
-    }
-  }
-
-  async function stopSession(id: string): Promise<void> {
-    try {
-      await ipc.stopSession(id);
-    } catch (e) {
-      setStore("lastError", String(e));
-    }
-    setStore("sessions", (s) => s.filter((x) => x.info.id !== id));
-    if (store.activeSessionId === id) setStore("activeSessionId", null);
-  }
-
-  // ── Event reducers (single global listeners, registered in main.tsx) ─────
-
-  function handleAgentEvent(payload: AgentEventPayload): void {
-    const idx = store.sessions.findIndex((s) => s.info.id === payload.sessionId);
-    if (idx < 0) return;
-    // Minimal reducer — the full ContentBlock semantics (tool cards, thinking,
-    // backwards tool_id correlation) are specified in docs/ARCHITECTURE.md.
-    switch (payload.eventType) {
-      case "turn_started":
-        setStore("sessions", idx, "runState", "generating");
-        break;
-      case "turn_completed":
-      case "turn_aborted":
-        setStore("sessions", idx, "runState", "ready");
-        break;
-      case "session_ready":
-        if (store.sessions[idx].runState !== "generating") {
-          setStore("sessions", idx, "runState", "ready");
-        }
-        if (payload.model) setStore("sessions", idx, "info", "model", payload.model);
-        break;
-      case "content_delta": {
-        const blocks = store.sessions[idx].blocks;
-        const last = blocks[blocks.length - 1];
-        if (last && last.type === "text") {
-          setStore("sessions", idx, "blocks", blocks.length - 1, "content", (c) => c + (payload.text ?? ""));
-        } else {
-          setStore("sessions", idx, "blocks", blocks.length, { type: "text", content: payload.text ?? "" });
-        }
-        break;
-      }
-      case "approval_required":
-        setStore("sessions", idx, "pendingApproval", {
-          requestId: payload.requestId ?? "",
-          description: payload.description ?? "",
-        });
-        break;
-      case "slash_commands":
-        setStore("sessions", idx, "slashCommands", payload.commands ?? []);
-        break;
-      case "session_error":
-        setStore("sessions", idx, "runState", "error");
-        break;
-      default:
-        break;
-    }
-  }
+  // ── Event reducers (single global listeners, registered via initListeners) ─
 
   function handleTimelineEvent(event: TimelineEvent): void {
-    setStore("timeline", (t) => [event, ...t]);
+    setStore("timeline", (t) => [event, ...t].slice(0, TIMELINE_CAP));
+    for (const slug of event.featureSlugs) {
+      setStore("featureActivity", slug, (n) => (n ?? 0) + 1);
+    }
+    if (store.selectedFeature && event.featureSlugs.includes(store.selectedFeature)) {
+      setStore("selectedFeatureTimeline", (t) => [event, ...t].slice(0, 100));
+    }
   }
 
   function handleIndexProgress(progress: IndexProgress): void {
-    setStore("indexProgress", progress.done >= progress.total && progress.total > 0 ? null : progress);
+    const done = progress.total > 0 && progress.done >= progress.total;
+    setStore("indexProgress", done ? null : progress);
+    if (done) {
+      void refreshFeatures();
+      void refreshTimeline();
+    }
   }
 
   function handleRepoChanged(repo: RepoState): void {
     setStore("repo", repo);
     void refreshFeatures();
+  }
+
+  // ── Listener registration (once per app run) ──────────────────────────────
+
+  let listenersRegistered = false;
+
+  async function initListeners(): Promise<void> {
+    if (listenersRegistered) return;
+    listenersRegistered = true;
+    try {
+      await Promise.all([
+        ipc.listenAgentEvent(sessionSlice.handleAgentEvent),
+        ipc.listenTimelineEvent(handleTimelineEvent),
+        ipc.listenIndexProgress(handleIndexProgress),
+        ipc.listenRepoChanged(handleRepoChanged),
+      ]);
+    } catch {
+      // Not running inside Tauri (plain `vite dev` in a browser) — fine for UI work.
+    }
   }
 
   return {
@@ -282,6 +307,8 @@ function createAppStore() {
     openRepo,
     closeRepo,
     reindex,
+    pinFeature,
+    updateFeature,
     refreshFeatures,
     refreshTimeline,
     refreshDiff,
@@ -290,15 +317,15 @@ function createAppStore() {
     setActiveView,
     setPaletteOpen,
     setSidebarWidth,
+    setSessionPaneWidth,
     toggleSessionPane,
-    startSession,
-    sendSessionInput,
-    approveRequest,
-    stopSession,
-    handleAgentEvent,
+    pushError,
+    dismissToast,
+    ...sessionSlice,
     handleTimelineEvent,
     handleIndexProgress,
     handleRepoChanged,
+    initListeners,
   };
 }
 

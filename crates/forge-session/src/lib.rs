@@ -6,8 +6,10 @@
 //! doc-comment; [`AgentEvent`] mirrors the sidecar out-events 1:1.
 
 mod claude;
+mod locate;
 mod manager;
 mod payload;
+mod protocol;
 pub mod shell_env;
 mod types;
 

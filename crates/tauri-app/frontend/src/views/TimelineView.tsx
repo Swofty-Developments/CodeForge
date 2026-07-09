@@ -1,94 +1,182 @@
 /* Timeline view — reverse-chron immutable event list, live via timeline:event.
- * Placeholder empty state until the backend is wired. */
+ * Composes the filter bar + event rows over the merged (live + paged) feed.
+ * Client-side filtering with a backend refetch when narrowed; caps rendered
+ * rows and pages older events via the since-cursor. Zero edit affordances. */
 
-import { For, Show } from "solid-js";
-import type { EventKind } from "../types";
+import { For, Show, createComputed, createMemo, createSignal, onCleanup } from "solid-js";
+import { createStore } from "solid-js/store";
+import type { Actor, EventKind } from "../types";
 import { appStore } from "../stores/app-store";
+import { TimelineEventRow } from "../components/timeline/TimelineEventRow";
+import { TimelineFilterBar, type FeatureChip } from "../components/timeline/TimelineFilterBar";
+import { useTimelineEvents } from "../components/timeline/use-timeline-events";
+import {
+  filtersNarrowed,
+  matchesFilters,
+  toIpcFilter,
+  type TimelineFilters,
+} from "../components/timeline/timeline-utils";
 
-const KIND_LABEL: Record<EventKind, string> = {
-  session_started: "Session started",
-  session_ended: "Session ended",
-  file_edited: "File edited",
-  command_run: "Command run",
-  tests_run: "Tests run",
-  index_started: "Index started",
-  index_completed: "Index completed",
-  feature_pinned: "Feature pinned",
-  feature_edited: "Feature edited",
-  note: "Note",
-};
+const RENDER_STEP = 500;
+
+if (!document.getElementById("tlv-styles")) {
+  const style = document.createElement("style");
+  style.id = "tlv-styles";
+  style.textContent = `
+    .tlv { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .tlv-filter {
+      position: sticky; top: 0; z-index: 2;
+      background: var(--bg-base); border-bottom: 1px solid var(--border);
+    }
+    .tlv-list {
+      max-width: 820px; width: 100%; margin: 0 auto;
+      padding: var(--space-3) var(--space-4) var(--space-8);
+      display: flex; flex-direction: column; gap: 1px;
+    }
+    .tlv-more {
+      display: flex; justify-content: center; padding: var(--space-4) 0 0;
+    }
+    .tlv-more-btn {
+      font-size: 11px; font-weight: 500; color: var(--text-secondary);
+      padding: 5px 16px; border-radius: var(--radius-pill);
+      background: var(--bg-muted); border: 1px solid var(--border);
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .tlv-more-btn:hover:not(:disabled) { background: var(--bg-accent); border-color: var(--border-strong); color: var(--text); }
+    .tlv-more-btn:disabled { opacity: 0.5; cursor: default; }
+    .tlv-nomatch {
+      margin: auto; text-align: center; padding: var(--space-8) var(--space-4);
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    .tlv-nomatch-text { font-size: 12px; color: var(--text-tertiary); }
+    .tlv-nomatch-clear {
+      font-size: 11px; font-family: var(--font-mono); color: var(--primary);
+      padding: 2px 10px; border-radius: var(--radius-pill);
+      background: rgba(var(--primary-rgb), 0.08); border: 1px solid rgba(var(--primary-rgb), 0.2);
+    }
+    .tlv-empty { margin: auto; text-align: center; max-width: 360px; animation: fade-slide-up 0.22s var(--ease-out) both; }
+    .tlv-empty-title { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+    .tlv-empty-sub { font-size: 12px; line-height: 1.5; color: var(--text-tertiary); }
+  `;
+  document.head.appendChild(style);
+}
 
 export function TimelineView() {
   const { store } = appStore;
+  const { events, loadOlder, refetch, loadingOlder, exhausted } = useTimelineEvents();
+
+  const [filters, setFilters] = createStore<TimelineFilters>({ feature: null, actor: null, kinds: [] });
+  const [renderLimit, setRenderLimit] = createSignal(RENDER_STEP);
+  const [now, setNow] = createSignal(Date.now());
+
+  const clock = setInterval(() => setNow(Date.now()), 30_000);
+  onCleanup(() => clearInterval(clock));
+
+  // Baseline = highest event id present when the feed first loads. Anything with
+  // a larger id arrived live afterward and gets the streaming-in animation.
+  const [baseline, setBaseline] = createSignal<number | null>(null);
+  createComputed(() => {
+    const evs = events();
+    if (baseline() === null && evs.length > 0) setBaseline(evs[0].id);
+  });
+  const isLive = (id: number) => baseline() !== null && id > baseline()!;
+
+  const featureChips = createMemo<FeatureChip[]>(() =>
+    store.features.map((f) => ({ slug: f.slug, name: f.name })),
+  );
+
+  const snapshot = (): TimelineFilters => ({
+    feature: filters.feature,
+    actor: filters.actor,
+    kinds: [...filters.kinds],
+  });
+
+  function maybeRefetch(): void {
+    const f = snapshot();
+    if (filtersNarrowed(f)) void refetch(toIpcFilter(f));
+  }
+
+  function onFeature(slug: string | null): void {
+    setFilters("feature", slug);
+    maybeRefetch();
+  }
+  function onActor(actor: Actor | null): void {
+    setFilters("actor", actor);
+    maybeRefetch();
+  }
+  function onKind(kind: EventKind): void {
+    setFilters("kinds", (ks) => (ks.includes(kind) ? ks.filter((k) => k !== kind) : [...ks, kind]));
+    maybeRefetch();
+  }
+  function onClear(): void {
+    setFilters({ feature: null, actor: null, kinds: [] });
+  }
+
+  const filtered = createMemo(() => {
+    const f = snapshot();
+    if (!filtersNarrowed(f)) return events();
+    return events().filter((e) => matchesFilters(e, f));
+  });
+
+  const visible = createMemo(() => filtered().slice(0, renderLimit()));
+  const hasMore = () => filtered().length > visible().length || !exhausted();
+
+  async function onLoadOlder(): Promise<void> {
+    if (filtered().length > renderLimit()) {
+      setRenderLimit(renderLimit() + RENDER_STEP);
+      return;
+    }
+    await loadOlder(toIpcFilter(snapshot()));
+    setRenderLimit(renderLimit() + RENDER_STEP);
+  }
 
   return (
-    <div class="tl">
+    <div class="tlv">
       <Show
-        when={store.timeline.length > 0}
+        when={events().length > 0}
         fallback={
-          <div class="tl-empty">
-            <div class="tl-empty-title">Nothing on the timeline yet</div>
-            <div class="tl-empty-sub">
-              Once hooks are installed, every edit, command and session lands here —
-              classified by feature, live.
-            </div>
+          <div class="tlv-empty">
+            <div class="tlv-empty-title">No timeline yet</div>
+            <div class="tlv-empty-sub">Events will appear as agents work.</div>
           </div>
         }
       >
-        <div class="tl-list">
-          <For each={store.timeline}>
-            {(event) => (
-              <div class="tl-row">
-                <span
-                  class="tl-lane"
-                  classList={{
-                    "tl-lane--agent": event.actor === "agent",
-                    "tl-lane--human": event.actor === "human",
-                  }}
-                />
-                <span class="tl-kind">{KIND_LABEL[event.kind]}</span>
-                <span class="tl-slugs">
-                  <For each={event.featureSlugs}>
-                    {(slug) => <span class="tl-slug">{slug}</span>}
-                  </For>
-                </span>
-                <span class="tl-ts">{new Date(event.ts).toLocaleTimeString()}</span>
-              </div>
-            )}
-          </For>
+        <div class="tlv-filter">
+          <TimelineFilterBar
+            features={featureChips()}
+            filters={filters}
+            onFeature={onFeature}
+            onActor={onActor}
+            onKind={onKind}
+            onClear={onClear}
+          />
         </div>
-      </Show>
 
-      <style>{`
-        .tl { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-        .tl-empty { margin: auto; text-align: center; max-width: 340px; animation: fade-slide-up 0.22s var(--ease-out) both; }
-        .tl-empty-title { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
-        .tl-empty-sub { font-size: 12px; line-height: 1.5; color: var(--text-tertiary); }
-        .tl-list {
-          max-width: 768px; width: 100%; margin: 0 auto;
-          padding: var(--space-4);
-          display: flex; flex-direction: column; gap: 2px;
-        }
-        .tl-row {
-          display: flex; align-items: center; gap: var(--space-3);
-          padding: 6px 10px;
-          border-radius: var(--radius-sm);
-          animation: fade-slide-up 0.15s var(--ease-out) both;
-        }
-        .tl-row:hover { background: var(--bg-hover); }
-        .tl-lane { width: 2px; height: 16px; border-radius: 1px; background: var(--text-tertiary); flex-shrink: 0; }
-        .tl-lane--agent { background: var(--primary); }
-        .tl-lane--human { background: var(--green); }
-        .tl-kind { font-size: 12px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
-        .tl-slugs { flex: 1; display: flex; gap: 4px; overflow: hidden; }
-        .tl-slug {
-          font-size: 9px; font-family: var(--font-mono);
-          padding: 0 6px; border-radius: var(--radius-pill);
-          color: var(--primary); background: rgba(var(--primary-rgb), 0.08);
-          white-space: nowrap;
-        }
-        .tl-ts { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-      `}</style>
+        <Show
+          when={visible().length > 0}
+          fallback={
+            <div class="tlv-nomatch">
+              <span class="tlv-nomatch-text">No events match these filters.</span>
+              <button class="tlv-nomatch-clear" onClick={onClear}>
+                clear filters
+              </button>
+            </div>
+          }
+        >
+          <div class="tlv-list">
+            <For each={visible()}>
+              {(event) => <TimelineEventRow event={event} now={now()} live={isLive(event.id)} />}
+            </For>
+            <Show when={hasMore()}>
+              <div class="tlv-more">
+                <button class="tlv-more-btn" disabled={loadingOlder()} onClick={() => void onLoadOlder()}>
+                  {loadingOlder() ? "Loading…" : "Load older"}
+                </button>
+              </div>
+            </Show>
+          </div>
+        </Show>
+      </Show>
     </div>
   );
 }

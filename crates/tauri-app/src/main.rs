@@ -5,6 +5,7 @@ mod db;
 mod events;
 mod migrations;
 mod queries;
+mod runtime;
 mod state;
 
 use std::collections::HashMap;
@@ -56,6 +57,7 @@ fn main() {
             commands::repo::daemon_status,
             commands::features::get_features,
             commands::features::get_feature,
+            commands::features::get_feature_doc,
             commands::features::pin_feature,
             commands::features::update_feature,
             commands::timeline::get_timeline,

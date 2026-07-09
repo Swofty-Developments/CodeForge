@@ -60,6 +60,10 @@ export function getFeature(repoPath: string, slug: string): Promise<Feature> {
   return invoke("get_feature", { repoPath, slug });
 }
 
+export function getFeatureDoc(repoPath: string, slug: string): Promise<string | null> {
+  return invoke("get_feature_doc", { repoPath, slug });
+}
+
 export function pinFeature(repoPath: string, slug: string, pinned: boolean): Promise<void> {
   return invoke("pin_feature", { repoPath, slug, pinned });
 }

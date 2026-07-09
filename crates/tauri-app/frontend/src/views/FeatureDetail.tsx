@@ -1,22 +1,62 @@
-/* Feature detail view — description, entry points, file list with roles,
- * living doc + recent timeline (placeholders until wired). */
+/* Feature detail view — inline-editable header (name/description), entry points
+ * (open in editor), files grouped by role, living doc, recent activity, and the
+ * "Ask Claude about this feature" hand-off. Sections use the shared collapse. */
 
-import { For, Show, createMemo } from "solid-js";
-import type { FileRole } from "../types";
+import { For, Show, createMemo, createSignal } from "solid-js";
+import { marked } from "marked";
+import type { Feature } from "../types";
 import { appStore } from "../stores/app-store";
+import { CollapsibleSection } from "../components/feature/CollapsibleSection";
+import { FilesSection } from "../components/feature/FilesSection";
+import { RecentActivity } from "../components/feature/RecentActivity";
+import { openInEditor } from "../components/feature/open-path";
+import { createNow } from "../components/sidebar/time";
 
-const ROLE_TINT: Record<FileRole, string> = {
-  core: "tint-primary",
-  support: "tint-sky",
-  test: "tint-green",
-  config: "tint-amber",
-};
+const RECENT_LIMIT = 15;
+
+function confidenceTint(c: number): string {
+  if (c >= 0.75) return "tint-green";
+  if (c >= 0.5) return "tint-amber";
+  return "tint-red";
+}
 
 export function FeatureDetail() {
   const { store } = appStore;
-  const feature = createMemo(() =>
-    store.features.find((f) => f.slug === store.selectedFeature) ?? null,
+  const now = createNow();
+  const feature = createMemo(
+    () => store.features.find((f) => f.slug === store.selectedFeature) ?? null,
   );
+
+  const [editingName, setEditingName] = createSignal(false);
+  const [editingDesc, setEditingDesc] = createSignal(false);
+
+  function commitName(f: Feature, value: string): void {
+    setEditingName(false);
+    const next = value.trim();
+    if (next && next !== f.name) void appStore.updateFeature(f.slug, { name: next });
+  }
+
+  function commitDesc(f: Feature, value: string): void {
+    setEditingDesc(false);
+    const next = value.trim();
+    if (next !== f.description) void appStore.updateFeature(f.slug, { description: next });
+  }
+
+  function open(path: string): void {
+    void openInEditor(store.repo?.path, path).catch((e) => appStore.pushError(String(e)));
+  }
+
+  function askClaude(f: Feature): void {
+    appStore.prefillComposer(`Explain the ${f.name} feature and its current state`);
+  }
+
+  const recent = createMemo(() => store.selectedFeatureTimeline.slice(0, RECENT_LIMIT));
+  // Prefer the generated living doc (.featureforge/docs/<slug>.md); fall back to
+  // the feature description until an index run has written one.
+  const livingDoc = createMemo(() => {
+    const md = store.selectedFeatureDoc ?? feature()?.description ?? "";
+    return md ? (marked.parse(md) as string) : "";
+  });
 
   return (
     <div class="fd">
@@ -31,37 +71,132 @@ export function FeatureDetail() {
       >
         {(f) => (
           <div class="fd-inner">
+            {/* ── Header ── */}
             <div class="fd-header">
-              <h2 class="fd-title">{f().name}</h2>
-              <Show when={f().pinned}>
-                <span class="fd-pill tint-amber">pinned</span>
+              <Show
+                when={editingName()}
+                fallback={
+                  <h2 class="fd-title" title="Double-click to rename" onDblClick={() => setEditingName(true)}>
+                    {f().name}
+                  </h2>
+                }
+              >
+                <input
+                  class="fd-title-input"
+                  value={f().name}
+                  ref={(el) => setTimeout(() => { el.focus(); el.select(); }, 0)}
+                  onBlur={(e) => commitName(f(), e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); commitName(f(), e.currentTarget.value); }
+                    else if (e.key === "Escape") { e.preventDefault(); setEditingName(false); }
+                  }}
+                />
               </Show>
-              <span class="fd-confidence">{Math.round(f().confidence * 100)}%</span>
-            </div>
-            <p class="fd-description">{f().description}</p>
-            <div class="fd-tags">
-              <For each={f().tags}>{(tag) => <span class="fd-pill tint-purple">{tag}</span>}</For>
+
+              <button
+                class="fd-pin"
+                classList={{ "fd-pin--on": f().pinned }}
+                title={f().pinned ? "Unpin feature" : "Pin feature"}
+                onClick={() => void appStore.pinFeature(f().slug, !f().pinned)}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M16 3v2l-1 1v5l3 3v2h-5v6l-1 1-1-1v-6H6v-2l3-3V6L8 5V3h8z" />
+                </svg>
+              </button>
+
+              <span class={`fd-chip fd-confidence ${confidenceTint(f().confidence)}`}>
+                {Math.round(f().confidence * 100)}% conf
+              </span>
             </div>
 
-            <div class="section-label fd-section">Entry points</div>
-            <For each={f().entryPoints}>
-              {(path) => <div class="fd-file fd-file--entry">{path}</div>}
-            </For>
+            <Show when={f().tags.length > 0}>
+              <div class="fd-tags">
+                <For each={f().tags}>{(tag) => <span class="fd-chip tint-purple">{tag}</span>}</For>
+              </div>
+            </Show>
 
-            <div class="section-label fd-section">Files</div>
-            <For each={f().files}>
-              {(file) => (
-                <div class="fd-file">
-                  <span class="fd-file-path">{file.path}</span>
-                  <span class={`fd-pill ${ROLE_TINT[file.role]}`}>{file.role}</span>
+            {/* ── Description (click to edit) ── */}
+            <Show
+              when={editingDesc()}
+              fallback={
+                <p
+                  class="fd-description"
+                  classList={{ "fd-description--empty": !f().description }}
+                  title="Click to edit"
+                  onClick={() => setEditingDesc(true)}
+                >
+                  {f().description || "Add a description…"}
+                </p>
+              }
+            >
+              <textarea
+                class="fd-desc-input"
+                rows={3}
+                value={f().description}
+                ref={(el) => setTimeout(() => { el.focus(); el.select(); }, 0)}
+                onBlur={(e) => commitDesc(f(), e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { e.preventDefault(); setEditingDesc(false); }
+                }}
+              />
+            </Show>
+
+            {/* ── Ask Claude ── */}
+            <button class="fd-ask" onClick={() => askClaude(f())}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z" />
+              </svg>
+              Ask Claude about this feature
+            </button>
+
+            {/* ── Entry points ── */}
+            <CollapsibleSection label="Entry points" count={f().entryPoints.length}>
+              <Show
+                when={f().entryPoints.length > 0}
+                fallback={<div class="fd-hint">No entry points recorded.</div>}
+              >
+                <div class="fd-entries">
+                  <For each={f().entryPoints}>
+                    {(path) => (
+                      <button class="fd-entry" onClick={() => open(path)} title={`Open ${path}`}>
+                        <span class="fd-entry-path">{path}</span>
+                        <svg class="fd-entry-open" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M14 4h6v6M20 4l-9 9M18 13v6H5V6h6" />
+                        </svg>
+                      </button>
+                    )}
+                  </For>
                 </div>
-              )}
-            </For>
+              </Show>
+            </CollapsibleSection>
 
-            <div class="section-label fd-section">Living doc</div>
-            <div class="fd-doc-placeholder">
-              The per-feature doc (.featureforge/docs/{f().slug}.md) renders here once indexing is wired.
-            </div>
+            {/* ── Files ── */}
+            <CollapsibleSection label="Files" count={f().files.length}>
+              <Show when={f().files.length > 0} fallback={<div class="fd-hint">No files mapped.</div>}>
+                <FilesSection
+                  files={f().files}
+                  allFeatures={store.features}
+                  currentSlug={f().slug}
+                  onOpen={open}
+                />
+              </Show>
+            </CollapsibleSection>
+
+            {/* ── Living doc (falls back to description; see note) ── */}
+            <CollapsibleSection label="Living doc">
+              <Show when={livingDoc()} fallback={<div class="fd-hint">No living doc yet.</div>}>
+                <div class="fd-doc md-render" innerHTML={livingDoc()} />
+                <div class="fd-doc-note">
+                  Rendered from the description — the per-feature doc
+                  (.featureforge/docs/{f().slug}.md) is not exposed in the feature payload yet.
+                </div>
+              </Show>
+            </CollapsibleSection>
+
+            {/* ── Recent activity ── */}
+            <CollapsibleSection label="Recent activity" count={recent().length}>
+              <RecentActivity events={recent()} now={now()} />
+            </CollapsibleSection>
           </div>
         )}
       </Show>
@@ -69,43 +204,104 @@ export function FeatureDetail() {
       <style>{`
         .fd { flex: 1; display: flex; flex-direction: column; min-height: 0; }
         .fd-inner {
-          max-width: 768px;
-          width: 100%;
-          margin: 0 auto;
-          padding: var(--space-6) var(--space-4) var(--space-8);
+          max-width: 768px; width: 100%; margin: 0 auto;
+          padding: var(--space-6) var(--space-4) var(--space-10);
           animation: fade-slide-up 0.22s var(--ease-out) both;
         }
         .fd-empty { margin: auto; text-align: center; max-width: 320px; }
         .fd-empty-title { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
         .fd-empty-sub { font-size: 12px; line-height: 1.5; color: var(--text-tertiary); }
+
         .fd-header { display: flex; align-items: center; gap: var(--space-2); }
-        .fd-title { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; color: var(--text); flex: 1; }
-        .fd-confidence { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); }
-        .fd-description { margin-top: var(--space-2); font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
-        .fd-tags { display: flex; gap: var(--space-1); margin-top: var(--space-3); flex-wrap: wrap; }
-        .fd-section { margin: var(--space-6) 0 var(--space-2); }
-        .fd-pill {
+        .fd-title {
+          font-size: 20px; font-weight: 700; letter-spacing: -0.5px; color: var(--text);
+          flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          cursor: text;
+        }
+        .fd-title-input {
+          flex: 1; min-width: 0;
+          font-family: var(--font-body);
+          font-size: 20px; font-weight: 700; letter-spacing: -0.5px;
+          padding: 2px 6px; margin: -2px 0;
+          background: var(--bg-muted);
+        }
+        .fd-pin {
+          display: flex; align-items: center; flex-shrink: 0;
+          padding: var(--space-1); border-radius: var(--radius-sm);
+          color: var(--text-tertiary);
+          transition: background 0.15s, color 0.15s;
+        }
+        .fd-pin:hover { background: var(--bg-accent); color: var(--text-secondary); }
+        .fd-pin--on, .fd-pin--on:hover { color: var(--amber); }
+
+        .fd-chip {
           font-size: 9px; font-weight: 500; font-family: var(--font-mono);
           padding: 1px 6px; border-radius: var(--radius-pill);
-          text-transform: uppercase; letter-spacing: 0.04em;
+          text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0;
         }
-        .fd-file {
-          display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
-          padding: 6px 10px;
-          margin-bottom: 2px;
-          border-radius: var(--radius-sm);
-          background: rgba(255, 255, 255, 0.02);
-          border: 1px solid var(--border);
-          font-family: var(--font-mono); font-size: 11.5px;
-          color: var(--text-secondary);
+        .fd-confidence { font-variant-numeric: tabular-nums; }
+        .fd-tags { display: flex; gap: var(--space-1); margin-top: var(--space-3); flex-wrap: wrap; }
+
+        .fd-description {
+          margin-top: var(--space-3);
+          font-size: 13px; line-height: 1.6; color: var(--text-secondary);
+          border-radius: var(--radius-sm); padding: 4px 6px; margin-left: -6px; margin-right: -6px;
+          cursor: text; transition: background 0.15s;
         }
-        .fd-file--entry { color: var(--primary); }
-        .fd-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .fd-doc-placeholder {
-          padding: var(--space-4);
-          border: 1px dashed var(--border-strong);
+        .fd-description:hover { background: var(--bg-hover); }
+        .fd-description--empty { color: var(--text-tertiary); font-style: italic; }
+        .fd-desc-input {
+          margin-top: var(--space-3);
+          width: 100%;
+          font-family: var(--font-body); font-size: 13px; line-height: 1.6;
+          padding: 8px 10px; resize: vertical;
+        }
+
+        .fd-ask {
+          display: inline-flex; align-items: center; gap: 8px;
+          margin-top: var(--space-5);
+          padding: 8px 16px;
+          font-size: 13px; font-weight: 600;
+          color: #fff; background: var(--primary);
           border-radius: var(--radius-md);
-          font-size: 12px; color: var(--text-tertiary);
+          transition: filter 0.15s, transform 0.1s;
+        }
+        .fd-ask:hover { filter: brightness(1.15); }
+        .fd-ask:active { transform: scale(0.98); }
+
+        .fd-hint { font-size: 12px; color: var(--text-tertiary); }
+
+        .fd-entries { display: flex; flex-direction: column; gap: 2px; }
+        .fd-entry {
+          display: flex; align-items: center; gap: var(--space-2);
+          width: 100%; padding: 6px 10px;
+          border-radius: var(--radius-sm);
+          background: rgba(var(--primary-rgb), 0.05);
+          border: 1px solid rgba(var(--primary-rgb), 0.15);
+          font-family: var(--font-mono); font-size: 11.5px; color: var(--primary);
+          text-align: left;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .fd-entry:hover { background: rgba(var(--primary-rgb), 0.1); border-color: rgba(var(--primary-rgb), 0.3); }
+        .fd-entry-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .fd-entry-open { flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
+        .fd-entry:hover .fd-entry-open { opacity: 0.8; }
+
+        .fd-doc { font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+        .fd-doc :is(h1, h2, h3) { color: var(--text); font-weight: 600; margin: 0.6em 0 0.3em; }
+        .fd-doc h1 { font-size: 1.25em; } .fd-doc h2 { font-size: 1.15em; } .fd-doc h3 { font-size: 1.05em; }
+        .fd-doc p { margin: 0.5em 0; }
+        .fd-doc ul, .fd-doc ol { margin: 0.5em 0; padding-left: 1.3em; }
+        .fd-doc code {
+          font-family: var(--font-mono); font-size: 0.88em;
+          background: rgba(255, 255, 255, 0.08); padding: 1px 5px; border-radius: 4px;
+          color: var(--hljs-inline-code);
+        }
+        .fd-doc a { color: var(--primary); }
+        .fd-doc-note {
+          margin-top: var(--space-2);
+          font-size: 10px; font-family: var(--font-mono); line-height: 1.5;
+          color: var(--text-tertiary);
         }
       `}</style>
     </div>

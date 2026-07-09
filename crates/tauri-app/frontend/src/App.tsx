@@ -1,7 +1,8 @@
 /* App shell: sidebar (feature tree) · main panel (tab bar / view / status bar) ·
  * right session pane · Cmd+K palette. Layout per docs/ARCHITECTURE.md §Frontend. */
 
-import { Match, Show, Switch, onCleanup, onMount } from "solid-js";
+import { For, Match, Show, Switch, onCleanup, onMount } from "solid-js";
+import type { ActiveView } from "./types";
 import { CommandPalette } from "./components/CommandPalette";
 import { SessionPane } from "./components/SessionPane";
 import { Sidebar } from "./components/Sidebar";
@@ -35,16 +36,33 @@ export default function App() {
     }
   }
 
+  const VIEW_KEYS: Record<string, ActiveView> = { "1": "feature", "2": "timeline", "3": "diff" };
+
   function onKeyDown(e: KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "k") {
       e.preventDefault();
       appStore.setPaletteOpen(!store.paletteOpen);
-    } else if (e.key === "Escape" && store.paletteOpen) {
-      appStore.setPaletteOpen(false);
     } else if (mod && e.key === "\\") {
       e.preventDefault();
       appStore.toggleSessionPane();
+    } else if (mod && VIEW_KEYS[e.key] && store.repo) {
+      e.preventDefault();
+      appStore.setActiveView(VIEW_KEYS[e.key]);
+    } else if (e.key === "Escape") {
+      // Priority close: palette → pending approval (deny) → session pane.
+      if (store.paletteOpen) {
+        appStore.setPaletteOpen(false);
+        return;
+      }
+      const withApproval =
+        store.sessions.find((s) => s.info.id === store.activeSessionId && s.pendingApproval) ??
+        store.sessions.find((s) => s.pendingApproval);
+      if (withApproval?.pendingApproval) {
+        void appStore.approveRequest(withApproval.info.id, withApproval.pendingApproval.requestId, false);
+        return;
+      }
+      if (store.sessionPaneOpen) appStore.toggleSessionPane();
     }
   }
 
@@ -91,6 +109,24 @@ export default function App() {
         <CommandPalette />
       </Show>
 
+      <Show when={store.toasts.length > 0}>
+        <div class="toast-stack">
+          <For each={store.toasts}>
+            {(toast) => (
+              <div
+                class="toast"
+                role="alert"
+                title="Dismiss"
+                onClick={() => appStore.dismissToast(toast.id)}
+              >
+                <span class="toast-dot" />
+                <span class="toast-msg">{toast.message}</span>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
       <style>{`
         .main-panel {
           flex: 1;
@@ -133,6 +169,52 @@ export default function App() {
         .resize-handle:hover::after {
           background: var(--primary);
           box-shadow: 0 0 6px var(--primary-glow);
+        }
+
+        /* ── Error toasts — bottom-right stack, semantic red tint ── */
+        .toast-stack {
+          position: fixed;
+          right: 16px;
+          bottom: 34px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          z-index: 150;
+          max-width: 360px;
+        }
+        .toast {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 10px 12px;
+          background:
+            linear-gradient(rgba(var(--red-rgb), 0.08), rgba(var(--red-rgb), 0.08)),
+            var(--bg-card);
+          border: 1px solid rgba(var(--red-rgb), 0.3);
+          border-radius: var(--radius-md);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+          cursor: pointer;
+          animation: fade-slide-up 0.2s var(--ease-out) both;
+        }
+        .toast-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--red);
+          margin-top: 5px;
+          flex-shrink: 0;
+        }
+        .toast-msg {
+          font-size: 11.5px;
+          line-height: 1.45;
+          font-family: var(--font-mono);
+          color: var(--red);
+          word-break: break-word;
+          user-select: text;
+          -webkit-user-select: text;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .toast { animation: none; }
         }
       `}</style>
     </>
