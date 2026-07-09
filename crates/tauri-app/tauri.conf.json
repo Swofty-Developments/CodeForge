@@ -15,12 +15,14 @@
     "windows": [
       {
         "title": "FeatureForge",
-        "width": 1200,
-        "height": 800,
+        "width": 1280,
+        "height": 820,
         "center": true,
         "resizable": true,
         "minWidth": 800,
-        "minHeight": 500
+        "minHeight": 500,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

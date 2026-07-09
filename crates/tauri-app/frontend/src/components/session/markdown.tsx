@@ -94,9 +94,9 @@ function injectMdStyles(): void {
 .md-render a:hover { text-decoration: underline; }
 .md-render hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
 .md-render code:not(.hljs) {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hljs-code-bg);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 0.88em;
   color: var(--hljs-inline-code);
@@ -109,13 +109,13 @@ function injectMdStyles(): void {
   border-radius: 0 4px 4px 0;
 }
 .md-render table { border-collapse: collapse; margin: 0.75em 0; font-size: 0.92em; }
-.md-render th { background: rgba(255, 255, 255, 0.04); font-weight: 600; }
-.md-render th, .md-render td { padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.08); }
+.md-render th { background: var(--bg-muted); font-weight: 600; }
+.md-render th, .md-render td { padding: 6px 10px; border: 1px solid var(--border-variant); }
 
 .md-code-block {
   position: relative;
   margin: 0.75em 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--hljs-code-bg);
   border: 1px solid var(--border);
   overflow: hidden;
@@ -136,14 +136,14 @@ function injectMdStyles(): void {
 }
 .md-copy-btn {
   position: absolute; top: 4px; right: 8px;
-  font-size: 11px; padding: 3px 10px; border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  font-size: 11px; padding: 3px 10px; border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   color: var(--text-tertiary);
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 .md-code-block:hover .md-copy-btn { opacity: 1; }
-.md-copy-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-secondary); }
+.md-copy-btn:hover { background: var(--bg-accent); color: var(--text-secondary); }
 
 /* Streaming: the newest line fades up as it appears */
 .md-render--streaming > *:last-child { animation: streaming-line-in 0.15s var(--ease-out) both; }

@@ -46,54 +46,58 @@ export function TabBar() {
       </button>
 
       <style>{`
+        /* Zed tab strip: chrome sits on the panel surface; the active tab adopts
+         * the content background and merges into it (its bottom border is hidden
+         * by a -1px overlap over the strip's own border). Hover is instant. */
         .tab-bar {
           display: flex;
-          align-items: center;
-          gap: 2px;
-          padding: 6px 8px;
-          background: var(--bg-muted);
+          align-items: stretch;
+          height: var(--tabbar-height);
+          padding: 0 var(--space-2) 0 0;
+          background: var(--bg-surface);
           border-bottom: 1px solid var(--border);
           flex-shrink: 0;
         }
         .tab {
+          position: relative;
           display: flex; align-items: center; gap: 6px;
-          padding: 5px 12px;
-          font-size: 12px; font-weight: 500;
-          color: var(--text-secondary);
-          border-radius: var(--radius-sm);
-          transition: background 0.15s ease, color 0.15s ease;
+          padding: 0 14px;
+          font-size: 13px;
+          color: var(--text-tertiary);
+          border-right: 1px solid var(--border-variant);
           white-space: nowrap;
         }
-        .tab:hover { background: var(--bg-hover); }
+        .tab:first-child { border-left: 1px solid var(--border-variant); }
+        .tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
         .tab.active {
-          background: var(--bg-base);
           color: var(--text);
-          border: 1px solid var(--border-strong);
+          background: var(--bg-tab-active);
+          margin-bottom: -1px;
+          border-bottom: 1px solid var(--bg-tab-active);
         }
         .tab-context {
           font-family: var(--font-mono);
           font-size: 10px;
-          color: var(--primary);
-          background: rgba(var(--primary-rgb), 0.08);
-          padding: 1px 6px;
-          border-radius: var(--radius-pill);
+          color: var(--text-accent);
+          max-width: 160px; overflow: hidden; text-overflow: ellipsis;
         }
         .tab-bar-spacer { flex: 1; }
         .tab-repo {
+          display: flex; align-items: center;
           font-size: 11px;
           font-family: var(--font-mono);
           color: var(--text-tertiary);
-          padding: 0 var(--space-2);
+          padding: 0 var(--space-3);
         }
-        .tb-action {
+        .tab-bar .tb-action {
+          align-self: center;
           width: 24px; height: 24px;
           border-radius: var(--radius-sm);
           display: flex; align-items: center; justify-content: center;
           color: var(--text-tertiary);
-          transition: background 0.1s, color 0.1s;
         }
-        .tb-action:hover { background: var(--bg-accent); color: var(--text-secondary); }
-        .tb-action.active { color: var(--primary); background: var(--primary-glow); }
+        .tab-bar .tb-action:hover { background: var(--bg-accent); color: var(--text-secondary); }
+        .tab-bar .tb-action.active { color: var(--primary); background: var(--primary-glow); }
       `}</style>
     </div>
   );

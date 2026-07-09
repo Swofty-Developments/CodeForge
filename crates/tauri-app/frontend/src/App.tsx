@@ -8,6 +8,7 @@ import { SessionPane } from "./components/SessionPane";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
+import { TitleBar } from "./components/TitleBar";
 import { DiffReview } from "./views/DiffReview";
 import { FeatureDetail } from "./views/FeatureDetail";
 import { TimelineView } from "./views/TimelineView";
@@ -79,32 +80,35 @@ export default function App() {
 
   return (
     <>
-      <Sidebar />
-      <div class="resize-handle" onMouseDown={onSidebarDragStart} />
-      <div class="main-panel">
-        <Show when={store.activeView !== "welcome"} fallback={<Welcome />}>
-          <TabBar />
-          <div class="main-panel-body">
-            <div class="main-panel-view">
-              <Switch>
-                <Match when={store.activeView === "feature"}>
-                  <FeatureDetail />
-                </Match>
-                <Match when={store.activeView === "timeline"}>
-                  <TimelineView />
-                </Match>
-                <Match when={store.activeView === "diff"}>
-                  <DiffReview />
-                </Match>
-              </Switch>
+      <TitleBar />
+      <div class="workspace">
+        <Show when={store.repo} fallback={<div class="workspace-welcome"><Welcome /></div>}>
+          <Sidebar />
+          <div class="resize-handle" onMouseDown={onSidebarDragStart} />
+          <div class="main-panel">
+            <TabBar />
+            <div class="main-panel-body">
+              <div class="main-panel-view">
+                <Switch fallback={<FeatureDetail />}>
+                  <Match when={store.activeView === "feature"}>
+                    <FeatureDetail />
+                  </Match>
+                  <Match when={store.activeView === "timeline"}>
+                    <TimelineView />
+                  </Match>
+                  <Match when={store.activeView === "diff"}>
+                    <DiffReview />
+                  </Match>
+                </Switch>
+              </div>
+              <Show when={store.sessionPaneOpen}>
+                <SessionPane />
+              </Show>
             </div>
-            <Show when={store.sessionPaneOpen}>
-              <SessionPane />
-            </Show>
           </div>
-          <StatusBar />
         </Show>
       </div>
+      <StatusBar />
       <Show when={store.paletteOpen}>
         <CommandPalette />
       </Show>

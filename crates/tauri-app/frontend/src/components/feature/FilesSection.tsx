@@ -83,19 +83,18 @@ export function FilesSection(props: {
         .fl-row {
           display: flex; align-items: center; gap: var(--space-2);
           width: 100%;
-          padding: 6px 10px;
+          padding: 5px 10px;
           border-radius: var(--radius-sm);
-          background: rgba(255, 255, 255, 0.02);
+          background: var(--bg-muted);
           border: 1px solid var(--border);
           font-family: var(--font-mono); font-size: 11.5px;
           color: var(--text-secondary);
           text-align: left;
-          transition: background 0.15s, border-color 0.15s, color 0.15s;
         }
         .fl-row:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text); }
         .fl-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .fl-shared { flex-shrink: 0; }
-        .fl-open { flex-shrink: 0; color: var(--text-tertiary); opacity: 0; transition: opacity 0.15s; }
+        .fl-open { flex-shrink: 0; color: var(--text-tertiary); opacity: 0; }
         .fl-row:hover .fl-open { opacity: 0.8; }
 
         .fd-chip {

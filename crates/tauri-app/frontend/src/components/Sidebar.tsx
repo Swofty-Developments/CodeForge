@@ -171,7 +171,7 @@ export function Sidebar() {
         }
         .sb-repo-line { display: flex; align-items: center; gap: var(--space-2); }
         .sb-repo-name {
-          font-size: 14px; font-weight: 700; letter-spacing: -0.3px; color: var(--text);
+          font-size: 13px; font-weight: 600; letter-spacing: -0.2px; color: var(--text);
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .sb-meta {
@@ -208,7 +208,6 @@ export function Sidebar() {
           color: var(--text-secondary);
           padding: 3px 10px;
           border-radius: var(--radius-sm);
-          transition: background 0.15s, color 0.15s;
         }
         .sb-reindex:hover { background: rgba(var(--primary-rgb), 0.1); color: var(--primary); }
         .sb-reindex:disabled { opacity: 0.4; cursor: default; background: none; color: var(--text-tertiary); }

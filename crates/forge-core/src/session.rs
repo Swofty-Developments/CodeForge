@@ -14,6 +14,9 @@ pub struct RepoState {
     pub indexed_at: Option<DateTime<Utc>>,
     /// `None` if the per-repo daemon failed to start.
     pub daemon_port: Option<u16>,
+    /// Current git branch (title-bar pill). `None` on a detached HEAD.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 /// Streamed to the frontend via the `index:progress` event during indexing.
@@ -80,6 +83,7 @@ mod tests {
             features_count: 7,
             indexed_at: Some(Utc::now()),
             daemon_port: Some(49213),
+            branch: Some("main".into()),
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"featuresCount\""));

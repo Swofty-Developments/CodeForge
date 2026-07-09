@@ -221,14 +221,14 @@ export function FeatureDetail() {
 
         .fd-header { display: flex; align-items: center; gap: var(--space-2); }
         .fd-title {
-          font-size: 20px; font-weight: 700; letter-spacing: -0.5px; color: var(--text);
+          font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: var(--text);
           flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           cursor: text;
         }
         .fd-title-input {
           flex: 1; min-width: 0;
           font-family: var(--font-body);
-          font-size: 20px; font-weight: 700; letter-spacing: -0.5px;
+          font-size: 18px; font-weight: 600; letter-spacing: -0.3px;
           padding: 2px 6px; margin: -2px 0;
           background: var(--bg-muted);
         }
@@ -236,7 +236,6 @@ export function FeatureDetail() {
           display: flex; align-items: center; flex-shrink: 0;
           padding: var(--space-1); border-radius: var(--radius-sm);
           color: var(--text-tertiary);
-          transition: background 0.15s, color 0.15s;
         }
         .fd-pin:hover { background: var(--bg-accent); color: var(--text-secondary); }
         .fd-pin--on, .fd-pin--on:hover { color: var(--amber); }
@@ -253,7 +252,7 @@ export function FeatureDetail() {
           margin-top: var(--space-3);
           font-size: 13px; line-height: 1.6; color: var(--text-secondary);
           border-radius: var(--radius-sm); padding: 4px 6px; margin-left: -6px; margin-right: -6px;
-          cursor: text; transition: background 0.15s;
+          cursor: text;
         }
         .fd-description:hover { background: var(--bg-hover); }
         .fd-description--empty { color: var(--text-tertiary); font-style: italic; }
@@ -269,12 +268,10 @@ export function FeatureDetail() {
           margin-top: var(--space-5);
           padding: 8px 16px;
           font-size: 13px; font-weight: 600;
-          color: #fff; background: var(--primary);
+          color: #16202e; background: var(--primary);
           border-radius: var(--radius-md);
-          transition: filter 0.15s, transform 0.1s;
         }
-        .fd-ask:hover { filter: brightness(1.15); }
-        .fd-ask:active { transform: scale(0.98); }
+        .fd-ask:hover { filter: brightness(1.08); }
 
         .fd-hint { font-size: 12px; color: var(--text-tertiary); }
 
@@ -287,11 +284,10 @@ export function FeatureDetail() {
           border: 1px solid rgba(var(--primary-rgb), 0.15);
           font-family: var(--font-mono); font-size: 11.5px; color: var(--primary);
           text-align: left;
-          transition: background 0.15s, border-color 0.15s;
         }
         .fd-entry:hover { background: rgba(var(--primary-rgb), 0.1); border-color: rgba(var(--primary-rgb), 0.3); }
         .fd-entry-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .fd-entry-open { flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
+        .fd-entry-open { flex-shrink: 0; opacity: 0; }
         .fd-entry:hover .fd-entry-open { opacity: 0.8; }
 
         .fd-doc { font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
@@ -301,7 +297,7 @@ export function FeatureDetail() {
         .fd-doc ul, .fd-doc ol { margin: 0.5em 0; padding-left: 1.3em; }
         .fd-doc code {
           font-family: var(--font-mono); font-size: 0.88em;
-          background: rgba(255, 255, 255, 0.08); padding: 1px 5px; border-radius: 4px;
+          background: var(--hljs-code-bg); padding: 1px 5px; border-radius: var(--radius-sm);
           color: var(--hljs-inline-code);
         }
         .fd-doc a { color: var(--primary); }
@@ -311,7 +307,6 @@ export function FeatureDetail() {
           padding: 3px 10px; border-radius: var(--radius-sm);
           color: var(--primary); background: var(--bg-accent);
           border: 1px solid var(--border-glow);
-          transition: background 0.15s;
         }
         .fd-doc-index:hover { background: var(--primary-glow); }
       `}</style>

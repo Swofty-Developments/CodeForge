@@ -4,57 +4,71 @@
  * and the prefers-reduced-motion block. Themes swap the :root vars at runtime. */
 
 :root {
-  /* Surface palette — warm-tinted darks */
-  --bg-base: #0f1012;
-  --bg-card: #151518;
-  --bg-surface: #18181c;
-  --bg-accent: #222228;
-  --bg-muted: #1c1c20;
-  --bg-user-bubble: #1e1e24;
-  --bg-hover: rgba(255, 255, 255, 0.04);
+  /* ── Zed One Dark — surface stack: content is DARKEST, chrome is lightest.
+   * Regions are separated by 1px solid borders, never shadows at rest.
+   * (Token NAMES are the component contract; only the values change.) ── */
+  --bg-base: #282c33;        /* editor/content — the darkest layer (body, center view) */
+  --bg-surface: #2f343e;     /* panels: sidebar, session pane, tab bar */
+  --bg-card: #2f343e;        /* elevated surfaces = panel color; elevation via border, not lightness */
+  --bg-elevated: #363c46;    /* menus / popovers / palette — one step up */
+  --bg-accent: #363c46;      /* opaque hover fill (Zed hovers are opaque, not translucent) */
+  --bg-muted: #2e343e;       /* input / element background */
+  --element-bg: #2e343e;     /* interactive element resting fill (pills, chips) */
+  --bg-user-bubble: #2f343e; /* user message row */
+  --bg-hover: #363c46;       /* row hover */
+  --bg-chrome: #3b414d;      /* title bar + status bar — the lightest chrome */
+  --bg-tab-active: #282c33;  /* active tab merges into the content surface */
+  --bg-active-line: rgba(47, 52, 62, 0.75);
 
-  /* Text with warm undertones */
-  --text: #f0eef8;
-  --text-secondary: #b8b6c8;
-  --text-tertiary: #807e92;
+  /* Text ladder */
+  --text: #dce0e5;
+  --text-secondary: #a9afbc;
+  --text-tertiary: #878a98;
+  --editor-fg: #acb2be;      /* code text, dimmer than UI text */
 
-  /* Accent palette — molten metals */
-  --primary: #6b7cff;
-  --primary-glow: rgba(107, 124, 255, 0.2);
-  --primary-muted: #5568d9;
-  --green: #4cd694;
-  --red: #f25f67;
-  --amber: #f0b840;
-  --sky: #58c4f0;
-  --purple: #b47aff;
-  --pink: #f07ab4;
-  --orange: #f5943c;
+  /* One accent (Zed uses a single blue); status colors are the One Dark set. */
+  --primary: #74ade8;
+  --primary-glow: rgba(116, 173, 232, 0.24);
+  --primary-muted: #47679e;
+  --green: #a1c181;
+  --red: #d07277;
+  --amber: #dec184;
+  --sky: #74ade8;
+  --purple: #b478c0;
+  --pink: #cd7ca8;
+  --orange: #d3a86a;
 
-  /* Accent RGB triplets — for the rgba() semantic-tint formula */
-  --primary-rgb: 107, 124, 255;
-  --green-rgb: 76, 214, 148;
-  --red-rgb: 242, 95, 103;
-  --amber-rgb: 240, 184, 64;
-  --sky-rgb: 88, 196, 240;
-  --purple-rgb: 180, 122, 255;
+  /* Accent RGB triplets — for the rgba() semantic-tint formula (bg @ ~10%) */
+  --primary-rgb: 116, 173, 232;
+  --green-rgb: 161, 193, 129;
+  --red-rgb: 208, 114, 119;
+  --amber-rgb: 222, 193, 132;
+  --sky-rgb: 116, 173, 232;
+  --purple-rgb: 180, 120, 192;
 
-  /* Borders — translucent warm */
-  --border: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.10);
-  --border-glow: rgba(107, 124, 255, 0.25);
+  /* Borders — 1px SOLID (Zed separates regions with a hairline, not shadow) */
+  --border: #464b57;
+  --border-strong: #545a67;
+  --border-variant: #363c46; /* subtle / non-interactive dividers */
+  --border-glow: #47679e;    /* focused blue */
 
-  /* Radii */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  /* Scrollbar — Zed's 6px overlay thumb on a transparent track */
+  --scrollbar-thumb: rgba(200, 204, 212, 0.30);
+  --scrollbar-thumb-hover: #363c46;
+
+  /* Radii — Zed is tight: 4 controls, 6 popovers, 8 modals, nothing rounder */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
   --radius-pill: 100px;
 
-  /* Typography */
-  --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  /* Typography — IBM Plex Sans is Zed's UI face; bundled DM Sans is the near
+   * stand-in. All code + metadata in mono, which carries the IDE feel. */
+  --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* Spacing — 4px base scale */
+  /* Spacing — 4px base scale (kept; component layouts depend on it) */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -64,36 +78,44 @@
   --space-8: 32px;
   --space-10: 40px;
 
+  /* Chrome metrics — Zed's IDE proportions */
+  --titlebar-height: 34px;
+  --tabbar-height: 32px;
+  --statusbar-height: 24px;
+
   /* Layout */
   --sidebar-width: 260px;
   --sidebar-min: 180px;
   --sidebar-max: 500px;
 
-  /* Motion — the signature easing for every entrance */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Motion — Zed is restrained: 150ms slide/fade for panels ONLY; hover/active
+   * state changes are instant (components must not transition on hover). */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 50ms;
+  --dur: 150ms;
 
-  /* Syntax highlighting (One-Dark-ish; themes must supply the full set) */
-  --hljs-keyword: #c678dd;
-  --hljs-string: #98c379;
-  --hljs-number: #d19a66;
-  --hljs-comment: #5c6370;
-  --hljs-builtin: #e6c07b;
-  --hljs-function: #61afef;
-  --hljs-attr: #d19a66;
-  --hljs-variable: #e06c75;
-  --hljs-params: #abb2bf;
-  --hljs-meta: #61afef;
-  --hljs-regexp: #56b6c2;
-  --hljs-tag: #e06c75;
-  --hljs-selector: #e6c07b;
-  --hljs-symbol: #56b6c2;
-  --hljs-link: #61afef;
-  --hljs-punctuation: #abb2bf;
-  --hljs-property: #e06c75;
-  --hljs-class: #e6c07b;
-  --hljs-code-bg: #0f1012;
-  --hljs-code-text: #ebebf0;
-  --hljs-inline-code: #dda0f7;
+  /* Syntax highlighting — Zed One Dark */
+  --hljs-keyword: #b477cf;
+  --hljs-string: #a1c181;
+  --hljs-number: #bf956a;
+  --hljs-comment: #5d636f;
+  --hljs-builtin: #dec184;
+  --hljs-function: #73ade9;
+  --hljs-attr: #bf956a;
+  --hljs-variable: #d07277;
+  --hljs-params: #acb2be;
+  --hljs-meta: #73ade9;
+  --hljs-regexp: #6eb4bf;
+  --hljs-tag: #d07277;
+  --hljs-selector: #dec184;
+  --hljs-symbol: #6eb4bf;
+  --hljs-link: #73ade9;
+  --hljs-punctuation: #acb2be;
+  --hljs-property: #d07277;
+  --hljs-class: #dec184;
+  --hljs-code-bg: #2b2f38;
+  --hljs-code-text: #acb2be;
+  --hljs-inline-code: #b477cf;
 }
 
 /* ── Z-index ladder (keep in sync app-wide) ──
@@ -113,10 +135,14 @@ body {
   height: 100vh;
   user-select: none;
   -webkit-user-select: none;
-  font-feature-settings: "ss01", "ss02", "cv01";
+  font-size: 14px;
+  line-height: 1.618;
+  -webkit-font-smoothing: antialiased;
 }
 
-#app { display: flex; height: 100vh; width: 100vw; }
+#app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
+.workspace { flex: 1; display: flex; flex-direction: row; min-height: 0; min-width: 0; }
+.workspace-welcome { flex: 1; display: flex; min-height: 0; }
 
 button {
   font-family: var(--font-body);
@@ -155,13 +181,13 @@ textarea:focus-visible {
 }
 
 /* ── Scrollbar — 5px overlay style ── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--scrollbar-thumb, rgba(200, 204, 212, 0.3));
   border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.14); }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover, #363c46); }
 
 /* ── Common label style ── */
 .section-label {

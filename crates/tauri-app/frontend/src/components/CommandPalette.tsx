@@ -172,9 +172,9 @@ export function CommandPalette() {
         .cmd-palette {
           width: 520px;
           max-height: 420px;
-          background: var(--bg-card);
+          background: var(--bg-elevated);
           border: 1px solid var(--border-strong);
-          border-radius: 12px;
+          border-radius: var(--radius-lg);
           box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03);
           display: flex; flex-direction: column;
           overflow: hidden;
@@ -190,7 +190,7 @@ export function CommandPalette() {
           flex: 1;
           background: transparent; border: none; outline: none; box-shadow: none;
           color: var(--text);
-          font-size: 15px;
+          font-size: 14px;
           font-family: var(--font-body);
           caret-color: var(--primary);
           padding: 0;
@@ -199,26 +199,25 @@ export function CommandPalette() {
         .cmd-palette-kbd {
           font-size: 10px;
           color: var(--text-tertiary);
-          background: var(--bg-accent);
+          background: var(--bg-muted);
           border: 1px solid var(--border);
-          border-radius: 4px;
+          border-radius: var(--radius-sm);
           padding: 2px 6px;
           flex-shrink: 0;
         }
         .cmd-palette-list { overflow-y: auto; padding: var(--space-1); max-height: 350px; }
         .cmd-palette-item {
           display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
-          padding: var(--space-2) var(--space-3);
+          padding: 5px var(--space-3);
           border-radius: var(--radius-sm);
           cursor: pointer;
-          transition: background 0.08s;
         }
         .cmd-palette-item.selected { background: var(--bg-accent); }
         .cmd-palette-item-label { color: var(--text-secondary); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .cmd-palette-item.selected .cmd-palette-item-label { color: var(--text); }
         .cmd-hl { color: var(--primary); font-weight: 600; }
         .cmd-palette-item-category {
-          font-size: 10px; padding: 2px 8px; border-radius: 4px;
+          font-size: 10px; padding: 2px 8px; border-radius: var(--radius-sm);
           font-weight: 600; letter-spacing: 0.02em; flex-shrink: 0;
         }
         .cat-action  { color: var(--green);   background: rgba(var(--green-rgb), 0.1); }

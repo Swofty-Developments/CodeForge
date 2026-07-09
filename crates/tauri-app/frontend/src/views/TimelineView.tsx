@@ -40,7 +40,6 @@ if (!document.getElementById("tlv-styles")) {
       font-size: 11px; font-weight: 500; color: var(--text-secondary);
       padding: 5px 16px; border-radius: var(--radius-pill);
       background: var(--bg-muted); border: 1px solid var(--border);
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
     .tlv-more-btn:hover:not(:disabled) { background: var(--bg-accent); border-color: var(--border-strong); color: var(--text); }
     .tlv-more-btn:disabled { opacity: 0.5; cursor: default; }

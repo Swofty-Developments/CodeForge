@@ -92,13 +92,11 @@ export function Welcome() {
           margin-top: var(--space-6);
           padding: 10px 28px;
           font-size: 14px; font-weight: 600;
-          color: #fff;
+          color: #16202e;
           background: var(--primary);
           border-radius: var(--radius-md);
-          transition: filter 0.15s, transform 0.1s;
         }
-        .welcome-cta:hover { filter: brightness(1.15); }
-        .welcome-cta:active { transform: scale(0.97); }
+        .welcome-cta:hover { filter: brightness(1.08); }
         .welcome-hints {
           display: flex; justify-content: center; gap: var(--space-4);
           margin-top: var(--space-6);
@@ -106,9 +104,9 @@ export function Welcome() {
         .kbd-hint { font-size: 11px; color: var(--text-tertiary); }
         .kbd-hint kbd {
           padding: 2px 6px;
-          background: var(--bg-accent);
-          border: 1px solid var(--border-strong);
-          border-radius: 4px;
+          background: var(--bg-muted);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
           font-size: 10px;
           font-family: var(--font-mono);
           margin-right: 4px;

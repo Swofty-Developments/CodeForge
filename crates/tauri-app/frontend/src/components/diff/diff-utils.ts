@@ -181,7 +181,6 @@ const DIFF_CSS = `
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 500; color: var(--text-secondary);
   padding: 4px 10px; border-radius: var(--radius-sm);
-  transition: background 0.12s, color 0.12s;
 }
 .drv-refresh:hover { background: var(--bg-accent); color: var(--text); }
 .drv-refresh svg { color: var(--text-tertiary); }
@@ -197,14 +196,13 @@ const DIFF_CSS = `
 .dfg {
   margin-bottom: var(--space-3);
   border: 1px solid var(--border); border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.02); overflow: hidden;
+  background: var(--bg-card); overflow: hidden;
   animation: fade-slide-up 0.18s var(--ease-out) both;
 }
-.dfg--unmapped { background: rgba(255, 255, 255, 0.012); }
+.dfg--unmapped { background: var(--bg-base); }
 .dfg-head {
   display: flex; align-items: center; gap: var(--space-2);
-  width: 100%; padding: 9px 12px; text-align: left; cursor: pointer;
-  transition: background 0.12s;
+  width: 100%; padding: 8px 12px; text-align: left; cursor: pointer;
 }
 .dfg-head:hover { background: var(--bg-hover); }
 .dfg-chevron { flex-shrink: 0; color: var(--text-tertiary); transition: transform 0.18s ease; }
@@ -226,20 +224,19 @@ const DIFF_CSS = `
 .dfr:first-child { border-top: none; }
 .dfr-head {
   display: flex; align-items: center; gap: var(--space-2);
-  width: 100%; padding: 6px 12px; text-align: left; cursor: pointer;
-  transition: background 0.12s;
+  width: 100%; padding: 5px 12px; text-align: left; cursor: pointer;
 }
 .dfr-head:hover { background: var(--bg-hover); }
 .dfr-status {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0;
+  width: 16px; height: 16px; border-radius: var(--radius-sm); flex-shrink: 0;
   font-size: 9px; font-weight: 600; font-family: var(--font-mono);
 }
 .dfr-status--modified { background: rgba(var(--primary-rgb), 0.15); color: var(--primary); }
 .dfr-status--added { background: rgba(var(--green-rgb), 0.15); color: var(--green); }
 .dfr-status--deleted { background: rgba(var(--red-rgb), 0.15); color: var(--red); }
-.dfr-status--renamed { background: rgba(245, 148, 60, 0.15); color: var(--orange); }
-.dfr-status--untracked { background: rgba(120, 170, 255, 0.15); color: var(--sky); }
+.dfr-status--renamed { background: color-mix(in srgb, var(--orange) 15%, transparent); color: var(--orange); }
+.dfr-status--untracked { background: rgba(var(--sky-rgb), 0.15); color: var(--sky); }
 .dfr-status--unknown { background: var(--bg-muted); color: var(--text-tertiary); }
 .dfr-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dfr-dir { color: var(--text-tertiary); }
@@ -247,7 +244,7 @@ const DIFF_CSS = `
 .dfr-counts { display: flex; gap: 8px; flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
 .dfr-add { color: var(--green); }
 .dfr-del { color: var(--red); }
-.dfr-chevron { flex-shrink: 0; color: var(--text-tertiary); opacity: 0; transition: opacity 0.12s, transform 0.18s ease; }
+.dfr-chevron { flex-shrink: 0; color: var(--text-tertiary); opacity: 0; transition: transform 0.18s ease; }
 .dfr-head:hover .dfr-chevron { opacity: 0.6; }
 .dfr-chevron--open { transform: rotate(90deg); opacity: 0.6; }
 .dfr-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.2s ease; }

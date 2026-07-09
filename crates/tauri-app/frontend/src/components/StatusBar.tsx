@@ -79,7 +79,7 @@ export function StatusBar() {
           gap: 8px;
         }
         .sb-group { display: flex; align-items: center; gap: 6px; min-width: 0; }
-        .sb-label { font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--text-secondary); transition: color 0.2s; }
+        .sb-label { font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--text-secondary); }
         .sb-mono { font-family: var(--font-mono); font-weight: 500; }
         .sb-dim { color: var(--text-tertiary); }
         .sb-sep { color: var(--text-tertiary); opacity: 0.5; font-size: 11px; }

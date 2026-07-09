@@ -115,6 +115,7 @@ export interface RepoState {
   featuresCount: number;
   indexedAt: string | null;
   daemonPort: number | null;
+  branch: string | null;
 }
 
 export interface IndexProgress {

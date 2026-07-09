@@ -102,7 +102,6 @@ export function TimelineFilterBar(props: {
           padding: 2px 9px; border-radius: var(--radius-pill);
           background: var(--bg-muted); border: 1px solid var(--border);
           white-space: nowrap;
-          transition: background 0.15s, border-color 0.15s, color 0.15s;
         }
         .tlf-chip:hover { background: var(--bg-accent); border-color: var(--border-strong); }
         .tlf-chip--on {
@@ -115,7 +114,6 @@ export function TimelineFilterBar(props: {
           font-size: 10px; font-family: var(--font-mono);
           color: var(--text-tertiary); padding: 2px 8px;
           border-radius: var(--radius-pill);
-          transition: color 0.15s, background 0.15s;
         }
         .tlf-clear:hover { color: var(--red); background: rgba(var(--red-rgb), 0.08); }
       `}</style>

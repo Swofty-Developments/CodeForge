@@ -59,14 +59,12 @@ export function FeatureRow(props: {
           border-radius: var(--radius-sm);
           cursor: pointer;
           text-align: left;
-          transition: background 0.15s, box-shadow 0.2s;
           position: relative;
           animation: fade-slide-up 0.16s var(--ease-out) both;
         }
         .ft-row:hover { background: var(--bg-hover); }
         .ft-row--active {
           background: rgba(var(--primary-rgb), 0.08);
-          box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15);
         }
         .ft-row--active::before {
           content: ""; position: absolute; left: 0; top: 6px; bottom: 6px;
@@ -90,8 +88,7 @@ export function FeatureRow(props: {
           display: flex; align-items: center; flex-shrink: 0;
           color: var(--text-tertiary);
           opacity: 0;
-          border-radius: 3px;
-          transition: opacity 0.15s, color 0.15s, background 0.15s;
+          border-radius: var(--radius-sm);
         }
         .ft-row:hover .ft-pin { opacity: 0.55; }
         .ft-pin:hover { opacity: 1; background: var(--bg-accent); color: var(--text-secondary); }

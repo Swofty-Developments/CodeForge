@@ -87,6 +87,25 @@ pub async fn current_head(repo_root: &Path) -> Result<Option<String>> {
     Err(Error::Git(stderr.trim().to_string()))
 }
 
+/// The current branch name (`git branch --show-current`). `Ok(None)` on a
+/// detached HEAD or unborn branch — a real, distinct state, shown as such.
+pub async fn current_branch(repo_root: &Path) -> Result<Option<String>> {
+    let out = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(repo_root)
+        .output()
+        .await?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if stderr.contains("not a git repository") {
+            return Err(Error::NotARepo(repo_root.to_path_buf()));
+        }
+        return Err(Error::Git(stderr.trim().to_string()));
+    }
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(if name.is_empty() { None } else { Some(name) })
+}
+
 /// Repo-relative paths of all changed (staged + unstaged + untracked) files,
 /// from `git status --porcelain=v2`. Renames report the new path.
 pub async fn changed_files(repo_root: &Path) -> Result<Vec<PathBuf>> {

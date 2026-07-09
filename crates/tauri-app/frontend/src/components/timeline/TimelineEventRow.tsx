@@ -23,10 +23,9 @@ if (!document.getElementById("tl-row-styles")) {
     .tlr--live { animation: streaming-line-in 180ms var(--ease-out) both; }
     .tlr-head {
       display: flex; align-items: center; gap: var(--space-2);
-      width: 100%; padding: 5px 10px;
+      width: 100%; padding: 4px 10px;
       border-radius: var(--radius-sm);
       text-align: left; cursor: pointer;
-      transition: background 0.12s;
     }
     .tlr-head:hover { background: var(--bg-hover); }
     .tlr-lane { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
@@ -50,7 +49,7 @@ if (!document.getElementById("tl-row-styles")) {
     }
     .tlr-chevron {
       flex-shrink: 0; color: var(--text-tertiary); opacity: 0;
-      transition: opacity 0.12s, transform 0.18s ease;
+      transition: transform 0.18s ease;
     }
     .tlr-head:hover .tlr-chevron { opacity: 0.7; }
     .tlr-chevron--open { transform: rotate(90deg); opacity: 0.7; }

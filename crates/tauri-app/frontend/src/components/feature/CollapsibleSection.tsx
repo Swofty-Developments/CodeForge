@@ -41,7 +41,6 @@ export function CollapsibleSection(props: {
           display: flex; align-items: center; gap: 6px;
           padding: 2px 0; min-width: 0;
           color: var(--text-tertiary);
-          transition: color 0.15s;
         }
         .fs-toggle:hover { color: var(--text-secondary); }
         .fs-chevron { flex-shrink: 0; transition: transform 0.18s ease; }

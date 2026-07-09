@@ -83,6 +83,13 @@ async fn run(ctx: ReindexCtx) {
             // repo_util no longer derives indexed_at (the DB owns it); stamp the
             // timestamp we just recorded so the event carries the real value.
             state.indexed_at = Some(indexed_at);
+            state.branch = match forge_git::current_branch(&ctx.repo_root).await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!("could not read git branch for repo:changed: {e}");
+                    None
+                }
+            };
             let _ = ctx.app.emit(events::REPO_CHANGED, &state);
         }
         Err(e) => {

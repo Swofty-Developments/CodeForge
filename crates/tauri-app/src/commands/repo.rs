@@ -53,6 +53,7 @@ pub async fn open_repo(
             let indexed_at = read_indexed_at(&state.db, &repo_id).await?;
             let mut rs = repo_util::repo_state(&root, count, Some(port));
             rs.indexed_at = indexed_at; // CONTRACT-3: DB is source of truth
+            rs.branch = forge_git::current_branch(&root).await.map_err(|e| e.to_string())?;
             return Ok(rs);
         }
     }
@@ -145,6 +146,7 @@ pub async fn open_repo(
 
     let mut repo_state = repo_util::repo_state(&root, features_count, Some(port));
     repo_state.indexed_at = indexed_at; // CONTRACT-3: DB is source of truth
+    repo_state.branch = forge_git::current_branch(&root).await.map_err(|e| e.to_string())?;
     let _ = app.emit(events::REPO_CHANGED, &repo_state);
     Ok(repo_state)
 }

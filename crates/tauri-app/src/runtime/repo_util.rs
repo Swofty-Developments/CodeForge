@@ -37,6 +37,7 @@ pub fn repo_state(root: &Path, features_count: u32, daemon_port: Option<u16>) ->
         features_count,
         indexed_at: None,
         daemon_port,
+        branch: None,
     }
 }
 
