@@ -13,6 +13,12 @@
  *     from it — it NEVER infers resumability from prior-query state or SDK error
  *     strings.
  *   { type: "approval_response", requestId, decision, message? }
+ *   { type: "set_mode", mode }
+ *     mode is one of default|acceptEdits|plan|bypassPermissions. The SDK's
+ *     Query.setPermissionMode() control request is streaming-input only; this
+ *     sidecar drives query() with a string prompt (non-streaming), so a live
+ *     turn cannot be re-moded in place. We therefore persist the mode and apply
+ *     it as options.permissionMode on the NEXT query turn (next-turn switch).
  *   { type: "abort" }
  *
  * Stdout events:
@@ -62,6 +68,14 @@ let approvalCounter = 0;
 let lastTextLen = 0;
 let lastThinkingLen = 0;
 
+// The four SDK permission modes a session may run under.
+const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"];
+
+// The session's current permission mode. Seeded from the first query's
+// permissionMode and overridden by set_mode; applied to options.permissionMode
+// on every query turn (continue turns included). null = SDK/CLI default.
+let sessionPermissionMode = null;
+
 // ── Stdin reader ─────────────────────────────────────────────────────────────
 
 const rl = createInterface({ input: process.stdin, terminal: false });
@@ -86,6 +100,10 @@ rl.on("line", (line) => {
 
     case "approval_response":
       handleApprovalResponse(cmd);
+      break;
+
+    case "set_mode":
+      handleSetMode(cmd);
       break;
 
     case "abort":
@@ -126,9 +144,13 @@ async function handleQuery(cmd) {
     options.allowedTools = allowedTools;
   }
 
-  if (permissionMode) {
-    options.permissionMode = permissionMode;
-    if (permissionMode === "bypassPermissions") {
+  // Seed the session permission mode from the first query that carries one,
+  // then apply the (possibly set_mode-overridden) session mode on every turn —
+  // continue turns don't re-send permissionMode, so the sidecar is authoritative.
+  if (permissionMode) sessionPermissionMode = permissionMode;
+  if (sessionPermissionMode) {
+    options.permissionMode = sessionPermissionMode;
+    if (sessionPermissionMode === "bypassPermissions") {
       options.allowDangerouslySkipPermissions = true;
     }
   }
@@ -438,6 +460,19 @@ function handleApprovalResponse(cmd) {
     pendingApprovals.delete(requestId);
     pending.resolve({ decision, message });
   }
+}
+
+function handleSetMode(cmd) {
+  const { mode } = cmd;
+  // Unknown mode is a named error, never a silent no-op (Rust validates too).
+  if (!PERMISSION_MODES.includes(mode)) {
+    emit({ type: "error", message: `Unknown permission mode: ${mode}` });
+    return;
+  }
+  // Next-turn switch: setPermissionMode() is a streaming-only control request
+  // and this sidecar is non-streaming, so we persist the mode; handleQuery
+  // applies it as options.permissionMode on the next turn.
+  sessionPermissionMode = mode;
 }
 
 function handleAbort() {

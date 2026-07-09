@@ -2,7 +2,7 @@ use forge_core::{Actor, EventKind, Feature, FeaturePatch};
 use forge_timeline::NewEvent;
 use tauri::State;
 
-use crate::runtime::repo_util;
+use crate::runtime::{feature_color, repo_util};
 use crate::state::AppState;
 
 /// All features of an open repo (sidebar feature tree).
@@ -109,5 +109,38 @@ pub async fn update_feature(
     timeline
         .append(event)
         .map_err(|e| format!("edit persisted but timeline append failed: {e}"))?;
+    Ok(feature)
+}
+
+/// Set (or clear, with `color: null`) a feature's graph node color. Like
+/// `update_feature` this implies a pin, persists the index, appends a
+/// FeatureEdited timeline event, and returns the updated feature.
+#[tauri::command]
+pub async fn set_feature_color(
+    state: State<'_, AppState>,
+    repo_path: String,
+    slug: String,
+    color: Option<String>,
+) -> Result<Feature, String> {
+    let root = repo_util::canonical(&repo_path)?;
+    let (index, timeline) = state.index_and_timeline(&root).await.ok_or("repo is not open")?;
+
+    let feature = {
+        let mut guard = index.write().await;
+        feature_color::set_color(&mut guard, &slug, color)?
+    };
+
+    let event = NewEvent {
+        session_id: None,
+        actor: Actor::Human,
+        kind: EventKind::FeatureEdited,
+        feature_slugs: vec![slug],
+        payload: serde_json::json!({ "color": feature.color }),
+    };
+    // The timeline is the durable audit log; a lost append is a real failure,
+    // surfaced to the caller rather than reduced to a log line.
+    timeline
+        .append(event)
+        .map_err(|e| format!("color persisted but timeline append failed: {e}"))?;
     Ok(feature)
 }

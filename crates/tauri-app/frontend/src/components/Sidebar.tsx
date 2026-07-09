@@ -43,7 +43,7 @@ export function Sidebar() {
 
   function onSelect(slug: string): void {
     markSeen(slug, maxEventId());
-    appStore.selectFeature(slug);
+    appStore.openFeatureDetail(slug);
   }
 
   const daemonKind = () => store.daemon?.kind;

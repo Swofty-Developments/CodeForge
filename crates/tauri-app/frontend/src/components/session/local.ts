@@ -6,10 +6,12 @@
  */
 
 import { appStore } from "../../stores/app-store";
+import type { PermissionMode } from "../../types";
 
-/** Start a session at a chosen model; the store builds the full SessionUi. */
-export async function startSessionWithModel(model?: string): Promise<void> {
-  await appStore.startSession(model);
+/** Start a session at a chosen model + permission mode; the store builds the
+ *  full SessionUi and tags it with the active context. */
+export async function startSessionWithModel(model?: string, permissionMode?: PermissionMode): Promise<void> {
+  await appStore.startSession(model, permissionMode);
 }
 
 export function selectSession(sessionId: string): void {

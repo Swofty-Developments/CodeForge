@@ -16,9 +16,11 @@ mod error;
 mod feature;
 mod session;
 mod timeline;
+mod worktree;
 
 pub use diff::{DiffByFeature, DiffHunk, DiffLine, FeatureDiffGroup, FileDiff};
 pub use error::{Error, Result};
 pub use feature::{Feature, FeatureFile, FeaturePatch, FileRole};
 pub use session::{IndexProgress, RepoState, SessionInfo, SessionStatus, StartSessionOpts};
 pub use timeline::{Actor, EventKind, TimelineEvent, TimelineFilter};
+pub use worktree::{MergeResult, Worktree};

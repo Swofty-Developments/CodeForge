@@ -1,24 +1,16 @@
 /**
- * Session slice — start/send/approve/stop actions plus the `agent-event`
- * reducer (CodeForge streaming model, docs/ARCHITECTURE.md §Sessions).
- * Demux: payload.sessionId is the routing key (CONTRACT-1) — the backend stamps
- * it on every event. threadId carries the Claude SDK session id for display /
- * resume bookkeeping only and is never used for routing.
- * `messages` is the single source of truth; there is no parallel block mirror.
+ * Session slice — start/send/approve/stop actions + live permission-mode switch.
+ * The `agent-event` reducer and its message helpers live in session-reducer.ts.
+ * Sessions are tagged with the active context path (W1) and a permission mode (W5).
  */
 
 import { produce, type SetStoreFunction } from "solid-js/store";
 import * as ipc from "../ipc";
-import type {
-  AgentEventPayload,
-  ContentBlock,
-  SessionInfo,
-  SessionMessage,
-  SessionUi,
-} from "../types";
+import type { PermissionMode, SessionInfo, SessionUi } from "../types";
 import type { AppStore } from "./app-store";
+import { createAgentEventHandler, finalizeLiveAssistant } from "./session-reducer";
 
-function newSessionUi(info: SessionInfo): SessionUi {
+function newSessionUi(info: SessionInfo, contextPath: string, permissionMode: PermissionMode): SessionUi {
   return {
     info,
     runState: "starting",
@@ -27,54 +19,9 @@ function newSessionUi(info: SessionInfo): SessionUi {
     slashCommands: [],
     claudeSessionId: null,
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+    contextPath,
+    permissionMode,
   };
-}
-
-/** The live streaming message = last assistant message without a `done-` id. */
-function findLiveAssistant(s: SessionUi): SessionMessage | null {
-  for (let i = s.messages.length - 1; i >= 0; i--) {
-    const m = s.messages[i];
-    if (m.role === "assistant" && !m.id.startsWith("done-")) return m;
-  }
-  return null;
-}
-
-function ensureLiveAssistant(s: SessionUi): SessionMessage {
-  const live = findLiveAssistant(s);
-  if (live) return live;
-  const msg: SessionMessage = { id: crypto.randomUUID(), role: "assistant", content: "", blocks: [] };
-  s.messages.push(msg);
-  return msg;
-}
-
-/** Backwards scan across messages; an empty toolId matches the most recent
- *  tool block. Tool blocks live on the live assistant message. */
-function findToolBlock(s: SessionUi, toolId: string | undefined): ContentBlock | null {
-  for (let mi = s.messages.length - 1; mi >= 0; mi--) {
-    const blocks = s.messages[mi].blocks;
-    for (let bi = blocks.length - 1; bi >= 0; bi--) {
-      const b = blocks[bi];
-      if (b.type === "tool_use" && (!toolId || b.toolId === toolId)) return b;
-    }
-  }
-  return null;
-}
-
-function finalizeLiveAssistant(s: SessionUi, toolOutcome: "completed" | "error"): void {
-  const msg = findLiveAssistant(s);
-  if (!msg) return;
-  for (const b of msg.blocks) {
-    if (b.type === "tool_use" && (b.toolStatus === "generating" || b.toolStatus === "running")) {
-      b.toolStatus = toolOutcome;
-      if (toolOutcome === "error") b.toolError = true;
-    }
-  }
-  msg.content = msg.blocks.filter((b) => b.type === "text").map((b) => b.content).join("\n");
-  msg.id = `done-${crypto.randomUUID()}`;
-}
-
-function pushSystemMessage(s: SessionUi, content: string, level: "info" | "warn" | "error" = "info"): void {
-  s.messages.push({ id: `done-${crypto.randomUUID()}`, role: "system", content, blocks: [], level });
 }
 
 export function createSessionSlice(
@@ -82,13 +29,28 @@ export function createSessionSlice(
   setStore: SetStoreFunction<AppStore>,
   pushError: (message: string) => void,
 ) {
-  async function startSession(model?: string): Promise<void> {
+  async function startSession(model?: string, permissionMode: PermissionMode = "default"): Promise<void> {
     if (!store.repo) return;
+    const contextPath = store.activeContextPath;
+    if (!contextPath) return;
     try {
-      const info = await ipc.startSession({ repoPath: store.repo.path, model });
-      setStore("sessions", store.sessions.length, newSessionUi(info));
+      const info = await ipc.startSession({ repoPath: store.repo.path, model, permissionMode });
+      setStore("sessions", store.sessions.length, newSessionUi(info, contextPath, permissionMode));
       setStore("activeSessionId", info.id);
     } catch (e) {
+      pushError(String(e));
+    }
+  }
+
+  /** Switch a running session's permission mode live (W5). Optimistic. */
+  async function setSessionMode(sessionId: string, mode: PermissionMode): Promise<void> {
+    const idx = store.sessions.findIndex((s) => s.info.id === sessionId);
+    const prev = idx >= 0 ? store.sessions[idx].permissionMode : undefined;
+    if (idx >= 0) setStore("sessions", idx, "permissionMode", mode);
+    try {
+      await ipc.setSessionMode(sessionId, mode);
+    } catch (e) {
+      if (idx >= 0 && prev) setStore("sessions", idx, "permissionMode", prev);
       pushError(String(e));
     }
   }
@@ -155,171 +117,15 @@ export function createSessionSlice(
     setStore("composerPrefill", null);
   }
 
-  function handleAgentEvent(payload: AgentEventPayload): void {
-    // CONTRACT-1: route strictly by sessionId (stamped on every event).
-    const idx = store.sessions.findIndex((s) => s.info.id === payload.sessionId);
-    if (idx < 0) return;
-    const mutate = (fn: (s: SessionUi) => void) => setStore("sessions", idx, produce(fn));
-
-    switch (payload.eventType) {
-      case "content_delta": {
-        const text = payload.text ?? "";
-        if (!text) return;
-        mutate((s) => {
-          const msg = ensureLiveAssistant(s);
-          const last = msg.blocks[msg.blocks.length - 1];
-          if (last && last.type === "text") last.content += text;
-          else msg.blocks.push({ type: "text", content: text });
-          msg.content += text;
-        });
-        break;
-      }
-      case "thinking_delta": {
-        const text = payload.text ?? "";
-        if (!text) return;
-        mutate((s) => {
-          const msg = ensureLiveAssistant(s);
-          const last = msg.blocks[msg.blocks.length - 1];
-          if (last && last.type === "thinking") last.content += text;
-          else msg.blocks.push({ type: "thinking", content: text });
-        });
-        break;
-      }
-      case "tool_use_start":
-        mutate((s) =>
-          ensureLiveAssistant(s).blocks.push({
-            type: "tool_use",
-            content: "",
-            toolId: payload.toolId ?? "",
-            // Keep nullable — the UI renders an explicit "unknown tool" affordance
-            // rather than fabricating a name.
-            toolName: payload.toolName,
-            toolInput: "",
-            toolStatus: "generating",
-          }),
-        );
-        break;
-      case "tool_input_delta":
-        mutate((s) => {
-          const b = findToolBlock(s, payload.toolId);
-          if (b) b.toolInput = (b.toolInput ?? "") + (payload.inputJson ?? "");
-        });
-        break;
-      case "tool_use_end":
-        mutate((s) => {
-          const b = findToolBlock(s, payload.toolId);
-          if (b) b.toolStatus = "running";
-        });
-        break;
-      case "tool_result":
-        mutate((s) => {
-          const b = findToolBlock(s, payload.toolId);
-          if (!b) return;
-          b.toolOutput = payload.toolOutput ?? "";
-          b.toolStatus = payload.isError ? "error" : "completed";
-          b.toolError = !!payload.isError;
-          // Claude tool_results arrive with an empty toolName; the block keeps its own.
-          if (payload.toolName) b.toolName = payload.toolName;
-        });
-        break;
-      case "turn_started":
-        mutate((s) => {
-          s.runState = "generating";
-        });
-        break;
-      case "turn_completed":
-        mutate((s) => {
-          if (payload.turnId && !s.claudeSessionId) s.claudeSessionId = payload.turnId;
-          finalizeLiveAssistant(s, "completed");
-          s.runState = "ready";
-        });
-        break;
-      case "turn_aborted":
-        mutate((s) => {
-          finalizeLiveAssistant(s, "error");
-          pushSystemMessage(s, `Aborted: ${payload.reason ?? "unknown"}`, "warn");
-          s.runState = "ready";
-        });
-        break;
-      case "usage_report":
-        mutate((s) => {
-          s.usage.inputTokens += payload.inputTokens ?? 0;
-          s.usage.outputTokens += payload.outputTokens ?? 0;
-          s.usage.cacheReadTokens += payload.cacheReadTokens ?? 0;
-          s.usage.cacheWriteTokens += payload.cacheWriteTokens ?? 0;
-          s.usage.costUsd += payload.costUsd ?? 0;
-          for (let i = s.messages.length - 1; i >= 0; i--) {
-            const m = s.messages[i];
-            if (m.role === "assistant") {
-              m.meta = {
-                model: payload.model,
-                inputTokens: payload.inputTokens,
-                outputTokens: payload.outputTokens,
-                costUsd: payload.costUsd,
-              };
-              break;
-            }
-          }
-        });
-        break;
-      case "session_ready":
-        mutate((s) => {
-          // payload.message carries the Claude SDK session id (forge-session payload.rs).
-          if (payload.message) s.claudeSessionId = payload.message;
-          if (payload.model) s.info.model = payload.model;
-          // init arrives mid-turn with `claude -p`; never downgrade "generating".
-          if (s.runState !== "generating") s.runState = "ready";
-        });
-        break;
-      case "slash_commands":
-        mutate((s) => {
-          s.slashCommands = payload.commands ?? [];
-        });
-        break;
-      case "session_error":
-        mutate((s) => {
-          s.runState = "error";
-          pushSystemMessage(s, `Error: ${payload.message ?? "unknown"}`, "error");
-        });
-        pushError(payload.message ?? "Session error");
-        break;
-      // A resume attempt failed — a distinct, surfaced state (not a silent
-      // fall-through to a fresh session). Agent A emits the detail in `message`.
-      case "session_resume_failed":
-        mutate((s) => {
-          s.runState = "error";
-          pushSystemMessage(s, `Resume failed: ${payload.message ?? "unknown"}`, "error");
-        });
-        pushError(`Session resume failed: ${payload.message ?? "unknown"}`);
-        break;
-      // The session runs, but server-side persistence is degraded — shown
-      // honestly rather than hidden behind the happy path.
-      case "session_persistence_degraded":
-        mutate((s) => {
-          pushSystemMessage(s, `Persistence degraded: ${payload.message ?? "unknown"}`, "warn");
-        });
-        break;
-      case "approval_required":
-        mutate((s) => {
-          s.pendingApproval = {
-            requestId: payload.requestId ?? "",
-            description: payload.description ?? "",
-          };
-        });
-        break;
-      default:
-        break;
-    }
-  }
-
   return {
     startSession,
+    setSessionMode,
     sendMessage,
     sendSessionInput,
     approveRequest,
     stopSession,
     prefillComposer,
     clearComposerPrefill,
-    handleAgentEvent,
+    handleAgentEvent: createAgentEventHandler(store, setStore, pushError),
   };
 }

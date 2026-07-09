@@ -78,6 +78,17 @@ impl SessionManager {
         self.get(id)?.respond_to_approval(request_id, approve, None)
     }
 
+    /// Switch a session's permission mode mid-session. `mode` must be one of the
+    /// four SDK modes (default|acceptEdits|plan|bypassPermissions) — an unknown
+    /// value is a named [`Error::InvalidMode`], never a silent no-op. The mode is
+    /// validated here (before the session lookup) and forwarded to the sidecar.
+    pub fn set_mode(&self, id: &str, mode: &str) -> Result<()> {
+        if !crate::mode::is_valid_permission_mode(mode) {
+            return Err(crate::Error::InvalidMode(mode.to_string()));
+        }
+        self.get(id)?.set_mode(mode)
+    }
+
     /// Abort the in-flight turn (session stays alive).
     pub fn abort(&self, id: &str) -> Result<()> {
         self.get(id)?.interrupt()
@@ -140,5 +151,19 @@ mod tests {
         assert!(matches!(mgr.abort(&ghost), Err(crate::Error::NotFound(_))));
         assert!(matches!(mgr.approve(&ghost, "1", true), Err(crate::Error::NotFound(_))));
         assert!(matches!(mgr.stop(&ghost).await, Err(crate::Error::NotFound(_))));
+    }
+
+    #[test]
+    fn set_mode_validates_before_lookup() {
+        let mgr = SessionManager::new();
+        let ghost = Uuid::new_v4().to_string();
+        // Invalid mode is rejected up front (named InvalidMode), even before the
+        // session lookup — never a silent no-op.
+        assert!(matches!(mgr.set_mode(&ghost, "yolo"), Err(crate::Error::InvalidMode(_))));
+        assert!(matches!(mgr.set_mode(&ghost, "bypass"), Err(crate::Error::InvalidMode(_))));
+        // A valid mode gets past validation to the lookup, which fails NotFound.
+        for mode in ["default", "acceptEdits", "plan", "bypassPermissions"] {
+            assert!(matches!(mgr.set_mode(&ghost, mode), Err(crate::Error::NotFound(_))));
+        }
     }
 }

@@ -29,6 +29,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("session not found: {0}")]
     NotFound(String),
+    #[error("invalid permission mode: {0} (expected default|acceptEdits|plan|bypassPermissions)")]
+    InvalidMode(String),
     #[error("sidecar error: {0}")]
     Sidecar(String),
     #[error("{0}")]

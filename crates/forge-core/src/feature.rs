@@ -21,6 +21,9 @@ pub struct Feature {
     pub confidence: f32,
     /// Human-pinned features survive re-index verbatim.
     pub pinned: bool,
+    /// User-set graph node color (hex, e.g. "#74ade8"). `None` = default palette.
+    #[serde(default)]
+    pub color: Option<String>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -75,6 +78,7 @@ mod tests {
             tags: vec!["security".into()],
             confidence: 0.9,
             pinned: true,
+            color: None,
             updated_at: Utc::now(),
         }
     }

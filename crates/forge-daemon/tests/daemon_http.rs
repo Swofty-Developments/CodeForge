@@ -32,6 +32,7 @@ fn seed_features_json(repo: &Path) {
         tags: vec!["security".into()],
         confidence: 0.9,
         pinned: false,
+        color: None,
         updated_at: Utc::now(),
     }];
     let dir = repo.join(".featureforge");

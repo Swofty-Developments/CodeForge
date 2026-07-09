@@ -2,12 +2,14 @@
  * status dot + close), new-session model dropdown, the streamed message view,
  * and the autosize composer. Layout/CSS live in ./session/styles. */
 
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { appStore } from "../stores/app-store";
 import { MessageStream } from "./session/MessageStream";
 import { closeSession, selectSession, startSessionWithModel } from "./session/local";
 import { injectSessionStyles } from "./session/styles";
-import type { RunState, SessionUi } from "../types";
+import { ModeControl } from "./session/ModeControl";
+import { samePath } from "../stores/path";
+import type { PermissionMode, RunState, SessionUi } from "../types";
 
 const MAX_COMPOSER_PX = 168; // ~8 lines at 13.5px / 1.45
 
@@ -39,12 +41,30 @@ export function SessionPane() {
   const [input, setInput] = createSignal("");
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [custom, setCustom] = createSignal("");
+  // Mode for the NEXT session started here; an active session shows its own live mode.
+  const [pendingMode, setPendingMode] = createSignal<PermissionMode>("default");
   let taRef: HTMLTextAreaElement | undefined;
 
-  const active = (): SessionUi | null =>
-    store.sessions.find((s) => s.info.id === store.activeSessionId) ?? null;
+  // Only the active context's sessions are shown (W1: sessions are context-tagged).
+  const visibleSessions = createMemo((): SessionUi[] =>
+    store.activeContextPath
+      ? store.sessions.filter((s) => samePath(s.contextPath, store.activeContextPath!))
+      : [],
+  );
+  const active = (): SessionUi | null => {
+    const id = store.activeSessionId;
+    if (!id) return null;
+    return visibleSessions().find((s) => s.info.id === id) ?? null;
+  };
   const generating = () => active()?.runState === "generating";
   const canSend = () => !!store.repo && !!input().trim();
+  const currentMode = (): PermissionMode => active()?.permissionMode ?? pendingMode();
+
+  function selectMode(mode: PermissionMode): void {
+    setPendingMode(mode);
+    const s = active();
+    if (s) void appStore.setSessionMode(s.info.id, mode);
+  }
 
   // "Ask Claude about this feature" seeds composerPrefill + reveals the pane.
   createEffect(() => {
@@ -62,7 +82,7 @@ export function SessionPane() {
     if (!text || !store.repo) return;
     setInput("");
     if (taRef) autosize(taRef);
-    if (!store.activeSessionId) await appStore.startSession();
+    if (!active()) await appStore.startSession(undefined, pendingMode());
     // sendSessionInput pushes the user message into session.messages itself.
     await appStore.sendSessionInput(text);
   }
@@ -70,7 +90,7 @@ export function SessionPane() {
   function pickModel(model: string | null): void {
     setMenuOpen(false);
     setCustom("");
-    void startSessionWithModel(model ?? undefined);
+    void startSessionWithModel(model ?? undefined, pendingMode());
   }
 
   function pickCustom(): void {
@@ -82,7 +102,7 @@ export function SessionPane() {
     <div class="session-pane" style={{ width: `${store.sessionPaneWidth}px` }}>
       <div class="sp-tabs">
         <div class="sp-tabs-scroll">
-          <For each={store.sessions}>
+          <For each={visibleSessions()}>
             {(session) => (
               <div
                 class="sp-tab"
@@ -184,6 +204,7 @@ export function SessionPane() {
             }}
           />
           <div class="sp-composer-meta">
+            <ModeControl mode={currentMode()} disabled={!store.repo} onSelect={selectMode} />
             <Show when={active()}>
               {(s) => <span class="sp-model-tag">{s().info.model ?? "default"}</span>}
             </Show>

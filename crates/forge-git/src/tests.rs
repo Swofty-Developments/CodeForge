@@ -74,6 +74,7 @@ fn feature(slug: &str, files: &[&str]) -> Feature {
         tags: Vec::new(),
         confidence: 1.0,
         pinned: false,
+        color: None,
         updated_at: Utc::now(),
     }
 }

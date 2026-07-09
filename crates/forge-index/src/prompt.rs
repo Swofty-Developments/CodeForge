@@ -122,6 +122,7 @@ mod tests {
             tags: vec![],
             confidence: 0.8,
             pinned: false,
+            color: None,
             updated_at: chrono::Utc::now(),
         };
         let prompt = doc_prompt(&feature);

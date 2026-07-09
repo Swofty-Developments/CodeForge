@@ -25,11 +25,14 @@ import type {
   Feature,
   FeaturePatch,
   IndexProgress,
+  MergeResult,
+  PermissionMode,
   RepoState,
   SessionInfo,
   StartSessionOpts,
   TimelineEvent,
   TimelineFilter,
+  Worktree,
 } from "./types";
 
 // ── Repo ────────────────────────────────────────────────────────────────────
@@ -72,6 +75,29 @@ export function updateFeature(repoPath: string, slug: string, patch: FeaturePatc
   return invoke("update_feature", { repoPath, slug, patch });
 }
 
+/** null/undefined color clears; implies pin like update_feature. */
+export function setFeatureColor(repoPath: string, slug: string, color?: string): Promise<Feature> {
+  return invoke("set_feature_color", { repoPath, slug, color: color ?? null });
+}
+
+// ── Worktrees (W3 frozen commands) ──────────────────────────────────────────
+
+export function listWorktrees(repoPath: string): Promise<Worktree[]> {
+  return invoke("list_worktrees", { repoPath });
+}
+
+export function createWorktree(repoPath: string, name: string, baseRef?: string): Promise<Worktree> {
+  return invoke("create_worktree", { repoPath, name, baseRef: baseRef ?? null });
+}
+
+export function removeWorktree(repoPath: string, worktreePath: string, force: boolean): Promise<void> {
+  return invoke("remove_worktree", { repoPath, worktreePath, force });
+}
+
+export function mergeWorktree(baseRepoPath: string, worktreePath: string): Promise<MergeResult> {
+  return invoke("merge_worktree", { baseRepoPath, worktreePath });
+}
+
 // ── Timeline & diff ─────────────────────────────────────────────────────────
 
 export function getTimeline(repoPath: string, filter: TimelineFilter): Promise<TimelineEvent[]> {
@@ -98,6 +124,10 @@ export function approveSession(id: string, requestId: string, approve: boolean):
 
 export function stopSession(id: string): Promise<void> {
   return invoke("stop_session", { id });
+}
+
+export function setSessionMode(sessionId: string, mode: PermissionMode): Promise<void> {
+  return invoke("set_session_mode", { sessionId, mode });
 }
 
 export function listSessions(): Promise<SessionInfo[]> {

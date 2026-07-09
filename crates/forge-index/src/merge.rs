@@ -67,6 +67,7 @@ mod tests {
             tags: Vec::new(),
             confidence: 0.5,
             pinned,
+            color: None,
             updated_at: Utc::now(),
         }
     }

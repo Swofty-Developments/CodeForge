@@ -23,6 +23,8 @@ export interface Feature {
   tags: string[];
   confidence: number;
   pinned: boolean;
+  /** User-set graph color (hex like "#74ade8"). Undefined = default per-slug hue. */
+  color?: string;
   updatedAt: string; // RFC3339
 }
 
@@ -125,7 +127,40 @@ export interface IndexProgress {
   total: number;
 }
 
+// ── Worktrees (W2 frozen forge-core mirror) ─────────────────────────────────
+
+/** A git worktree of a repo. The base checkout reports itself with isBase=true. */
+export interface Worktree {
+  path: string;
+  name: string;
+  branch: string | null;
+  isBase: boolean;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+}
+
+/** Outcome of merging a worktree branch back into the base branch. */
+export interface MergeResult {
+  merged: boolean;
+  conflicts: string[];
+  aborted: boolean;
+  message: string;
+  sourceBranch: string;
+  targetBranch: string;
+}
+
+/** One open repo context = its own RepoRuntime (daemon / index / timeline),
+ *  keyed by state.path. The base checkout is context #0. */
+export interface RepoContext {
+  state: RepoState;
+  isBase: boolean;
+}
+
 export type SessionStatus = "starting" | "ready" | "generating" | "error" | "stopped";
+
+/** The four SDK permission modes (W5). "Auto" = bypassPermissions auto-runs everything. */
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
 
 export interface SessionInfo {
   id: string;
@@ -138,7 +173,7 @@ export interface SessionInfo {
 export interface StartSessionOpts {
   repoPath: string;
   model?: string;
-  permissionMode?: string; // "default" | "acceptEdits" | "plan" | "bypassPermissions"
+  permissionMode?: PermissionMode;
   resumeSessionId?: string;
 }
 
@@ -296,6 +331,8 @@ export interface SessionUsage {
 export interface ErrorToast {
   id: number;
   message: string;
+  /** Tints the toast; defaults to error (red). */
+  kind?: "error" | "success";
 }
 
 /** A session as rendered in the right-hand session pane. `messages` is the
@@ -308,6 +345,10 @@ export interface SessionUi {
   slashCommands: string[];
   claudeSessionId: string | null;
   usage: SessionUsage;
+  /** The repo context (worktree/base path) this session belongs to. */
+  contextPath: string;
+  /** Live permission mode; switchable via set_session_mode. */
+  permissionMode: PermissionMode;
 }
 
-export type ActiveView = "welcome" | "feature" | "timeline" | "diff";
+export type ActiveView = "welcome" | "feature" | "timeline" | "diff" | "graph";

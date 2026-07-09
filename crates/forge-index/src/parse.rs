@@ -116,6 +116,7 @@ pub(crate) fn validate_features(repo_root: &Path, raw: Vec<RawFeature>) -> Resul
             tags: feature.tags,
             confidence: clamp_confidence(feature.confidence),
             pinned: false,
+            color: None,
             updated_at: now,
         });
     }

@@ -103,6 +103,17 @@ impl ClaudeSession {
             .map_err(|_| crate::Error::Sidecar("sidecar stdin channel closed".into()))
     }
 
+    /// Switch the session's permission mode mid-session: writes
+    /// `{"type":"set_mode","mode":<mode>}`. The augmenter passes non-`query`
+    /// lines through untouched, so this reaches the sidecar verbatim. The
+    /// sidecar applies it on its next query turn (see the sidecar protocol).
+    pub fn set_mode(&self, mode: &str) -> Result<()> {
+        let msg = serde_json::json!({ "type": "set_mode", "mode": mode });
+        self.stdin_tx
+            .try_send(msg.to_string())
+            .map_err(|_| crate::Error::Sidecar("sidecar stdin channel closed".into()))
+    }
+
     /// Abort the in-flight turn: writes `{"type":"abort"}`.
     pub fn interrupt(&self) -> Result<()> {
         self.stdin_tx

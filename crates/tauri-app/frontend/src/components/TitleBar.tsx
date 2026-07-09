@@ -2,8 +2,9 @@
  * left, then the project + branch + feature-count pills. Right side carries the
  * reindex control. Pills are the primary identity affordance top-left. */
 
-import { Show, createMemo } from "solid-js";
+import { Show, createMemo, createSignal } from "solid-js";
 import { appStore } from "../stores/app-store";
+import { samePath } from "../stores/path";
 
 export function TitleBar() {
   const { store } = appStore;
@@ -11,6 +12,28 @@ export function TitleBar() {
   const indexing = createMemo(
     () => store.indexProgress != null && store.indexProgress.stage !== "error",
   );
+
+  const [branchMenu, setBranchMenu] = createSignal(false);
+
+  const activeCtx = () =>
+    store.activeContextPath
+      ? store.contexts.find((c) => samePath(c.state.path, store.activeContextPath!)) ?? null
+      : null;
+  const activeIsBase = () => activeCtx()?.isBase ?? true;
+  const baseBranch = createMemo(() => {
+    const base = store.contexts.find((c) => c.isBase) ?? store.contexts[0];
+    return base ? base.state.branch ?? base.state.name : "";
+  });
+
+  function newWorktree(): void {
+    setBranchMenu(false);
+    appStore.setWorktreePromptOpen(true);
+  }
+  function mergeActive(): void {
+    setBranchMenu(false);
+    const p = store.activeContextPath;
+    if (p) void appStore.mergeWorktree(p);
+  }
 
   return (
     <div class="titlebar" data-tauri-drag-region>
@@ -37,22 +60,42 @@ export function TitleBar() {
               <span class="tb-pill-label">{r().name}</span>
             </button>
 
-            <Show when={r().branch}>
-              {(branch) => (
-                <div class="tb-pill tb-pill--branch" title={`on branch ${branch()}`}>
-                  <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
-                    <path
-                      d="M4.5 2.5v7m0 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m0-7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3m7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m0 3v1.5a3 3 0 0 1-3 3H4.5"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.1"
-                      stroke-linecap="round"
-                    />
-                  </svg>
-                  <span class="tb-pill-label tb-mono">{branch()}</span>
+            <div class="tb-branch-wrap">
+              <button
+                class="tb-pill tb-pill--branch"
+                classList={{ "tb-pill--open": branchMenu() }}
+                title="branch actions"
+                onClick={() => setBranchMenu((o) => !o)}
+              >
+                <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M4.5 2.5v7m0 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m0-7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3m7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m0 3v1.5a3 3 0 0 1-3 3H4.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.1"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span class="tb-pill-label tb-mono">{r().branch ?? "detached"}</span>
+                <svg class="tb-caret" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                </svg>
+              </button>
+              <Show when={branchMenu()}>
+                <div class="tb-menu-backdrop" onClick={() => setBranchMenu(false)} />
+                <div class="tb-branch-menu">
+                  <button class="tb-menu-item" onClick={newWorktree}>
+                    New worktree from <span class="tb-menu-branch">{r().branch ?? "HEAD"}</span>…
+                  </button>
+                  <Show when={!activeIsBase()}>
+                    <button class="tb-menu-item" onClick={mergeActive}>
+                      Merge <span class="tb-menu-branch">{r().branch ?? "HEAD"}</span> into{" "}
+                      <span class="tb-menu-branch">{baseBranch()}</span>
+                    </button>
+                  </Show>
                 </div>
-              )}
-            </Show>
+              </Show>
+            </div>
 
             <div class="tb-pill tb-pill--count" title="features in this repo">
               <span class="tb-pill-label tb-mono">{r().featuresCount}</span>
@@ -116,8 +159,31 @@ export function TitleBar() {
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .tb-mono { font-family: var(--font-mono); font-size: 11px; }
-        .tb-pill--branch { color: var(--text-muted); }
+        .tb-pill--branch { color: var(--text-muted); cursor: pointer; }
         .tb-pill--branch .tb-ico { color: var(--text-tertiary); }
+        .tb-pill--open, .tb-pill--branch:hover { background: var(--bg-hover); color: var(--text); }
+        .tb-caret { width: 11px; height: 11px; flex-shrink: 0; color: var(--text-tertiary); opacity: 0.7; }
+        .tb-branch-wrap { position: relative; display: inline-flex; -webkit-app-region: no-drag; }
+        .tb-menu-backdrop { position: fixed; inset: 0; z-index: 99; }
+        .tb-branch-menu {
+          position: absolute;
+          top: calc(100% + 5px); left: 0;
+          z-index: 100;
+          min-width: 220px;
+          padding: 4px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-strong);
+          border-radius: var(--radius-md);
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+          animation: dropdown-in 0.14s var(--ease-out);
+        }
+        .tb-menu-item {
+          display: block; width: 100%; text-align: left;
+          padding: 7px 9px; border-radius: var(--radius-sm);
+          font-size: 12px; color: var(--text-secondary); white-space: nowrap;
+        }
+        .tb-menu-item:hover { background: var(--bg-accent); color: var(--text); }
+        .tb-menu-branch { font-family: var(--font-mono); font-size: 11px; color: var(--primary); }
         .tb-pill--count { gap: 4px; }
         .tb-pill--count .tb-pill-label { color: var(--primary); font-weight: 600; }
         .tb-pill-sub { color: var(--text-tertiary); font-size: 11px; }

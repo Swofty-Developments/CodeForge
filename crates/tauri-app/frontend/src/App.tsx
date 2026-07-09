@@ -4,13 +4,16 @@
 import { For, Match, Show, Switch, onCleanup, onMount } from "solid-js";
 import type { ActiveView } from "./types";
 import { CommandPalette } from "./components/CommandPalette";
+import { MergeResultPanel } from "./components/MergeResultPanel";
 import { SessionPane } from "./components/SessionPane";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { TitleBar } from "./components/TitleBar";
+import { WorktreeTabs } from "./components/WorktreeTabs";
 import { DiffReview } from "./views/DiffReview";
 import { FeatureDetail } from "./views/FeatureDetail";
+import { GraphView } from "./views/GraphView";
 import { TimelineView } from "./views/TimelineView";
 import { Welcome } from "./views/Welcome";
 import { appStore } from "./stores/app-store";
@@ -19,6 +22,7 @@ export default function App() {
   const { store } = appStore;
 
   let sidebarDragging = false;
+  let sessionDragging = false;
 
   function onSidebarDragStart(e: MouseEvent) {
     e.preventDefault();
@@ -26,18 +30,32 @@ export default function App() {
     document.body.style.cursor = "col-resize";
   }
 
+  function onSessionDragStart(e: MouseEvent) {
+    e.preventDefault();
+    sessionDragging = true;
+    document.body.style.cursor = "col-resize";
+  }
+
   function onMouseMove(e: MouseEvent) {
     if (sidebarDragging) appStore.setSidebarWidth(e.clientX);
+    // Session pane hugs the right edge, so its width grows as the handle moves left.
+    else if (sessionDragging) appStore.setSessionPaneWidth(window.innerWidth - e.clientX);
   }
 
   function onMouseUp() {
-    if (sidebarDragging) {
+    if (sidebarDragging || sessionDragging) {
       sidebarDragging = false;
+      sessionDragging = false;
       document.body.style.cursor = "";
     }
   }
 
-  const VIEW_KEYS: Record<string, ActiveView> = { "1": "feature", "2": "timeline", "3": "diff" };
+  const VIEW_KEYS: Record<string, ActiveView> = {
+    "1": "feature",
+    "2": "graph",
+    "3": "timeline",
+    "4": "diff",
+  };
 
   function onKeyDown(e: KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
@@ -81,6 +99,9 @@ export default function App() {
   return (
     <>
       <TitleBar />
+      <Show when={store.repo}>
+        <WorktreeTabs />
+      </Show>
       <div class="workspace">
         <Show when={store.repo} fallback={<div class="workspace-welcome"><Welcome /></div>}>
           <Sidebar />
@@ -89,19 +110,28 @@ export default function App() {
             <TabBar />
             <div class="main-panel-body">
               <div class="main-panel-view">
-                <Switch fallback={<FeatureDetail />}>
-                  <Match when={store.activeView === "feature"}>
-                    <FeatureDetail />
-                  </Match>
-                  <Match when={store.activeView === "timeline"}>
-                    <TimelineView />
-                  </Match>
-                  <Match when={store.activeView === "diff"}>
-                    <DiffReview />
-                  </Match>
-                </Switch>
+                {/* Keyed on the active context so switching cross-fades + slides. */}
+                <Show when={store.activeContextPath} keyed>
+                  <div class="ctx-swap">
+                    <Switch fallback={<FeatureDetail />}>
+                      <Match when={store.activeView === "feature"}>
+                        <FeatureDetail />
+                      </Match>
+                      <Match when={store.activeView === "graph"}>
+                        <GraphView />
+                      </Match>
+                      <Match when={store.activeView === "timeline"}>
+                        <TimelineView />
+                      </Match>
+                      <Match when={store.activeView === "diff"}>
+                        <DiffReview />
+                      </Match>
+                    </Switch>
+                  </div>
+                </Show>
               </div>
               <Show when={store.sessionPaneOpen}>
+                <div class="resize-handle resize-handle--session" onMouseDown={onSessionDragStart} />
                 <SessionPane />
               </Show>
             </div>
@@ -109,6 +139,7 @@ export default function App() {
         </Show>
       </div>
       <StatusBar />
+      <MergeResultPanel />
       <Show when={store.paletteOpen}>
         <CommandPalette />
       </Show>
@@ -119,6 +150,7 @@ export default function App() {
             {(toast) => (
               <div
                 class="toast"
+                classList={{ "toast--success": toast.kind === "success" }}
                 role="alert"
                 title="Dismiss"
                 onClick={() => appStore.dismissToast(toast.id)}
@@ -155,6 +187,14 @@ export default function App() {
           display: flex;
           flex-direction: column;
         }
+        /* Cross-fade + horizontal slide when the active repo context changes. */
+        .ctx-swap {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          animation: ctx-swap-in 0.28s var(--ease-out) both;
+        }
         .resize-handle {
           width: 5px;
           cursor: col-resize;
@@ -162,6 +202,7 @@ export default function App() {
           flex-shrink: 0;
           position: relative;
         }
+        .resize-handle--session::after { left: 2px; }
         .resize-handle::after {
           content: "";
           position: absolute;
@@ -217,6 +258,15 @@ export default function App() {
           user-select: text;
           -webkit-user-select: text;
         }
+        /* Success variant — green tint (clean merges, etc.) */
+        .toast--success {
+          background:
+            linear-gradient(rgba(var(--green-rgb), 0.08), rgba(var(--green-rgb), 0.08)),
+            var(--bg-card);
+          border-color: rgba(var(--green-rgb), 0.3);
+        }
+        .toast--success .toast-dot { background: var(--green); }
+        .toast--success .toast-msg { color: var(--green); }
         @media (prefers-reduced-motion: reduce) {
           .toast { animation: none; }
         }

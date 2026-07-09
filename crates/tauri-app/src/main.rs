@@ -69,6 +69,7 @@ fn main() {
             commands::features::get_feature_doc,
             commands::features::pin_feature,
             commands::features::update_feature,
+            commands::features::set_feature_color,
             commands::timeline::get_timeline,
             commands::timeline::get_diff_by_feature,
             commands::sessions::start_session,
@@ -76,6 +77,11 @@ fn main() {
             commands::sessions::approve_session,
             commands::sessions::stop_session,
             commands::sessions::list_sessions,
+            commands::sessions::set_session_mode,
+            commands::worktrees::list_worktrees,
+            commands::worktrees::create_worktree,
+            commands::worktrees::remove_worktree,
+            commands::worktrees::merge_worktree,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

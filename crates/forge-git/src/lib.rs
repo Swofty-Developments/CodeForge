@@ -10,12 +10,20 @@ mod status;
 mod tests;
 mod truncate;
 mod untracked;
+mod worktree;
+mod worktree_parse;
+#[cfg(test)]
+mod worktree_tests;
 
 use std::path::{Path, PathBuf};
 
 use forge_core::{DiffByFeature, FileDiff};
 use forge_index::FeatureIndex;
 use tokio::process::Command;
+
+pub use worktree::{
+    base_repo_root, create_worktree, list_worktrees, merge_worktree, remove_worktree,
+};
 
 /// Git errors.
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +34,22 @@ pub enum Error {
     Git(String),
     #[error("not a git repository: {0}")]
     NotARepo(PathBuf),
+    #[error("worktree path already exists: {0}")]
+    WorktreePathExists(PathBuf),
+    #[error("branch already exists: {0}")]
+    BranchExists(String),
+    #[error("refusing to remove the base worktree: {0}")]
+    CannotRemoveBase(PathBuf),
+    #[error("cannot merge a detached-HEAD worktree (no branch to merge): {0}")]
+    WorktreeDetached(PathBuf),
+    #[error("cannot merge into a detached-HEAD base checkout")]
+    BaseDetached,
+    #[error("worktree name is empty after slugify: {0:?}")]
+    InvalidName(String),
+    #[error("repository has no commits yet; cannot create a worktree")]
+    NoCommits,
+    #[error("worktree not found under this repo: {0}")]
+    WorktreeNotFound(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

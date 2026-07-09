@@ -6,6 +6,7 @@ import { appStore } from "../stores/app-store";
 
 const TABS: { view: ActiveView; label: string }[] = [
   { view: "feature", label: "Feature" },
+  { view: "graph", label: "Graph" },
   { view: "timeline", label: "Timeline" },
   { view: "diff", label: "Diff review" },
 ];

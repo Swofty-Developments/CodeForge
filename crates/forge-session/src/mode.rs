@@ -6,6 +6,17 @@
 //! `options.resume` / `options.continue` / neither from this — it never infers
 //! resumability from prior-query state or sniffs SDK error strings.
 
+/// The four SDK permission modes selectable at session start (`StartSessionOpts.
+/// permission_mode`) and switchable mid-session via `SessionManager::set_mode`.
+/// Distinct from [`SessionMode`] (which decides SDK *engagement*: fresh/resume/
+/// continue); this is the *permission* posture Claude runs under.
+pub(crate) const PERMISSION_MODES: [&str; 4] = ["default", "acceptEdits", "plan", "bypassPermissions"];
+
+/// True when `mode` is one of the four valid SDK permission modes.
+pub(crate) fn is_valid_permission_mode(mode: &str) -> bool {
+    PERMISSION_MODES.contains(&mode)
+}
+
 /// How a `query` engages the Claude Agent SDK session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionMode {

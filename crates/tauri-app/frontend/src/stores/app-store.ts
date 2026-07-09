@@ -1,7 +1,12 @@
 /**
  * THE single global store (createRoot(createStore) singleton, CodeForge-style).
- * The store SHAPE is the frozen contract; session actions + the agent-event
- * reducer live in session-slice.ts.
+ * The store SHAPE is the frozen contract. Actions live in slices:
+ *   session-slice.ts  — session lifecycle + agent-event reducer
+ *   context-slice.ts  — the multi-context (base + worktrees) model
+ *   data-slice.ts     — per-context data loads + feature mutations
+ *
+ * `repo` is a DERIVED getter = the active context's RepoState, so every existing
+ * view that reads store.repo keeps working while the app tracks N open contexts.
  */
 
 import { createRoot } from "solid-js";
@@ -13,19 +18,34 @@ import type {
   DiffByFeature,
   ErrorToast,
   Feature,
-  FeaturePatch,
   IndexProgress,
+  MergeResult,
+  RepoContext,
   RepoState,
   SessionUi,
   TimelineEvent,
+  Worktree,
 } from "../types";
 import { createSessionSlice } from "./session-slice";
+import { createContextSlice } from "./context-slice";
+import { createDataSlice } from "./data-slice";
+import { samePath } from "./path";
 
 const TIMELINE_CAP = 1000;
 const TOAST_DISMISS_MS = 5000;
 
 export interface AppStore {
-  repo: RepoState | null;
+  /** Derived: the active context's RepoState (or null). Never written directly. */
+  readonly repo: RepoState | null;
+  /** All open contexts (base + worktrees), keyed by state.path. */
+  contexts: RepoContext[];
+  activeContextPath: string | null;
+  /** list_worktrees for the active repo family (base first); powers the tab strip. */
+  worktrees: Worktree[];
+  worktreesLoading: boolean;
+  /** Last merge outcome, surfaced honestly (clean success OR conflict panel). */
+  mergeResult: MergeResult | null;
+  worktreePromptOpen: boolean;
   features: Feature[];
   /** Legacy scaffold flag — always false now that the backend is wired. */
   featuresArePlaceholder: boolean;
@@ -55,7 +75,18 @@ export interface AppStore {
 
 function createAppStore() {
   const [store, setStore] = createStore<AppStore>({
-    repo: null,
+    get repo(): RepoState | null {
+      const active = this.activeContextPath;
+      if (!active) return null;
+      const ctx = this.contexts.find((c) => samePath(c.state.path, active));
+      return ctx ? ctx.state : null;
+    },
+    contexts: [],
+    activeContextPath: null,
+    worktrees: [],
+    worktreesLoading: false,
+    mergeResult: null,
+    worktreePromptOpen: false,
     features: [],
     featuresArePlaceholder: false,
     selectedFeature: null,
@@ -78,172 +109,48 @@ function createAppStore() {
     toasts: [],
   });
 
-  // ── Error surface ─────────────────────────────────────────────────────────
+  // ── Toast surface ─────────────────────────────────────────────────────────
 
   let toastSeq = 0;
 
-  function pushError(message: string): void {
+  function pushToast(message: string, kind: "error" | "success" = "error"): void {
     const id = ++toastSeq;
-    setStore("lastError", message);
-    setStore("toasts", (t) => [...t, { id, message }]);
+    if (kind === "error") setStore("lastError", message);
+    setStore("toasts", (t) => [...t, { id, message, kind }]);
     setTimeout(() => dismissToast(id), TOAST_DISMISS_MS);
   }
+  const pushError = (message: string): void => pushToast(message, "error");
+  const pushSuccess = (message: string): void => pushToast(message, "success");
 
   function dismissToast(id: number): void {
     setStore("toasts", (t) => t.filter((x) => x.id !== id));
   }
 
-  // ── Repo lifecycle ────────────────────────────────────────────────────────
+  // ── Slices ────────────────────────────────────────────────────────────────
 
-  async function openRepo(path: string): Promise<void> {
-    try {
-      const repo = await ipc.openRepo(path);
-      setStore({ repo, lastError: null, featureActivity: {}, selectedFeature: null, selectedFeatureTimeline: [] });
-      await Promise.all([refreshFeatures(), refreshTimeline(), refreshDaemon()]);
-      setStore("activeView", store.features.length > 0 ? "feature" : "timeline");
-    } catch (e) {
-      pushError(String(e));
-    }
-  }
+  const dataSlice = createDataSlice(store, setStore, pushError);
+  const contextSlice = createContextSlice(store, setStore, pushError, {
+    refreshFeatures: dataSlice.refreshFeatures,
+    refreshTimeline: dataSlice.refreshTimeline,
+    refreshDiff: dataSlice.refreshDiff,
+    refreshDaemon: dataSlice.refreshDaemon,
+  });
+  const sessionSlice = createSessionSlice(store, setStore, pushError);
 
-  async function closeRepo(): Promise<void> {
-    const repo = store.repo;
-    if (!repo) return;
-    try {
-      await ipc.closeRepo(repo.path);
-    } catch (e) {
-      pushError(String(e));
-    }
-    setStore({
-      repo: null,
-      features: [],
-      selectedFeature: null,
-      selectedFeatureTimeline: [],
-      activeView: "welcome",
-      timeline: [],
-      featureActivity: {},
-      diff: null,
-      daemon: null,
-      indexProgress: null,
-      composerPrefill: null,
-    });
-  }
-
-  async function reindex(force = false): Promise<void> {
-    if (!store.repo) return;
-    try {
-      await ipc.reindexRepo(store.repo.path, force);
-    } catch (e) {
-      pushError(String(e));
-    }
-  }
-
-  // ── Features ──────────────────────────────────────────────────────────────
-
-  async function pinFeature(slug: string, pinned: boolean): Promise<void> {
-    if (!store.repo) return;
-    const i = store.features.findIndex((f) => f.slug === slug);
-    if (i >= 0) setStore("features", i, "pinned", pinned); // optimistic
-    try {
-      await ipc.pinFeature(store.repo.path, slug, pinned);
-    } catch (e) {
-      if (i >= 0) setStore("features", i, "pinned", !pinned);
-      pushError(String(e));
-    }
-  }
-
-  async function updateFeature(slug: string, patch: FeaturePatch): Promise<void> {
-    if (!store.repo) return;
-    try {
-      const updated = await ipc.updateFeature(store.repo.path, slug, patch);
-      const i = store.features.findIndex((f) => f.slug === slug);
-      if (i >= 0) setStore("features", i, updated);
-    } catch (e) {
-      pushError(String(e));
-    }
-  }
-
-  // ── Data refresh ──────────────────────────────────────────────────────────
-
-  async function refreshFeatures(): Promise<void> {
-    if (!store.repo) return;
-    try {
-      const features = await ipc.getFeatures(store.repo.path);
-      setStore({ features, featuresArePlaceholder: false });
-    } catch (e) {
-      pushError(String(e));
-    }
-  }
-
-  async function refreshTimeline(): Promise<void> {
-    if (!store.repo) return;
-    try {
-      setStore("timeline", await ipc.getTimeline(store.repo.path, { limit: 200 }));
-    } catch (e) {
-      pushError(String(e));
-    }
-  }
-
-  async function refreshDiff(): Promise<void> {
-    if (!store.repo) return;
-    try {
-      setStore("diff", await ipc.getDiffByFeature(store.repo.path));
-    } catch (e) {
-      pushError(String(e));
-    }
-  }
-
-  async function refreshDaemon(): Promise<void> {
-    if (!store.repo) {
-      setStore("daemon", null);
-      return;
-    }
-    try {
-      const status = await ipc.daemonStatus(store.repo.path);
-      // running / offline are the two answers the backend can give; an errored
-      // probe becomes `unknown` (below), never a definitive `offline`.
-      setStore("daemon", status.running ? { kind: "running", port: status.port } : { kind: "offline" });
-    } catch (e) {
-      setStore("daemon", { kind: "unknown", error: String(e) });
-    }
-  }
-
-  // ── Navigation ────────────────────────────────────────────────────────────
-
-  function selectFeature(slug: string | null): void {
-    setStore({ selectedFeature: slug, selectedFeatureTimeline: [], selectedFeatureDoc: null });
-    if (!slug) return;
-    setStore("activeView", "feature");
-    const repo = store.repo;
-    if (!repo) return;
-    void (async () => {
-      try {
-        const [feature, events, doc] = await Promise.all([
-          ipc.getFeature(repo.path, slug),
-          ipc.getTimeline(repo.path, { featureSlug: slug, limit: 50 }),
-          ipc.getFeatureDoc(repo.path, slug),
-        ]);
-        const i = store.features.findIndex((f) => f.slug === slug);
-        if (i >= 0) setStore("features", i, feature);
-        // Stale-response guard: only apply if this feature is still selected.
-        if (store.selectedFeature === slug) {
-          setStore("selectedFeatureTimeline", events);
-          setStore("selectedFeatureDoc", doc);
-        }
-      } catch (e) {
-        pushError(String(e));
-      }
-    })();
-  }
+  // ── Navigation / layout ───────────────────────────────────────────────────
 
   function setActiveView(view: ActiveView): void {
     setStore("activeView", view);
-    if (view === "diff") void refreshDiff();
-    if (view === "timeline") void refreshTimeline();
+    if (view === "diff") void dataSlice.refreshDiff();
+    if (view === "timeline") void dataSlice.refreshTimeline();
   }
 
   function setPaletteOpen(open: boolean): void {
     setStore("paletteOpen", open);
+  }
+
+  function setWorktreePromptOpen(open: boolean): void {
+    setStore("worktreePromptOpen", open);
   }
 
   function setSidebarWidth(px: number): void {
@@ -257,10 +164,6 @@ function createAppStore() {
   function toggleSessionPane(): void {
     setStore("sessionPaneOpen", !store.sessionPaneOpen);
   }
-
-  // ── Sessions (see session-slice.ts) ───────────────────────────────────────
-
-  const sessionSlice = createSessionSlice(store, setStore, pushError);
 
   // ── Event reducers (single global listeners, registered via initListeners) ─
 
@@ -278,14 +181,17 @@ function createAppStore() {
     const done = progress.total > 0 && progress.done >= progress.total;
     setStore("indexProgress", done ? null : progress);
     if (done) {
-      void refreshFeatures();
-      void refreshTimeline();
+      void dataSlice.refreshFeatures();
+      void dataSlice.refreshTimeline();
     }
   }
 
   function handleRepoChanged(repo: RepoState): void {
-    setStore("repo", repo);
-    void refreshFeatures();
+    const i = store.contexts.findIndex((c) => samePath(c.state.path, repo.path));
+    if (i >= 0) setStore("contexts", i, "state", repo);
+    if (store.activeContextPath && samePath(store.activeContextPath, repo.path)) {
+      void dataSlice.refreshFeatures();
+    }
   }
 
   // ── Listener registration (once per app run) ──────────────────────────────
@@ -310,24 +216,18 @@ function createAppStore() {
   return {
     store,
     setStore,
-    openRepo,
-    closeRepo,
-    reindex,
-    pinFeature,
-    updateFeature,
-    refreshFeatures,
-    refreshTimeline,
-    refreshDiff,
-    refreshDaemon,
-    selectFeature,
+    ...dataSlice,
+    ...contextSlice,
+    ...sessionSlice,
     setActiveView,
     setPaletteOpen,
+    setWorktreePromptOpen,
     setSidebarWidth,
     setSessionPaneWidth,
     toggleSessionPane,
     pushError,
+    pushSuccess,
     dismissToast,
-    ...sessionSlice,
     handleTimelineEvent,
     handleIndexProgress,
     handleRepoChanged,

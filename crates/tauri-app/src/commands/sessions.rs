@@ -143,6 +143,24 @@ pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionInfo
     Ok(state.sessions.lock().await.list())
 }
 
+/// Switch a running session's permission mode mid-session (contract W5). `mode`
+/// must be one of default|acceptEdits|plan|bypassPermissions — an unknown value
+/// is a named error (validated in `SessionManager::set_mode`), never a silent
+/// no-op. The sidecar applies the new mode on its next query turn.
+#[tauri::command]
+pub async fn set_session_mode(
+    state: State<'_, AppState>,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    state
+        .sessions
+        .lock()
+        .await
+        .set_mode(&session_id, &mode)
+        .map_err(|e| format!("{e}"))
+}
+
 /// Create the DB thread + session rows for a session, returning the new thread
 /// id. The repo is open (CONTRACT-2), so its row id is known and passed in; a
 /// failure here is real (surfaced by the caller), never swallowed.

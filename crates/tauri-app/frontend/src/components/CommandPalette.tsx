@@ -68,7 +68,7 @@ export function CommandPalette() {
       id: `feature-${f.slug}`,
       label: f.name,
       category: "feature" as const,
-      run: () => appStore.selectFeature(f.slug),
+      run: () => appStore.openFeatureDetail(f.slug),
     }));
     const out: { cmd: Cmd; match: number[] }[] = [];
     for (const cmd of [...baseCmds, ...features]) {
