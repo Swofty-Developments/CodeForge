@@ -5,12 +5,14 @@
  * prompt; closing a worktree tab removes it (confirming when dirty). */
 
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { Portal } from "solid-js/web";
 import { appStore } from "../stores/app-store";
 import type { RepoContext, Worktree } from "../types";
 import { samePath } from "../stores/path";
 
 export function WorktreeTabs() {
   const { store } = appStore;
+  let newBtnRef: HTMLButtonElement | undefined;
 
   // Base first, then worktrees in open order (stable sort).
   const ordered = createMemo(() =>
@@ -114,6 +116,7 @@ export function WorktreeTabs() {
 
       <div class="wt-new-wrap">
         <button
+          ref={(el) => (newBtnRef = el)}
           class="wt-new"
           title={`New worktree from ${newFromBranch()}`}
           onClick={() => appStore.setWorktreePromptOpen(!store.worktreePromptOpen)}
@@ -123,7 +126,7 @@ export function WorktreeTabs() {
           </svg>
         </button>
         <Show when={store.worktreePromptOpen}>
-          <NewWorktreePrompt baseRef={newFromBranch()} />
+          <NewWorktreePrompt baseRef={newFromBranch()} anchor={() => newBtnRef} />
         </Show>
       </div>
 
@@ -211,10 +214,30 @@ export function WorktreeTabs() {
   );
 }
 
-function NewWorktreePrompt(props: { baseRef: string }) {
+const PROMPT_WIDTH = 250;
+
+/* Rendered through a Portal to <body> with FIXED positioning: the tab strip
+ * scrolls (overflow-x: auto), and a scroll container clips any absolutely-
+ * positioned descendant — anchoring inside it cut the popover to a sliver. */
+function NewWorktreePrompt(props: { baseRef: string; anchor: () => HTMLElement | undefined }) {
   const [name, setName] = createSignal("");
+  const [pos, setPos] = createSignal({ left: 8, top: 64 });
   let inputRef: HTMLInputElement | undefined;
-  onMount(() => queueMicrotask(() => inputRef?.focus()));
+
+  function place(): void {
+    const a = props.anchor();
+    if (!a) return;
+    const r = a.getBoundingClientRect();
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - PROMPT_WIDTH - 8);
+    setPos({ left, top: r.bottom + 6 });
+  }
+
+  onMount(() => {
+    place();
+    window.addEventListener("resize", place);
+    queueMicrotask(() => inputRef?.focus());
+  });
+  onCleanup(() => window.removeEventListener("resize", place));
 
   function submit(): void {
     const n = name().trim();
@@ -224,9 +247,13 @@ function NewWorktreePrompt(props: { baseRef: string }) {
   }
 
   return (
-    <>
+    <Portal>
       <div class="wt-prompt-backdrop" onClick={() => appStore.setWorktreePromptOpen(false)} />
-      <div class="wt-prompt" onClick={(e) => e.stopPropagation()}>
+      <div
+        class="wt-prompt"
+        style={{ left: `${pos().left}px`, top: `${pos().top}px` }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div class="wt-prompt-label">
           New worktree from <span class="wt-prompt-base">{props.baseRef || "current branch"}</span>
         </div>
@@ -250,8 +277,7 @@ function NewWorktreePrompt(props: { baseRef: string }) {
       <style>{`
         .wt-prompt-backdrop { position: fixed; inset: 0; z-index: 99; }
         .wt-prompt {
-          position: absolute;
-          top: calc(100% + 5px); right: 0;
+          position: fixed;
           z-index: 100;
           width: 250px;
           padding: 10px;
@@ -280,6 +306,6 @@ function NewWorktreePrompt(props: { baseRef: string }) {
         .wt-prompt-create:hover { filter: brightness(1.08); }
         .wt-prompt-create:disabled { opacity: 0.4; cursor: default; filter: none; }
       `}</style>
-    </>
+    </Portal>
   );
 }
