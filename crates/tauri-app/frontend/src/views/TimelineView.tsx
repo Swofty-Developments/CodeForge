@@ -1,9 +1,9 @@
 /* Timeline view — reverse-chron immutable event list, live via timeline:event.
  * Composes the filter bar + event rows over the merged (live + paged) feed.
  * Client-side filtering with a backend refetch when narrowed; caps rendered
- * rows and pages older events via the since-cursor. Zero edit affordances. */
+ * rows and pages older events via the beforeId cursor. Zero edit affordances. */
 
-import { For, Show, createComputed, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createComputed, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { Actor, EventKind } from "../types";
 import { appStore } from "../stores/app-store";
@@ -71,6 +71,10 @@ export function TimelineView() {
   const clock = setInterval(() => setNow(Date.now()), 30_000);
   onCleanup(() => clearInterval(clock));
 
+  // Settle exhaustion up front: one probe fetch on mount tells us whether older
+  // events exist at all, so "Load older" never shows on a fully-loaded feed.
+  onMount(() => void refetch(toIpcFilter(snapshot())));
+
   // Baseline = highest event id present when the feed first loads. Anything with
   // a larger id arrived live afterward and gets the streaming-in animation.
   const [baseline, setBaseline] = createSignal<number | null>(null);
@@ -90,25 +94,27 @@ export function TimelineView() {
     kinds: [...filters.kinds],
   });
 
-  function maybeRefetch(): void {
-    const f = snapshot();
-    if (filtersNarrowed(f)) void refetch(toIpcFilter(f));
+  // Every filter change re-probes: exhaustion is scoped to the fetched filter,
+  // so widening (or clearing) must re-settle it for the new scope.
+  function refetchScope(): void {
+    void refetch(toIpcFilter(snapshot()));
   }
 
   function onFeature(slug: string | null): void {
     setFilters("feature", slug);
-    maybeRefetch();
+    refetchScope();
   }
   function onActor(actor: Actor | null): void {
     setFilters("actor", actor);
-    maybeRefetch();
+    refetchScope();
   }
   function onKind(kind: EventKind): void {
     setFilters("kinds", (ks) => (ks.includes(kind) ? ks.filter((k) => k !== kind) : [...ks, kind]));
-    maybeRefetch();
+    refetchScope();
   }
   function onClear(): void {
     setFilters({ feature: null, actor: null, kinds: [] });
+    refetchScope();
   }
 
   const filtered = createMemo(() => {

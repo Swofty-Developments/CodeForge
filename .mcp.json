@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codeforge": {
+      "args": [],
+      "command": "/Users/jacob/.codeforge/bin/forge-mcp"
+    }
+  }
+}

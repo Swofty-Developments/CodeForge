@@ -59,6 +59,10 @@ pub struct TimelineFilter {
     pub kinds: Option<Vec<EventKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<DateTime<Utc>>,
+    /// Backward-paging cursor: only events with `id` strictly below this
+    /// (rowids are append-only, so id order == time order).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_id: Option<i64>,
     /// Max events returned, newest first. `None` = store default (200).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
@@ -97,6 +101,7 @@ mod tests {
             actor: Some(Actor::Human),
             kinds: Some(vec![EventKind::Note, EventKind::TestsRun]),
             since: None,
+            before_id: Some(400),
             limit: Some(50),
         };
         let json = serde_json::to_string(&f).unwrap();

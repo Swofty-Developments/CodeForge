@@ -41,7 +41,8 @@ export function useTimelineEvents() {
     return fresh.length;
   }
 
-  /** Page older events in using the oldest loaded ts as the since-cursor. */
+  /** Page older events in via the strictly-below id cursor. A short page is a
+   *  definitive answer: the store had nothing further back. */
   async function loadOlder(base: TimelineFilter): Promise<void> {
     const repo = store.repo;
     const oldest = events()[events().length - 1];
@@ -50,10 +51,11 @@ export function useTimelineEvents() {
     try {
       const page = await ipc.getTimeline(repo.path, {
         ...base,
-        since: oldest.ts,
+        beforeId: oldest.id,
         limit: PAGE_SIZE,
       });
-      if (mergeIn(page) === 0) setExhausted(true);
+      mergeIn(page);
+      if (page.length < PAGE_SIZE) setExhausted(true);
     } catch (e) {
       console.error("timeline: load older failed", e);
     } finally {
@@ -61,13 +63,17 @@ export function useTimelineEvents() {
     }
   }
 
-  /** Backend refetch when the filter narrows, so matches beyond the loaded window appear. */
+  /** Backend refetch on mount and when the filter narrows. The result is
+   *  newest-first and limited, so a short page also settles exhaustion — the
+   *  "Load older" affordance only appears when older events truly exist. */
   async function refetch(filter: TimelineFilter): Promise<void> {
     const repo = store.repo;
     if (!repo) return;
     setExhausted(false);
     try {
-      mergeIn(await ipc.getTimeline(repo.path, { ...filter, limit: PAGE_SIZE }));
+      const page = await ipc.getTimeline(repo.path, { ...filter, limit: PAGE_SIZE });
+      mergeIn(page);
+      if (page.length < PAGE_SIZE) setExhausted(true);
     } catch (e) {
       console.error("timeline: filtered refetch failed", e);
     }

@@ -115,6 +115,8 @@ export interface TimelineFilter {
   actor?: Actor;
   kinds?: EventKind[];
   since?: string; // RFC3339
+  /** Backward-paging cursor: only events with id strictly below this. */
+  beforeId?: number;
   limit?: number;
 }
 

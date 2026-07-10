@@ -157,6 +157,7 @@ async fn get_timeline(
         actor: None,
         kinds: None,
         since,
+        before_id: None,
         limit: params.limit,
     };
     let store = state.deps.timeline.clone();

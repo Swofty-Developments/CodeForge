@@ -199,3 +199,23 @@ fn concurrent_appends_all_land() {
     // Newest-first rowid ordering holds under concurrency.
     assert!(ids.windows(2).all(|w| w[0] > w[1]));
 }
+
+#[test]
+fn before_id_pages_strictly_older_events() {
+    let (_dir, store) = open_temp();
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        ids.push(store.append(note(&[], &format!("e{i}"))).expect("append").id);
+    }
+    // Page below the middle id: strictly older events, newest first.
+    let page = store
+        .query(&TimelineFilter { before_id: Some(ids[3]), ..Default::default() })
+        .expect("query");
+    let got: Vec<i64> = page.iter().map(|e| e.id).collect();
+    assert_eq!(got, vec![ids[2], ids[1], ids[0]]);
+    // Below the oldest id: definitively empty — the "no older events" state.
+    let none = store
+        .query(&TimelineFilter { before_id: Some(ids[0]), ..Default::default() })
+        .expect("query");
+    assert!(none.is_empty());
+}

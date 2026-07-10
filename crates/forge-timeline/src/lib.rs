@@ -158,6 +158,10 @@ impl TimelineStore {
             clauses.push("ts >= ?".into());
             params.push(Box::new(fmt_ts(&since)));
         }
+        if let Some(before_id) = filter.before_id {
+            clauses.push("id < ?".into());
+            params.push(Box::new(before_id));
+        }
 
         let mut sql =
             String::from("SELECT id, ts, session_id, actor, kind, feature_slugs, payload FROM events");
