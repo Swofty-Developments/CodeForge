@@ -127,7 +127,10 @@ export function Sidebar() {
           background: var(--bg-surface);
           border-right: 1px solid var(--border);
           flex-shrink: 0;
-          height: 100vh;
+          /* Stretch to the workspace row (between title/worktree strips and the
+             status bar) — an explicit 100vh overflowed it and ran the feature
+             list's scrollbar past the bottom of the window. */
+          min-height: 0;
           min-width: 0;
         }
         .sidebar-header {
