@@ -23,8 +23,6 @@ pub(crate) struct RawFeature {
     pub files: Vec<RawFeatureFile>,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
-    pub confidence: f32,
     /// Hierarchy path (slash-delimited) the model may assign, e.g. a crate name
     /// or "layer/module". Blank/absent → derived by [`derive_group`].
     #[serde(default)]
@@ -78,7 +76,7 @@ pub(crate) fn strip_fences(text: &str) -> &str {
 
 /// Validate raw features into domain [`Feature`]s: sanitize slugs, drop
 /// duplicates, drop paths that don't resolve to files inside the repo, clamp
-/// confidence to 0..1, and drop features left with no paths at all.
+/// drop features left with no paths at all.
 pub(crate) fn validate_features(repo_root: &Path, raw: Vec<RawFeature>) -> Result<Vec<Feature>> {
     let canonical_root = repo_root.canonicalize()?;
     let now = Utc::now();
@@ -120,7 +118,6 @@ pub(crate) fn validate_features(repo_root: &Path, raw: Vec<RawFeature>) -> Resul
             entry_points,
             files,
             tags: feature.tags,
-            confidence: clamp_confidence(feature.confidence),
             pinned: false,
             color: None,
             group,
@@ -276,13 +273,6 @@ fn parse_role(role: Option<&str>) -> FileRole {
     }
 }
 
-fn clamp_confidence(confidence: f32) -> f32 {
-    if confidence.is_finite() {
-        confidence.clamp(0.0, 1.0)
-    } else {
-        0.0
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -322,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_drops_missing_files_and_clamps() {
+    fn validate_drops_missing_files_and_bad_slugs() {
         let tmp = TempDir::new("validate");
         tmp.write("src/a.rs", "fn a() {}");
         tmp.write("README.md", "# readme");
@@ -331,8 +321,7 @@ mod tests {
             r#"[
               {"slug":"Real Feature!","name":"Real","entryPoints":["src/a.rs","ghost.rs"],
                "files":[{"path":"src/a.rs","role":"core"},{"path":"missing.rs","role":"test"},
-                        {"path":"../escape.rs","role":"config"},{"path":"README.md","role":"whatever"}],
-               "confidence":3.7},
+                        {"path":"../escape.rs","role":"config"},{"path":"README.md","role":"whatever"}]},
               {"slug":"ghost-only","name":"Ghost","files":[{"path":"nope.rs","role":"core"}]},
               {"slug":"real-feature","name":"Duplicate slug","files":[{"path":"README.md","role":"core"}]}
             ]"#,
@@ -347,7 +336,6 @@ mod tests {
         let paths: Vec<_> = f.files.iter().map(|x| x.path.clone()).collect();
         assert_eq!(paths, vec![PathBuf::from("src/a.rs"), PathBuf::from("README.md")]);
         assert_eq!(f.files[1].role, FileRole::Unknown); // unrecognized role → named Unknown state
-        assert_eq!(f.confidence, 1.0);
         assert!(!f.pinned);
     }
 

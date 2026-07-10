@@ -63,6 +63,7 @@ fn main() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::repo::open_repo,
+            commands::repo::init_repo,
             commands::repo::close_repo,
             commands::repo::reindex_repo,
             commands::repo::daemon_status,

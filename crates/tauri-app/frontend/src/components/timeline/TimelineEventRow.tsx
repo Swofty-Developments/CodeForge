@@ -7,6 +7,7 @@ import type { TimelineEvent } from "../../types";
 import {
   KIND_GLYPH,
   KIND_LABEL,
+  docRefreshFailed,
   eventTitle,
   laneColor,
   prettyPayload,
@@ -40,6 +41,7 @@ if (!document.getElementById("tl-row-styles")) {
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .tlr-title--mono { font-family: var(--font-mono); font-size: 11.5px; }
+    .tlr-title--failed { color: var(--red); }
     .tlr-chips { flex: 1; display: flex; gap: 4px; overflow: hidden; min-width: 0; }
     .tlr-chip {
       font-size: 9px; font-family: var(--font-mono); line-height: 1.6;
@@ -98,7 +100,13 @@ export function TimelineEventRow(props: { event: TimelineEvent; now: number; liv
         <span class="tlr-glyph" title={KIND_LABEL[props.event.kind]}>
           {KIND_GLYPH[props.event.kind]}
         </span>
-        <span class="tlr-title" classList={{ "tlr-title--mono": isMono() }}>
+        <span
+          class="tlr-title"
+          classList={{
+            "tlr-title--mono": isMono(),
+            "tlr-title--failed": docRefreshFailed(props.event),
+          }}
+        >
           {eventTitle(props.event)}
         </span>
         <span class="tlr-chips">

@@ -41,6 +41,9 @@ pub enum EventKind {
     IndexCompleted,
     FeaturePinned,
     FeatureEdited,
+    /// A feature's living doc was auto-refreshed after an agent turn touched it.
+    /// Payload: `{ slug, outcome: "updated" | "failed", detail }`.
+    DocUpdated,
     Note,
 }
 

@@ -53,8 +53,7 @@ these fields:
     "group": "hierarchy/path",
     "entryPoints": ["repo/relative/path.rs"],
     "files": [ { "path": "repo/relative/path.rs", "role": "core" } ],
-    "tags": ["short", "keywords"],
-    "confidence": 0.0
+    "tags": ["short", "keywords"]
   }
 ]
 
@@ -74,7 +73,6 @@ Rules:
 - entryPoints are the 1-3 best "start reading here" files for the feature.
 - role is one of: core | support | test | config.
 - every path is RELATIVE to the repo root and must exist on disk.
-- confidence is your 0..1 certainty the feature is real and correctly scoped.
 - output the JSON array and nothing else."#
         .to_string()
 }
@@ -146,7 +144,6 @@ mod tests {
                 pinned: false,
             }],
             tags: vec![],
-            confidence: 0.8,
             pinned: false,
             color: None,
             group: None,

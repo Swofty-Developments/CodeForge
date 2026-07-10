@@ -232,6 +232,25 @@ function createAppStore() {
     if (store.selectedFeature && event.featureSlugs.includes(store.selectedFeature)) {
       setStore("selectedFeatureTimeline", (t) => [event, ...t].slice(0, 100));
     }
+    // Living-doc hot reload: an auto-refresh landed for the OPEN feature — pull
+    // the fresh doc so FeatureDetail updates in place. Only the "updated"
+    // outcome refetches; a failed refresh stays visible on the timeline.
+    const repo = store.repo;
+    if (
+      event.kind === "doc_updated" &&
+      event.payload.outcome === "updated" &&
+      event.payload.slug === store.selectedFeature &&
+      repo
+    ) {
+      const slug = event.payload.slug;
+      void ipc
+        .getFeatureDoc(repo.path, slug)
+        .then((doc) => {
+          // Stale-response guard: apply only if this feature is still open.
+          if (store.selectedFeature === slug) setStore("selectedFeatureDoc", doc);
+        })
+        .catch((e) => pushError(String(e)));
+    }
   }
 
   function handleIndexProgress(progress: IndexProgress): void {

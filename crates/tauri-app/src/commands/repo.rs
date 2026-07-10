@@ -30,8 +30,30 @@ pub async fn open_repo(
         return Err(format!("{} is not a directory", root.display()));
     }
     if !repo_util::is_git_repo(&root) {
-        return Err(format!("{} is not a git repository", root.display()));
+        // Machine-matchable prefix: the frontend offers `init_repo` on exactly this.
+        return Err(format!("not_a_git_repo: {}", root.display()));
     }
+    repo_open::open_context(app, &state, root).await
+}
+
+/// `git init -b main` in a plain folder, then open it through the SAME flow as
+/// `open_repo`. Offered by the UI when `open_repo` rejects with the
+/// "not_a_git_repo:" prefix. An already-initialized repo is a named error —
+/// the caller should open it instead.
+#[tauri::command]
+pub async fn init_repo(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<RepoState, String> {
+    let root = repo_util::canonical(&path)?;
+    if !root.is_dir() {
+        return Err(format!("{} is not a directory", root.display()));
+    }
+    if repo_util::is_git_repo(&root) {
+        return Err(format!("{} is already a git repository", root.display()));
+    }
+    forge_git::init_repo(&root).await.map_err(|e| e.to_string())?;
     repo_open::open_context(app, &state, root).await
 }
 

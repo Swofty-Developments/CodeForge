@@ -1,6 +1,6 @@
 /* One feature-tree row: name, unseen-activity badge (sky), pin toggle (amber
- * when pinned, hover-reveal otherwise), confidence underline for low-confidence
- * features. Entrance staggers via inline animation-delay. */
+ * when pinned, hover-reveal otherwise). Entrance staggers via inline
+ * animation-delay. */
 
 import { Show } from "solid-js";
 import type { Feature } from "../../types";
@@ -14,7 +14,6 @@ export function FeatureRow(props: {
   onTogglePin: (slug: string, pinned: boolean) => void;
 }) {
   const f = () => props.feature;
-  const lowConfidence = () => f().confidence < 0.75;
 
   return (
     <button
@@ -45,10 +44,6 @@ export function FeatureRow(props: {
           <path d="M16 3v2l-1 1v5l3 3v2h-5v6l-1 1-1-1v-6H6v-2l3-3V6L8 5V3h8z" />
         </svg>
       </span>
-
-      <Show when={lowConfidence()}>
-        <span class="ft-confbar" style={{ width: `${Math.max(8, Math.round(f().confidence * 100))}%` }} />
-      </Show>
 
       <style>{`
         .ft-row {
@@ -94,14 +89,6 @@ export function FeatureRow(props: {
         .ft-pin:hover { opacity: 1; background: var(--bg-accent); color: var(--text-secondary); }
         .ft-pin--on, .ft-row:hover .ft-pin--on { opacity: 1; color: var(--amber); }
         .ft-pin--on:hover { color: var(--amber); }
-
-        /* Confidence underline — 2px bar, width == confidence, low-confidence only */
-        .ft-confbar {
-          position: absolute; left: var(--space-3); bottom: 2px;
-          height: 2px; border-radius: 1px;
-          background: rgba(var(--amber-rgb), 0.55);
-          pointer-events: none;
-        }
       `}</style>
     </button>
   );

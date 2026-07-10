@@ -4,7 +4,7 @@
  * to snake_case Rust params (repoPath -> repo_path).
  *
  * Registered commands (crates/tauri-app/src/main.rs — frozen contract):
- *   open_repo, close_repo, reindex_repo, daemon_status, index_status,
+ *   open_repo, init_repo, close_repo, reindex_repo, daemon_status, index_status,
  *   get_features, get_feature, pin_feature, update_feature,
  *   get_timeline, get_diff_by_feature,
  *   start_session, send_session_input, approve_session, stop_session, list_sessions,
@@ -46,6 +46,12 @@ import type {
 
 export function openRepo(path: string): Promise<RepoState> {
   return invoke("open_repo", { path });
+}
+
+/** `git init -b main` in a plain folder, then open it exactly like open_repo.
+ *  Offered when open_repo rejects with the "not_a_git_repo:" prefix. */
+export function initRepo(path: string): Promise<RepoState> {
+  return invoke("init_repo", { path });
 }
 
 export function closeRepo(path: string): Promise<void> {

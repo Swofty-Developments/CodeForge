@@ -21,7 +21,6 @@ export interface Feature {
   entryPoints: string[];
   files: FeatureFile[];
   tags: string[];
-  confidence: number;
   pinned: boolean;
   /** User-set graph color (hex like "#74ade8"). Undefined = default per-slug hue. */
   color?: string;
@@ -50,6 +49,7 @@ export type EventKind =
   | "index_completed"
   | "feature_pinned"
   | "feature_edited"
+  | "doc_updated"
   | "note";
 
 /** Per-kind timeline payloads. The backend writes these exact keys
@@ -81,6 +81,12 @@ export interface FeatureEditedPayload {
   name: string;
   tags: string[];
 }
+/** Living-doc auto-refresh outcome — both states named, never conflated. */
+export interface DocUpdatedPayload {
+  slug: string;
+  outcome: "updated" | "failed";
+  detail: string;
+}
 
 interface TimelineEventBase {
   id: number;
@@ -101,6 +107,7 @@ export type TimelineEvent =
   | (TimelineEventBase & { kind: "index_completed"; payload: IndexCompletedPayload })
   | (TimelineEventBase & { kind: "feature_pinned"; payload: FeaturePinnedPayload })
   | (TimelineEventBase & { kind: "feature_edited"; payload: FeatureEditedPayload })
+  | (TimelineEventBase & { kind: "doc_updated"; payload: DocUpdatedPayload })
   | (TimelineEventBase & { kind: "tests_run"; payload: unknown });
 
 export interface TimelineFilter {

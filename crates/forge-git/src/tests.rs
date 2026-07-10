@@ -8,7 +8,7 @@ use chrono::Utc;
 use forge_core::{Feature, FeatureFile, FileRole};
 use forge_index::FeatureIndex;
 
-use crate::{changed_files, collect_file_diffs, current_head, diff_by_feature};
+use crate::{changed_files, collect_file_diffs, current_branch, current_head, diff_by_feature, init_repo};
 
 /// A throwaway git repo. `git()` panics on non-zero exit so a broken fixture
 /// fails loudly rather than masquerading as a parser bug.
@@ -72,7 +72,6 @@ fn feature(slug: &str, files: &[&str]) -> Feature {
             .map(|p| FeatureFile { path: PathBuf::from(p), role: FileRole::Core, pinned: false })
             .collect(),
         tags: Vec::new(),
-        confidence: 1.0,
         pinned: false,
         color: None,
         group: None,
@@ -108,6 +107,20 @@ async fn changed_files_reports_modified_staged_untracked_renamed() {
         .map(PathBuf::from)
         .collect();
     assert_eq!(got, want);
+}
+
+#[tokio::test]
+async fn init_repo_creates_repo_on_unborn_main() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    assert!(!root.join(".git").exists());
+
+    init_repo(root).await.unwrap();
+
+    assert!(root.join(".git").is_dir(), "git init created .git (is_git_repo would be true)");
+    assert_eq!(current_branch(root).await.unwrap().as_deref(), Some("main"));
+    // Deliberately no commit: unborn main is the intended state.
+    assert_eq!(current_head(root).await.unwrap(), None);
 }
 
 #[tokio::test]

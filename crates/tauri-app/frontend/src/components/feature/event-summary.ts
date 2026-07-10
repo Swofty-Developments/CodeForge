@@ -19,6 +19,7 @@ export function kindAccent(kind: EventKind): string {
       return "purple";
     case "index_started":
     case "index_completed":
+    case "doc_updated":
       return "amber";
     case "feature_pinned":
       return "amber";
@@ -56,6 +57,11 @@ export function summarize(ev: TimelineEvent): string {
       return "error" in ev.payload
         ? `indexing failed: ${ev.payload.error}`
         : `indexed ${ev.payload.features} feature${ev.payload.features === 1 ? "" : "s"}`;
+    case "doc_updated":
+      // Both outcomes are named states; a failed refresh is never shown as done.
+      return ev.payload.outcome === "failed"
+        ? `doc refresh failed: ${ev.payload.slug}`
+        : `doc refreshed: ${ev.payload.slug}`;
     case "tests_run":
       // The backend does not yet emit a payload for this kind (see contractNotes).
       return kindLabel(ev.kind);
@@ -81,6 +87,8 @@ export function kindGlyph(kind: EventKind): string {
     case "index_started":
     case "index_completed":
       return "M4 6h16M4 12h16M4 18h10"; // lines
+    case "doc_updated":
+      return "M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"; // refresh arrow
     default:
       return "M6 12h12"; // dash / note
   }

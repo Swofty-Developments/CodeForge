@@ -95,6 +95,14 @@ pub async fn diff_by_feature(repo_root: &Path, index: &FeatureIndex) -> Result<D
     ))
 }
 
+/// `git init -b main` — turn a plain directory into a git repository. Commits
+/// NOTHING: an unborn `main` is a real, fine state (`git branch --show-current`
+/// already reports "main"). Failure surfaces git's stderr.
+pub async fn init_repo(root: &Path) -> Result<()> {
+    run_git(root, &["init", "-b", "main"]).await?;
+    Ok(())
+}
+
 /// `git rev-parse HEAD` — the current HEAD sha. `Ok(None)` on an unborn branch
 /// (fresh repo with no commits yet).
 pub async fn current_head(repo_root: &Path) -> Result<Option<String>> {

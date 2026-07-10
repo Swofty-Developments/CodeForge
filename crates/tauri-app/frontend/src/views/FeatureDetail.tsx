@@ -14,12 +14,6 @@ import { createNow } from "../components/sidebar/time";
 
 const RECENT_LIMIT = 15;
 
-function confidenceTint(c: number): string {
-  if (c >= 0.75) return "tint-green";
-  if (c >= 0.5) return "tint-amber";
-  return "tint-red";
-}
-
 export function FeatureDetail() {
   const { store } = appStore;
   const now = createNow();
@@ -104,10 +98,6 @@ export function FeatureDetail() {
                   <path d="M16 3v2l-1 1v5l3 3v2h-5v6l-1 1-1-1v-6H6v-2l3-3V6L8 5V3h8z" />
                 </svg>
               </button>
-
-              <span class={`fd-chip fd-confidence ${confidenceTint(f().confidence)}`}>
-                {Math.round(f().confidence * 100)}% conf
-              </span>
             </div>
 
             <Show when={f().tags.length > 0}>
@@ -245,7 +235,6 @@ export function FeatureDetail() {
           padding: 1px 6px; border-radius: var(--radius-pill);
           text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0;
         }
-        .fd-confidence { font-variant-numeric: tabular-nums; }
         .fd-tags { display: flex; gap: var(--space-1); margin-top: var(--space-3); flex-wrap: wrap; }
 
         .fd-description {

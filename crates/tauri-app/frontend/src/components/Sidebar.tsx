@@ -1,7 +1,7 @@
 /* Sidebar — the feature tree (features, not files). Repo header with daemon
- * status + index age · activity-sorted feature rows with unseen badges, pins and
- * confidence bars · index-status footer with Reindex. Width is driven by the
- * shell's resize handle via store.sidebarWidth. */
+ * status + index age · activity-sorted feature rows with unseen badges and
+ * pins · index-status footer with Reindex. Width is driven by the shell's
+ * resize handle via store.sidebarWidth. */
 
 import { For, Show, createEffect, createMemo } from "solid-js";
 import { appStore } from "../stores/app-store";

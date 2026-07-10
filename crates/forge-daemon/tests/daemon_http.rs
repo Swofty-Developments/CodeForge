@@ -30,7 +30,6 @@ fn seed_features_json(repo: &Path) {
             },
         ],
         tags: vec!["security".into()],
-        confidence: 0.9,
         pinned: false,
         color: None,
         group: None,

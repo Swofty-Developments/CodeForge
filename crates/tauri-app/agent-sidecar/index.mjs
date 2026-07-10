@@ -140,6 +140,12 @@ async function handleQuery(cmd) {
 
   if (cwd) options.cwd = cwd;
 
+  // The Agent SDK loads NO filesystem settings by default. Embedded sessions
+  // must behave like terminal `claude` runs: read the repo's .claude/settings
+  // (the CodeForge hooks that feed the timeline), CLAUDE.md (feature-index
+  // guidance), and .mcp.json (the forge MCP server).
+  options.settingSources = ["user", "project", "local"];
+
   if (allowedTools && Array.isArray(allowedTools) && allowedTools.length > 0) {
     options.allowedTools = allowedTools;
   }

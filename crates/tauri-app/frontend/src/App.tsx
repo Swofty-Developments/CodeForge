@@ -4,6 +4,7 @@
 import { For, Match, Show, Switch, onCleanup, onMount } from "solid-js";
 import type { ActiveView } from "./types";
 import { CommandPalette } from "./components/CommandPalette";
+import { InitRepoModal } from "./components/InitRepoModal";
 import { MergeResultPanel } from "./components/MergeResultPanel";
 import { SessionPane } from "./components/SessionPane";
 import { Sidebar } from "./components/Sidebar";
@@ -149,6 +150,7 @@ export default function App() {
       <StatusBar />
       <MergeResultPanel />
       <StaleModal />
+      <InitRepoModal />
       <Show when={store.paletteOpen}>
         <CommandPalette />
       </Show>

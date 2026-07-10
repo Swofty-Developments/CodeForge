@@ -14,7 +14,7 @@ use crate::{parse, Error, Result};
 
 /// Max concurrent per-feature doc passes.
 const DOC_CONCURRENCY: usize = 3;
-const DOCS_DIR: &str = ".codeforge/docs";
+pub(crate) const DOCS_DIR: &str = ".codeforge/docs";
 
 /// Outcome of the per-feature doc pass. `written` and `failed` are distinct,
 /// named states — a doc that failed to generate is never silently counted as
@@ -180,7 +180,7 @@ async fn progress(
 }
 
 /// First-N-lines clamp with a guaranteed trailing newline.
-fn clamp_lines(text: &str, max: usize) -> String {
+pub(crate) fn clamp_lines(text: &str, max: usize) -> String {
     let mut out = text.lines().take(max).collect::<Vec<_>>().join("\n");
     if !out.ends_with('\n') {
         out.push('\n');
@@ -236,7 +236,6 @@ mod tests {
         assert!(!features.is_empty(), "expected at least one feature");
         for f in &features {
             assert!(!f.slug.is_empty());
-            assert!((0.0..=1.0).contains(&f.confidence));
             assert!(!f.entry_points.is_empty() || !f.files.is_empty());
         }
 

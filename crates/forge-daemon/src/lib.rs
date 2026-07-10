@@ -5,6 +5,7 @@
 //! reachable externally: axum bound to `127.0.0.1:0`, actual port written to
 //! `<repo>/.codeforge/runtime/daemon.json` (`{port, pid, started_at}`).
 
+mod doc_refresh;
 mod hooks;
 mod http;
 mod ingest;
@@ -12,6 +13,7 @@ mod kit;
 mod kit_assets;
 mod reindex_queue;
 
+pub use doc_refresh::DocRefresher;
 pub use http::build_router;
 pub use kit::{install_kit, KitReport};
 pub use reindex_queue::{PendingReindex, ReindexQueue};
@@ -55,11 +57,17 @@ pub struct DaemonHandle {
     pub port: u16,
     shutdown_tx: Option<oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
+    refresh_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl DaemonHandle {
     /// Stop the daemon and remove `daemon.json`.
     pub async fn shutdown(mut self) {
+        if let Some(task) = self.refresh_task.take() {
+            // Aborting the listener drops its JoinSet, aborting in-flight doc
+            // refreshes; kill_on_drop in forge-index reaps a running claude.
+            task.abort();
+        }
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -99,6 +107,10 @@ impl Daemon {
         std::fs::write(&daemon_json, format!("{:#}\n", manifest))?;
 
         let reindex_queue = Arc::new(ReindexQueue::open(repo_root)?);
+        // The doc-refresh worker subscribes BEFORE the spool drain so Stop
+        // hooks replayed from the spool also trigger their turn's refreshes.
+        let refresher = Arc::new(DocRefresher::new(deps.clone()));
+        let refresh_task = doc_refresh::spawn_listener(refresher, deps.timeline.subscribe());
         // Replay hook payloads forward.sh spooled while the daemon was down,
         // before we start serving live ones (drain borrows deps; router moves it).
         ingest::drain_spool(&deps, &reindex_queue).await;
@@ -123,6 +135,7 @@ impl Daemon {
             port,
             shutdown_tx: Some(shutdown_tx),
             task: Some(task),
+            refresh_task: Some(refresh_task),
         })
     }
 }

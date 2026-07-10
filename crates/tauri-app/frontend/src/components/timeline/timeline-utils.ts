@@ -26,6 +26,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   index_completed: "Index completed",
   feature_pinned: "Feature pinned",
   feature_edited: "Feature edited",
+  doc_updated: "Doc refreshed",
   note: "Note",
 };
 
@@ -39,6 +40,7 @@ export const KIND_GLYPH: Record<EventKind, string> = {
   index_completed: "◆",
   feature_pinned: "⚑",
   feature_edited: "✎",
+  doc_updated: "↻",
   note: "❝",
 };
 
@@ -53,6 +55,7 @@ export const KIND_SHORT: Record<EventKind, string> = {
   index_completed: "indexed",
   feature_pinned: "pin",
   feature_edited: "feature",
+  doc_updated: "doc",
   note: "note",
 };
 
@@ -113,9 +116,19 @@ export function eventTitle(event: TimelineEvent): string {
       const n = typeof v === "number" ? v : Array.isArray(v) ? v.length : null;
       return n !== null ? `Indexed ${n} feature${n === 1 ? "" : "s"}` : KIND_LABEL.index_completed;
     }
+    case "doc_updated":
+      // Typed DocUpdatedPayload: both outcomes are named, never conflated.
+      return event.payload.outcome === "failed"
+        ? `Doc refresh failed: ${event.payload.slug}`
+        : `Doc refreshed: ${event.payload.slug}`;
     default:
       return KIND_LABEL[event.kind];
   }
+}
+
+/** Failed living-doc refresh — rows tint this title like other error states. */
+export function docRefreshFailed(event: TimelineEvent): boolean {
+  return event.kind === "doc_updated" && event.payload.outcome === "failed";
 }
 
 export function relativeTime(ts: string, nowMs: number): string {

@@ -10,6 +10,7 @@
  * reloaded on every switch. Sessions are global but tagged with `contextPath`.
  */
 
+import { createSignal } from "solid-js";
 import { produce, type SetStoreFunction } from "solid-js/store";
 import * as ipc from "../ipc";
 import type { AppStore } from "./app-store";
@@ -23,12 +24,18 @@ export interface ContextDeps {
   refreshDaemon: () => Promise<void>;
 }
 
+/** open_repo's machine-matchable rejection prefix for a plain (non-git) folder. */
+const NOT_A_GIT_REPO = "not_a_git_repo:";
+
 export function createContextSlice(
   store: AppStore,
   setStore: SetStoreFunction<AppStore>,
   pushError: (message: string) => void,
   deps: ContextDeps,
 ) {
+  /** Path awaiting the "initialize this folder as a git repo?" prompt, or null.
+   *  Slice-local signal (the AppStore shape is frozen); InitRepoModal reads it. */
+  const [initRepoPrompt, setInitRepoPrompt] = createSignal<string | null>(null);
   /** Reload the four per-context datasets for whatever context is active. */
   function loadForActive(): Promise<unknown> {
     return Promise.all([
@@ -129,8 +136,35 @@ export function createContextSlice(
       setStore("lastError", null);
       await adoptContext(repo, store.contexts.length === 0);
     } catch (e) {
+      const msg = String(e);
+      if (msg.startsWith(NOT_A_GIT_REPO)) {
+        // Not a dead end: offer `git init` via InitRepoModal instead of toasting.
+        setStore("lastError", null);
+        setInitRepoPrompt(msg.slice(NOT_A_GIT_REPO.length).trim());
+      } else {
+        pushError(msg);
+      }
+    }
+  }
+
+  /** [Initialize repository]: `git init -b main` in the prompted folder, then
+   *  adopt the returned context exactly like an openRepo success. */
+  async function confirmInitRepo(): Promise<void> {
+    const path = initRepoPrompt();
+    if (!path) return;
+    try {
+      const repo = await ipc.initRepo(path);
+      setStore("lastError", null);
+      setInitRepoPrompt(null);
+      await adoptContext(repo, store.contexts.length === 0);
+    } catch (e) {
+      setInitRepoPrompt(null);
       pushError(String(e));
     }
+  }
+
+  function dismissInitRepoPrompt(): void {
+    setInitRepoPrompt(null);
   }
 
   /** Open a worktree as its own context (W1) and switch to it. */
@@ -286,6 +320,9 @@ export function createContextSlice(
 
   return {
     openRepo,
+    initRepoPrompt,
+    confirmInitRepo,
+    dismissInitRepoPrompt,
     closeRepo,
     openWorktreeContext,
     switchContext,

@@ -17,8 +17,6 @@ pub struct Feature {
     /// Many-to-many: files participate in multiple features.
     pub files: Vec<FeatureFile>,
     pub tags: Vec<String>,
-    /// Indexer confidence 0..1.
-    pub confidence: f32,
     /// Human-pinned features survive re-index verbatim.
     pub pinned: bool,
     /// User-set graph node color (hex, e.g. "#74ade8"). `None` = default palette.
@@ -80,7 +78,6 @@ mod tests {
                 pinned: false,
             }],
             tags: vec!["security".into()],
-            confidence: 0.9,
             pinned: true,
             color: None,
             group: None,

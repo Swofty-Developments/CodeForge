@@ -64,7 +64,6 @@ mod tests {
             entry_points: Vec::new(),
             files: Vec::new(),
             tags: Vec::new(),
-            confidence: 0.5,
             pinned: false,
             color: None,
             group: None,

@@ -11,8 +11,10 @@ mod merge;
 mod meta;
 mod parse;
 mod prompt;
+mod refresh;
 
 pub use indexer::{DocReport, Indexer};
+pub use refresh::refresh_feature_doc;
 pub use meta::{IndexMeta, IndexState, IndexStatus};
 
 use std::path::{Path, PathBuf};
@@ -246,7 +248,6 @@ mod tests {
                 pinned: false,
             }],
             tags: Vec::new(),
-            confidence: 0.5,
             pinned,
             color: None,
             group: None,

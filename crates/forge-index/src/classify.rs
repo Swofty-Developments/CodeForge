@@ -119,7 +119,6 @@ mod tests {
                 .map(|p| FeatureFile { path: PathBuf::from(p), role: FileRole::Core, pinned: false })
                 .collect(),
             tags: Vec::new(),
-            confidence: 0.5,
             pinned: false,
             color: None,
             group: None,

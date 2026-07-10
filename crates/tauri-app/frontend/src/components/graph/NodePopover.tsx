@@ -36,7 +36,6 @@ export function NodePopover(props: {
       <div class="gp-stats">
         <span><b>{f().files.length}</b> files</span>
         <span><b>{f().entryPoints.length}</b> entries</span>
-        <span><b>{Math.round(f().confidence * 100)}%</b> conf</span>
       </div>
 
       <div class="gp-color-label">Node color</div>
