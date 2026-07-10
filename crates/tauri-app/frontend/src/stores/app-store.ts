@@ -48,7 +48,8 @@ export interface AppStore {
   worktreesLoading: boolean;
   /** Last merge outcome, surfaced honestly (clean success OR conflict panel). */
   mergeResult: MergeResult | null;
-  worktreePromptOpen: boolean;
+  /** Worktree switcher popover — tab-strip "+" and TitleBar "Worktrees…". */
+  worktreeSwitcherOpen: boolean;
   features: Feature[];
   /** Legacy scaffold flag — always false now that the backend is wired. */
   featuresArePlaceholder: boolean;
@@ -98,7 +99,7 @@ function createAppStore() {
     worktrees: [],
     worktreesLoading: false,
     mergeResult: null,
-    worktreePromptOpen: false,
+    worktreeSwitcherOpen: false,
     features: [],
     featuresArePlaceholder: false,
     selectedFeature: null,
@@ -201,8 +202,8 @@ function createAppStore() {
     setStore("paletteOpen", open);
   }
 
-  function setWorktreePromptOpen(open: boolean): void {
-    setStore("worktreePromptOpen", open);
+  function setWorktreeSwitcherOpen(open: boolean): void {
+    setStore("worktreeSwitcherOpen", open);
   }
 
   function setSidebarWidth(px: number): void {
@@ -283,7 +284,7 @@ function createAppStore() {
     reindexStale,
     setActiveView,
     setPaletteOpen,
-    setWorktreePromptOpen,
+    setWorktreeSwitcherOpen,
     setSidebarWidth,
     setSessionPaneWidth,
     toggleSessionPane,

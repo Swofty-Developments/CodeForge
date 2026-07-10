@@ -5,12 +5,31 @@
 //! stand-in for `forge_git`; see that module) and the CodeForge-specific
 //! setup from `worktree_fs`.
 
+use std::path::Path;
+
 use forge_core::{Actor, EventKind, MergeResult, Worktree};
+use forge_git::BranchInfo;
 use forge_timeline::NewEvent;
 use tauri::State;
 
 use crate::runtime::{repo_open, repo_util, worktree_fs};
 use crate::state::AppState;
+
+/// Post-create steps shared by `create_worktree` and `add_worktree_for_branch`:
+/// inherit the base's feature model (a base with no features.json yet is a real
+/// "not indexed" state, not an error), keep `.codeforge-worktrees/` ignored,
+/// then open the worktree as its own RepoRuntime (own daemon/index/timeline).
+async fn open_new_worktree(
+    app: tauri::AppHandle,
+    state: &AppState,
+    base: &Path,
+    worktree: &Worktree,
+) -> Result<(), String> {
+    worktree_fs::inherit_features(base, &worktree.path)?;
+    worktree_fs::ensure_worktrees_ignored(base)?;
+    repo_open::open_context(app, state, worktree.path.clone()).await?;
+    Ok(())
+}
 
 /// All worktrees of the repo `repo_path` belongs to, base first. Derives the
 /// base first (contract W4: `repo_path` may itself be a worktree).
@@ -39,13 +58,48 @@ pub async fn create_worktree(
         .await
         .map_err(|e| format!("{e}"))?;
 
-    // Inherit features immediately (a base with no features.json yet is a real
-    // "not indexed" state, not an error), and keep the worktrees dir ignored.
-    worktree_fs::inherit_features(&base, &worktree.path)?;
-    worktree_fs::ensure_worktrees_ignored(&base)?;
+    open_new_worktree(app, &state, &base, &worktree).await?;
+    Ok(worktree)
+}
 
-    // Open the worktree as its own RepoRuntime (own daemon / index / timeline).
-    repo_open::open_context(app, &state, worktree.path.clone()).await?;
+/// All local + remote-tracking branches of the repo family `repo_path` belongs
+/// to (base derived internally): locals first, then remotes, each alphabetical.
+#[tauri::command]
+pub async fn list_branches(repo_path: String) -> Result<Vec<BranchInfo>, String> {
+    let root = repo_util::canonical(&repo_path)?;
+    forge_git::list_branches(&root).await.map_err(|e| format!("{e}"))
+}
+
+/// `git fetch --all --prune` on the base repo. A repo with no remotes is a
+/// fine, no-op state — Ok, not an error.
+#[tauri::command]
+pub async fn fetch_remotes(repo_path: String) -> Result<(), String> {
+    let root = repo_util::canonical(&repo_path)?;
+    forge_git::fetch_remotes(&root).await.map_err(|e| format!("{e}"))
+}
+
+/// Check an EXISTING branch out into a new worktree (contract C2). `remote`
+/// unset: check out the local branch — already checked out elsewhere is a named
+/// error carrying that worktree's path. `remote` set: create a local branch
+/// tracking `<remote>/<branch>` — an existing local branch of that name is a
+/// named error telling the caller to pick the local branch instead. Then the
+/// same post-create steps as `create_worktree`, and the enriched worktree.
+#[tauri::command]
+pub async fn add_worktree_for_branch(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    repo_path: String,
+    branch: String,
+    remote: Option<String>,
+) -> Result<Worktree, String> {
+    let root = repo_util::canonical(&repo_path)?;
+    let base = forge_git::base_repo_root(&root).await.map_err(|e| format!("{e}"))?;
+
+    let worktree = forge_git::worktree_for_branch(&base, &branch, remote.as_deref())
+        .await
+        .map_err(|e| format!("{e}"))?;
+
+    open_new_worktree(app, &state, &base, &worktree).await?;
     Ok(worktree)
 }
 

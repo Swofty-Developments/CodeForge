@@ -12,7 +12,7 @@ use tokio::process::Command;
 use crate::worktree_parse::{compare_ref, dir_name, parse_worktree_porcelain, slugify, RawWorktree};
 use crate::{run_git, Error, Result};
 
-async fn raw_worktrees(repo_root: &Path) -> Result<Vec<RawWorktree>> {
+pub(crate) async fn raw_worktrees(repo_root: &Path) -> Result<Vec<RawWorktree>> {
     let raw = run_git(repo_root, &["worktree", "list", "--porcelain"]).await?;
     Ok(parse_worktree_porcelain(&raw))
 }
@@ -137,12 +137,18 @@ pub async fn create_worktree(
         ));
     }
 
-    let canonical = std::fs::canonicalize(&path)?;
-    list_worktrees(&base)
+    enriched_worktree(&base, &path).await
+}
+
+/// Canonicalize a freshly added worktree path and return its enriched
+/// [`Worktree`] entry from [`list_worktrees`].
+pub(crate) async fn enriched_worktree(base: &Path, path: &Path) -> Result<Worktree> {
+    let canonical = std::fs::canonicalize(path)?;
+    list_worktrees(base)
         .await?
         .into_iter()
         .find(|w| w.path == canonical)
-        .ok_or(Error::WorktreeNotFound(path))
+        .ok_or_else(|| Error::WorktreeNotFound(path.to_path_buf()))
 }
 
 /// Whether two paths resolve to the same location (symlinks resolved when the
@@ -246,6 +252,6 @@ pub async fn merge_worktree(base_repo_root_arg: &Path, worktree_path: &Path) -> 
 
 /// Run `git <args>` in `cwd`, returning the raw `Output` (status + streams) so
 /// the caller can branch on a non-zero exit (expected for conflicts / probes).
-async fn run_git_raw(cwd: &Path, args: &[&str]) -> Result<std::process::Output> {
+pub(crate) async fn run_git_raw(cwd: &Path, args: &[&str]) -> Result<std::process::Output> {
     Ok(Command::new("git").args(args).current_dir(cwd).output().await?)
 }

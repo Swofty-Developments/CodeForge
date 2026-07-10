@@ -173,6 +173,18 @@ export interface Worktree {
   dirty: boolean;
 }
 
+/** A local or remote-tracking branch of the repo family (C1, forge-git mirror). */
+export interface BranchInfo {
+  /** Short name, e.g. "feat/x" (never prefixed with the remote). */
+  name: string;
+  /** null = local branch; otherwise the remote name, e.g. "origin". */
+  remote: string | null;
+  /** Checked out at the base HEAD. */
+  isHead: boolean;
+  /** Absolute worktree path where this branch is checked out, else null. */
+  checkedOutAt: string | null;
+}
+
 /** Outcome of merging a worktree branch back into the base branch. */
 export interface MergeResult {
   merged: boolean;

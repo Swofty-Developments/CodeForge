@@ -22,14 +22,28 @@ export function TitleBar() {
     return base ? base.state.branch ?? base.state.name : "";
   });
 
-  function newWorktree(): void {
+  /** "Worktrees…" and "New worktree from <branch>…" both land in the switcher —
+   *  the create row appears there as soon as a new name is typed. */
+  function openSwitcher(): void {
     setBranchMenu(false);
-    appStore.setWorktreePromptOpen(true);
+    appStore.setWorktreeSwitcherOpen(true);
   }
-  function mergeActive(): void {
+  // Agent-driven hand-offs (C4): prefillComposer also opens the session pane.
+  function commitPushWithClaude(): void {
     setBranchMenu(false);
-    const p = store.activeContextPath;
-    if (p) void appStore.mergeWorktree(p);
+    const b = repo()?.branch ?? "the current branch";
+    appStore.prefillComposer(
+      `Commit the current changes on ${b} with a well-written message, push to origin ` +
+        `(set upstream if needed), and give me the compare/PR link.`,
+    );
+  }
+  function openPrWithClaude(): void {
+    setBranchMenu(false);
+    const b = repo()?.branch ?? "the current branch";
+    appStore.prefillComposer(
+      `Open a pull request for branch ${b} into ${baseBranch()}: commit anything pending, ` +
+        `push, create the PR with a clear title/description using gh, and give me the link.`,
+    );
   }
 
   return (
@@ -81,13 +95,17 @@ export function TitleBar() {
               <Show when={branchMenu()}>
                 <div class="tb-menu-backdrop" onClick={() => setBranchMenu(false)} />
                 <div class="tb-branch-menu">
-                  <button class="tb-menu-item" onClick={newWorktree}>
+                  <button class="tb-menu-item" onClick={openSwitcher}>Worktrees…</button>
+                  <button class="tb-menu-item" onClick={openSwitcher}>
                     New worktree from <span class="tb-menu-branch">{r().branch ?? "HEAD"}</span>…
                   </button>
                   <Show when={!activeIsBase()}>
-                    <button class="tb-menu-item" onClick={mergeActive}>
-                      Merge <span class="tb-menu-branch">{r().branch ?? "HEAD"}</span> into{" "}
-                      <span class="tb-menu-branch">{baseBranch()}</span>
+                    <div class="tb-menu-sep" />
+                    <button class="tb-menu-item" onClick={commitPushWithClaude}>
+                      Commit &amp; push with Claude
+                    </button>
+                    <button class="tb-menu-item" onClick={openPrWithClaude}>
+                      Open a PR with Claude
                     </button>
                   </Show>
                 </div>
@@ -167,6 +185,7 @@ export function TitleBar() {
           font-size: 12px; color: var(--text-secondary); white-space: nowrap;
         }
         .tb-menu-item:hover { background: var(--bg-accent); color: var(--text); }
+        .tb-menu-sep { height: 1px; background: var(--border-variant); margin: 4px 2px; }
         .tb-menu-branch { font-family: var(--font-mono); font-size: 11px; color: var(--primary); }
         .tb-pill--count { gap: 4px; }
         .tb-pill--count .tb-pill-label { color: var(--primary); font-weight: 600; }

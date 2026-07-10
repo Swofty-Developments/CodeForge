@@ -3,6 +3,9 @@
 //! Shells out to the `git` CLI via `tokio::process::Command` (always with
 //! `.current_dir(repo_root)`, errors surfaced from stderr). No libgit2.
 
+mod branches;
+#[cfg(test)]
+mod branches_tests;
 mod group;
 mod parse;
 mod status;
@@ -21,6 +24,7 @@ use forge_core::{DiffByFeature, FileDiff};
 use forge_index::FeatureIndex;
 use tokio::process::Command;
 
+pub use branches::{fetch_remotes, list_branches, worktree_for_branch, BranchInfo};
 pub use worktree::{
     base_repo_root, create_worktree, list_worktrees, merge_worktree, remove_worktree,
 };
@@ -38,6 +42,8 @@ pub enum Error {
     WorktreePathExists(PathBuf),
     #[error("branch already exists: {0}")]
     BranchExists(String),
+    #[error("branch '{branch}' is already checked out at {}", path.display())]
+    BranchCheckedOut { branch: String, path: PathBuf },
     #[error("refusing to remove the base worktree: {0}")]
     CannotRemoveBase(PathBuf),
     #[error("cannot merge a detached-HEAD worktree (no branch to merge): {0}")]

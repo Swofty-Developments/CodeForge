@@ -1,14 +1,15 @@
 /* Worktree tab strip — one tab per open repo context (base first, then
  * worktrees). Each tab shows the branch, a dirty dot, and ahead/behind counts
- * from list_worktrees (refreshed on focus + after merges). The active tab is
- * Zed-styled and merges into the content surface. "+" opens the new-worktree
- * prompt; closing a worktree tab removes it (confirming when dirty). */
+ * from list_worktrees (refreshed on focus). The active tab is Zed-styled and
+ * merges into the content surface. "+" opens the WorktreeSwitcher. Closing a
+ * tab only closes the CONTEXT (C3) — it never removes the worktree from disk,
+ * so it needs no confirm; removal is an explicit switcher action. */
 
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { Portal } from "solid-js/web";
+import { For, Show, createMemo, onCleanup, onMount } from "solid-js";
 import { appStore } from "../stores/app-store";
 import type { RepoContext, Worktree } from "../types";
 import { samePath } from "../stores/path";
+import { WorktreeSwitcher } from "./worktree/WorktreeSwitcher";
 
 export function WorktreeTabs() {
   const { store } = appStore;
@@ -31,15 +32,7 @@ export function WorktreeTabs() {
 
   function closeTab(ctx: RepoContext, e: MouseEvent): void {
     e.stopPropagation();
-    const meta = metaFor(ctx);
-    const dirty = meta?.dirty ?? false;
-    if (dirty) {
-      const ok = window.confirm(
-        `Worktree "${label(ctx)}" has uncommitted changes.\nRemove it anyway? The changes will be lost.`,
-      );
-      if (!ok) return;
-    }
-    void appStore.closeContext(ctx.state.path, dirty);
+    void appStore.closeContext(ctx.state.path);
   }
 
   // Refresh worktree metadata whenever the window regains focus.
@@ -51,9 +44,6 @@ export function WorktreeTabs() {
     window.addEventListener("focus", onFocus);
   });
   onCleanup(() => window.removeEventListener("focus", onFocus));
-
-  // create_worktree branches off the ACTIVE context's HEAD, so label with it.
-  const newFromBranch = createMemo(() => store.repo?.branch ?? store.repo?.name ?? "current branch");
 
   return (
     <div class="wt-strip">
@@ -103,7 +93,7 @@ export function WorktreeTabs() {
                 <span class="wt-count wt-behind" title={`${meta()!.behind} behind base`}>↓{meta()!.behind}</span>
               </Show>
               <Show when={!ctx.isBase}>
-                <button class="wt-close" title="Remove worktree" onClick={(e) => closeTab(ctx, e)}>
+                <button class="wt-close" title="Close tab (keeps the worktree)" onClick={(e) => closeTab(ctx, e)}>
                   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6">
                     <path d="M18 6L6 18M6 6l12 12" />
                   </svg>
@@ -118,15 +108,15 @@ export function WorktreeTabs() {
         <button
           ref={(el) => (newBtnRef = el)}
           class="wt-new"
-          title={`New worktree from ${newFromBranch()}`}
-          onClick={() => appStore.setWorktreePromptOpen(!store.worktreePromptOpen)}
+          title="Worktrees & branches…"
+          onClick={() => appStore.setWorktreeSwitcherOpen(!store.worktreeSwitcherOpen)}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M12 5v14M5 12h14" />
           </svg>
         </button>
-        <Show when={store.worktreePromptOpen}>
-          <NewWorktreePrompt baseRef={newFromBranch()} anchor={() => newBtnRef} />
+        <Show when={store.worktreeSwitcherOpen}>
+          <WorktreeSwitcher anchor={() => newBtnRef} />
         </Show>
       </div>
 
@@ -211,101 +201,5 @@ export function WorktreeTabs() {
         }
       `}</style>
     </div>
-  );
-}
-
-const PROMPT_WIDTH = 250;
-
-/* Rendered through a Portal to <body> with FIXED positioning: the tab strip
- * scrolls (overflow-x: auto), and a scroll container clips any absolutely-
- * positioned descendant — anchoring inside it cut the popover to a sliver. */
-function NewWorktreePrompt(props: { baseRef: string; anchor: () => HTMLElement | undefined }) {
-  const [name, setName] = createSignal("");
-  const [pos, setPos] = createSignal({ left: 8, top: 64 });
-  let inputRef: HTMLInputElement | undefined;
-
-  function place(): void {
-    const a = props.anchor();
-    if (!a) return;
-    const r = a.getBoundingClientRect();
-    const left = Math.min(Math.max(8, r.left), window.innerWidth - PROMPT_WIDTH - 8);
-    setPos({ left, top: r.bottom + 6 });
-  }
-
-  onMount(() => {
-    place();
-    window.addEventListener("resize", place);
-    queueMicrotask(() => inputRef?.focus());
-  });
-  onCleanup(() => window.removeEventListener("resize", place));
-
-  function submit(): void {
-    const n = name().trim();
-    if (!n) return;
-    appStore.setWorktreePromptOpen(false);
-    void appStore.createWorktree(n);
-  }
-
-  return (
-    <Portal>
-      <div class="wt-prompt-backdrop" onClick={() => appStore.setWorktreePromptOpen(false)} />
-      <div
-        class="wt-prompt"
-        style={{ left: `${pos().left}px`, top: `${pos().top}px` }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div class="wt-prompt-label">
-          New worktree from <span class="wt-prompt-base">{props.baseRef || "current branch"}</span>
-        </div>
-        <input
-          ref={inputRef}
-          class="wt-prompt-input"
-          placeholder="branch name…"
-          value={name()}
-          onInput={(e) => setName(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); submit(); }
-            else if (e.key === "Escape") { e.preventDefault(); appStore.setWorktreePromptOpen(false); }
-          }}
-        />
-        <div class="wt-prompt-actions">
-          <button class="wt-prompt-cancel" onClick={() => appStore.setWorktreePromptOpen(false)}>Cancel</button>
-          <button class="wt-prompt-create" disabled={!name().trim()} onClick={submit}>Create</button>
-        </div>
-      </div>
-
-      <style>{`
-        .wt-prompt-backdrop { position: fixed; inset: 0; z-index: 99; }
-        .wt-prompt {
-          position: fixed;
-          z-index: 100;
-          width: 250px;
-          padding: 10px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border-strong);
-          border-radius: var(--radius-md);
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-          animation: dropdown-in 0.14s var(--ease-out);
-          display: flex; flex-direction: column; gap: 8px;
-        }
-        .wt-prompt-label { font-size: 11px; color: var(--text-tertiary); }
-        .wt-prompt-base { color: var(--primary); font-family: var(--font-mono); font-size: 10.5px; }
-        .wt-prompt-input {
-          width: 100%; font-family: var(--font-mono); font-size: 12px;
-          background: var(--bg-muted); border: 1px solid var(--border);
-          border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text); outline: none;
-        }
-        .wt-prompt-input:focus { border-color: var(--border-glow); box-shadow: 0 0 0 2px var(--primary-glow); }
-        .wt-prompt-actions { display: flex; justify-content: flex-end; gap: 6px; }
-        .wt-prompt-cancel, .wt-prompt-create {
-          font-size: 11.5px; font-weight: 600; padding: 4px 12px; border-radius: var(--radius-sm);
-        }
-        .wt-prompt-cancel { color: var(--text-secondary); border: 1px solid var(--border); }
-        .wt-prompt-cancel:hover { background: var(--bg-accent); color: var(--text); }
-        .wt-prompt-create { color: #16202e; background: var(--primary); }
-        .wt-prompt-create:hover { filter: brightness(1.08); }
-        .wt-prompt-create:disabled { opacity: 0.4; cursor: default; filter: none; }
-      `}</style>
-    </Portal>
   );
 }

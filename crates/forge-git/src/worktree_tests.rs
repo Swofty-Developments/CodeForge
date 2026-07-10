@@ -9,12 +9,13 @@ use crate::{
 
 /// A throwaway repo on a deterministic `main` branch, `.codeforge-worktrees/`
 /// already gitignored so the base stays clean once worktrees are spun off.
-struct Fixture {
+/// Shared with `branches_tests`.
+pub(crate) struct Fixture {
     dir: tempfile::TempDir,
 }
 
 impl Fixture {
-    fn init() -> Self {
+    pub(crate) fn init() -> Self {
         let f = Fixture { dir: tempfile::tempdir().expect("tempdir") };
         git_in(f.path(), &["init", "-q", "-b", "main"]);
         git_in(f.path(), &["config", "user.email", "t@t.t"]);
@@ -26,7 +27,7 @@ impl Fixture {
         f
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         self.dir.path()
     }
 
@@ -35,7 +36,7 @@ impl Fixture {
     }
 }
 
-fn git_in(dir: &Path, args: &[&str]) {
+pub(crate) fn git_in(dir: &Path, args: &[&str]) {
     let out = Command::new("git").args(args).current_dir(dir).output().expect("spawn git");
     assert!(
         out.status.success(),

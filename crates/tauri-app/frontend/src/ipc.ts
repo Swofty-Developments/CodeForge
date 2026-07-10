@@ -24,6 +24,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentEventPayload,
+  BranchInfo,
   DaemonStatus,
   DiffByFeature,
   Feature,
@@ -107,6 +108,26 @@ export function removeWorktree(repoPath: string, worktreePath: string, force: bo
 
 export function mergeWorktree(baseRepoPath: string, worktreePath: string): Promise<MergeResult> {
   return invoke("merge_worktree", { baseRepoPath, worktreePath });
+}
+
+// ── Branches (C2 frozen commands) ───────────────────────────────────────────
+
+/** Local + remote-tracking refs of the repo family (base derived internally). */
+export function listBranches(repoPath: string): Promise<BranchInfo[]> {
+  return invoke("list_branches", { repoPath });
+}
+
+/** git fetch --all --prune. */
+export function fetchRemotes(repoPath: string): Promise<void> {
+  return invoke("fetch_remotes", { repoPath });
+}
+
+/** remote == null: check out the EXISTING local branch into a new worktree
+ *  (already-checked-out is a NAMED error). remote set: create a local branch
+ *  tracking <remote>/<branch>; an existing local branch of that name is a NAMED
+ *  error. The backend runs create_worktree's post-create steps + opens the context. */
+export function addWorktreeForBranch(repoPath: string, branch: string, remote?: string): Promise<Worktree> {
+  return invoke("add_worktree_for_branch", { repoPath, branch, remote: remote ?? null });
 }
 
 // ── Timeline & diff ─────────────────────────────────────────────────────────

@@ -177,6 +177,36 @@ export function createContextSlice(
     }
   }
 
+  /** Check out `branch` into a new worktree (C2); remote set = tracking branch.
+   *  Returns the NAMED error message (also toasted) for inline surfacing, else null. */
+  async function addWorktreeForBranch(branch: string, remote: string | null): Promise<string | null> {
+    const repo = store.repo;
+    if (!repo) return "no repository open";
+    try {
+      const wt = await ipc.addWorktreeForBranch(repo.path, branch, remote ?? undefined);
+      await openWorktreeContext(wt);
+      await refreshWorktrees();
+      return null;
+    } catch (e) {
+      pushError(String(e));
+      return String(e);
+    }
+  }
+
+  /** The ONLY remover (C3): an explicit, confirmed user action — removes the
+   *  worktree from git/disk, then closes its context if it was open. */
+  async function removeWorktreeExplicit(path: string, force: boolean): Promise<void> {
+    const base = baseContext();
+    try {
+      await ipc.removeWorktree(base ? base.state.path : path, path, force);
+    } catch (e) {
+      pushError(String(e));
+      return;
+    }
+    if (findContext(path)) await closeContext(path);
+    else await refreshWorktrees();
+  }
+
   /** Merge a worktree's branch into the base branch; surfaces MergeResult via
    *  store.mergeResult (a clean success OR an honest conflict panel — never a
    *  fabricated success). */
@@ -198,20 +228,14 @@ export function createContextSlice(
     }
   }
 
-  /** Close a context. A worktree is removed from git (remove_worktree, confirm
-   *  dirty via `force` in the caller); the base tears the whole repo down. */
-  async function closeContext(path: string, force: boolean): Promise<void> {
+  /** Close a context TAB (C3): tears down its runtime and drops it from the
+   *  store — NEVER touches the worktree on disk (removeWorktreeExplicit is the
+   *  separate confirmed remover). Closing the base closes the whole repo. */
+  async function closeContext(path: string): Promise<void> {
     const ctx = findContext(path);
     if (!ctx) return;
     if (ctx.isBase) {
       await closeRepo();
-      return;
-    }
-    const base = baseContext();
-    try {
-      await ipc.removeWorktree(base ? base.state.path : path, path, force);
-    } catch (e) {
-      pushError(String(e));
       return;
     }
     try {
@@ -268,6 +292,8 @@ export function createContextSlice(
     closeContext,
     refreshWorktrees,
     createWorktree,
+    addWorktreeForBranch,
+    removeWorktreeExplicit,
     mergeWorktree,
     dismissMergeResult: () => setStore("mergeResult", null),
   };
