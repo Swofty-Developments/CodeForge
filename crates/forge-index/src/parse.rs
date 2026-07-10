@@ -160,13 +160,21 @@ fn resolve_group(model: Option<&str>, entry_points: &[PathBuf], files: &[PathBuf
     cleaned.or_else(|| derive_group(entry_points, files))
 }
 
-/// Deterministic group-derivation rule (a NAMED rule, not a fallback): the group
-/// is the top-level directory segment shared by ALL of a feature's files
-/// (entry_points ∪ files). In a monorepo whose shared top segment is `crates` or
-/// `packages`, descend one level and use the crate/package name — so files all
-/// under `crates/forge-index/**` derive to `"forge-index"`. Files that share no
-/// common top-level directory (spread across the repo, or sitting at the repo
-/// root) derive to `None` → the sidebar's "Ungrouped" bucket.
+/// Monorepo container dirs: skipped in favour of their child (the crate/package
+/// name), so `crates/forge-index/**` groups as `forge-index`, not `crates`.
+const CONTAINER_DIRS: [&str; 4] = ["crates", "packages", "apps", "libs"];
+/// Structural dirs that carry no meaning in a group path.
+const NOISE_DIRS: [&str; 1] = ["src"];
+/// Group paths are capped at this many segments to keep the tree navigable.
+const MAX_GROUP_DEPTH: usize = 3;
+
+/// Deterministic group-derivation rule (a NAMED rule, not a fallback): walk the
+/// directory prefix shared by ALL of a feature's files (entry_points ∪ files),
+/// skipping monorepo containers (`crates/<x>` → `<x>`) and structural noise
+/// (`src`), and keep up to [`MAX_GROUP_DEPTH`] meaningful segments — so files
+/// all under `crates/atomix-web/src/pages/**` derive to `"atomix-web/pages"`,
+/// giving the sidebar real multi-level nesting. Files that share no common
+/// directory derive to `None` → the sidebar's "Ungrouped" bucket.
 fn derive_group(entry_points: &[PathBuf], files: &[PathBuf]) -> Option<String> {
     let dirs: Vec<Vec<String>> = entry_points
         .iter()
@@ -177,12 +185,30 @@ fn derive_group(entry_points: &[PathBuf], files: &[PathBuf]) -> Option<String> {
         return None;
     }
     let shared = common_prefix(&dirs);
-    let first = shared.first()?;
-    if (first == "crates" || first == "packages") && shared.len() >= 2 {
-        Some(shared[1].clone())
-    } else {
-        Some(first.clone())
+
+    let mut segments: Vec<String> = Vec::new();
+    let mut skip_next_is_container_child = false;
+    for (i, seg) in shared.iter().enumerate() {
+        if segments.len() >= MAX_GROUP_DEPTH {
+            break;
+        }
+        // A container dir is dropped; its child (the crate/package name) is kept
+        // by the normal path below on the next iteration.
+        if CONTAINER_DIRS.contains(&seg.as_str()) && i + 1 < shared.len() {
+            skip_next_is_container_child = true;
+            continue;
+        }
+        if NOISE_DIRS.contains(&seg.as_str()) && !skip_next_is_container_child {
+            continue;
+        }
+        skip_next_is_container_child = false;
+        segments.push(seg.clone());
     }
+
+    if segments.is_empty() {
+        return None;
+    }
+    Some(segments.join("/"))
 }
 
 /// The parent-directory components of a repo-relative path (`Normal` components
@@ -358,11 +384,28 @@ mod tests {
     }
 
     #[test]
-    fn derive_group_uses_top_segment_off_the_monorepo_path() {
-        // A plain top-level directory is the group verbatim.
+    fn derive_group_drops_structural_noise_and_nests() {
+        // `src` is structural noise: the meaningful dir below it is the group.
         assert_eq!(
             derive_group(&[], &bufs(&["src/auth/mod.rs", "src/auth/session.rs"])).as_deref(),
-            Some("src")
+            Some("auth")
+        );
+        // Deep shared prefixes keep multiple levels (container + noise removed).
+        assert_eq!(
+            derive_group(
+                &[],
+                &bufs(&[
+                    "crates/atomix-web/src/pages/markets/list.tsx",
+                    "crates/atomix-web/src/pages/markets/detail.tsx",
+                ]),
+            )
+            .as_deref(),
+            Some("atomix-web/pages/markets")
+        );
+        // Depth is capped at MAX_GROUP_DEPTH meaningful segments.
+        assert_eq!(
+            derive_group(&[], &bufs(&["a/b/c/d/e/f.rs", "a/b/c/d/e/g.rs"])).as_deref(),
+            Some("a/b/c")
         );
     }
 
@@ -388,7 +431,9 @@ mod tests {
             resolve_group(Some("   "), &[], &bufs(&["crates/x/lib.rs"])).as_deref(),
             Some("x")
         );
-        assert_eq!(resolve_group(None, &[], &bufs(&["src/x.rs"])).as_deref(), Some("src"));
+        // Files directly under bare `src/` share only a noise segment — that is
+        // the named "no meaningful group" state, not a group called "src".
+        assert_eq!(resolve_group(None, &[], &bufs(&["src/x.rs"])), None);
     }
 
     #[test]

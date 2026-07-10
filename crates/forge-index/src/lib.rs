@@ -23,7 +23,8 @@ use forge_core::{Feature, FeaturePatch};
 /// Index-format version. Bump when the indexing *technique* changes (prompt,
 /// derivation, meta shape) so a previously-written index reports `outdated` and
 /// the UI can prompt a re-index (FZ-2). Stored in `index-meta.json`.
-pub const INDEX_VERSION: u32 = 1;
+/// v2: granularity + multi-level group prompt, deep derive_group rule.
+pub const INDEX_VERSION: u32 = 2;
 
 /// Pure staleness/version verdict for the on-disk index at `repo_root` (FZ-2).
 /// Reads `features.json` + `index-meta.json` and re-hashes the manifest files;

@@ -60,11 +60,17 @@ these fields:
 
 Rules:
 - slug is kebab-case and stable; name is title-case.
-- group is a slash-delimited hierarchy path the sidebar nests features by. For a
-  multi-crate repo or monorepo use the crate/package name (e.g. "forge-index",
-  "web"); otherwise use a "layer/module" path (e.g. "backend/auth", "frontend").
-  Features in the same crate/package/layer MUST share the exact same group
-  string. Omit group only when a feature genuinely spans the whole repo.
+- group is a slash-delimited hierarchy path the sidebar nests features by, and it
+  should USE MULTIPLE LEVELS (up to 3). Level 1 is the crate/package/app name in
+  a multi-crate repo or monorepo (e.g. "forge-index", "web"), or the layer in a
+  single-package repo (e.g. "backend"). When an area contains more than ~5
+  features, subdivide with a second (and if useful third) level by subsystem or
+  surface — e.g. "atomix-web/pages", "atomix-web/trading", "atomix-core/matching",
+  "backend/auth/oidc". Never leave 10+ features sitting flat under one group when
+  they cluster into obvious sub-areas. Related features MUST share the exact same
+  group string, and a parent group's features must genuinely belong to every
+  segment of the path. Omit group only when a feature genuinely spans the whole
+  repo.
 - entryPoints are the 1-3 best "start reading here" files for the feature.
 - role is one of: core | support | test | config.
 - every path is RELATIVE to the repo root and must exist on disk.
