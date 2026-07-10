@@ -90,6 +90,13 @@ async fn run(ctx: ReindexCtx) {
                     None
                 }
             };
+            state.project = match repo_util::project_name(&ctx.repo_root).await {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    tracing::warn!("could not resolve project name for repo:changed: {e}");
+                    None
+                }
+            };
             let _ = ctx.app.emit(events::REPO_CHANGED, &state);
         }
         Err(e) => {

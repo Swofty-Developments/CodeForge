@@ -180,6 +180,7 @@ export function WorktreeSwitcher(props: { anchor: () => HTMLElement | undefined 
                 <ContextRow
                   ctx={c}
                   active={!!store.activeContextPath && samePath(store.activeContextPath, c.state.path)}
+                  showProject={new Set(store.contexts.map((x) => x.state.project ?? x.state.name)).size > 1}
                   onPick={() => { close(); void appStore.switchContext(c.state.path); }}
                 />
               )}

@@ -10,15 +10,37 @@ import { appStore } from "../stores/app-store";
 import type { RepoContext, Worktree } from "../types";
 import { samePath } from "../stores/path";
 import { WorktreeSwitcher } from "./worktree/WorktreeSwitcher";
+import { hueForSlug } from "./graph/colors";
+
+/** A context's project identity. `project` is filled by the backend (base-repo
+ *  basename); a missing one (older repo:changed emit) falls to the context's own
+ *  name — a named rule so the tab still groups with itself. */
+const projectOf = (ctx: RepoContext): string => ctx.state.project ?? ctx.state.name;
+
+/** Up to two initials: first letters of the first two words ("atomix-web" → AW),
+ *  or the first two characters of a single-word name ("atomix" → AT). */
+export function projectInitials(project: string): string {
+  const parts = project.split(/[-_\s.]+/).filter(Boolean);
+  const raw = parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}` : project.slice(0, 2);
+  return raw.toUpperCase();
+}
 
 export function WorktreeTabs() {
   const { store } = appStore;
   let newBtnRef: HTMLButtonElement | undefined;
 
-  // Base first, then worktrees in open order (stable sort).
+  // Grouped by project (alphabetical), base first within a project, then open order.
   const ordered = createMemo(() =>
-    [...store.contexts].sort((a, b) => (a.isBase === b.isBase ? 0 : a.isBase ? -1 : 1)),
+    [...store.contexts].sort((a, b) => {
+      const pa = projectOf(a);
+      const pb = projectOf(b);
+      if (pa !== pb) return pa.localeCompare(pb, undefined, { sensitivity: "base" });
+      return a.isBase === b.isBase ? 0 : a.isBase ? -1 : 1;
+    }),
   );
+
+  // Badges appear only when the open tabs span more than one project.
+  const multiProject = createMemo(() => new Set(store.contexts.map(projectOf)).size > 1);
 
   const metaFor = (ctx: RepoContext): Worktree | undefined =>
     store.worktrees.find((w) => samePath(String(w.path), ctx.state.path));
@@ -55,9 +77,22 @@ export function WorktreeTabs() {
             <div
               class="wt-tab"
               classList={{ "wt-tab--active": active(), "wt-tab--base": ctx.isBase }}
-              title={ctx.state.path}
+              title={`${projectOf(ctx)} — ${ctx.state.path}`}
               onClick={() => activate(ctx)}
             >
+              <Show when={multiProject()}>
+                <span
+                  class="wt-project"
+                  style={{
+                    color: hueForSlug(projectOf(ctx)),
+                    "border-color": `color-mix(in srgb, ${hueForSlug(projectOf(ctx))} 45%, transparent)`,
+                    background: `color-mix(in srgb, ${hueForSlug(projectOf(ctx))} 12%, transparent)`,
+                  }}
+                  title={projectOf(ctx)}
+                >
+                  {projectInitials(projectOf(ctx))}
+                </span>
+              </Show>
               <svg class="wt-ico" viewBox="0 0 16 16" aria-hidden="true">
                 <Show
                   when={ctx.isBase}
@@ -157,6 +192,14 @@ export function WorktreeTabs() {
           border-color: var(--border);
           border-bottom-color: var(--bg-base);
           margin-bottom: -1px;
+        }
+        .wt-project {
+          display: inline-flex; align-items: center; justify-content: center;
+          height: 14px; padding: 0 3px;
+          font-family: var(--font-mono); font-size: 8px; font-weight: 700;
+          letter-spacing: 0.06em; line-height: 1;
+          border: 1px solid; border-radius: 3px;
+          flex-shrink: 0;
         }
         .wt-ico { width: 12px; height: 12px; flex-shrink: 0; color: var(--text-tertiary); }
         .wt-tab--active .wt-ico { color: var(--primary); }

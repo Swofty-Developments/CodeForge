@@ -50,6 +50,14 @@ export const SWITCHER_CSS = `
     border: 1px solid var(--border-variant); padding: 0 4px; border-radius: var(--radius-pill);
     flex-shrink: 0;
   }
+  .ws-project {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 14px; padding: 0 3px;
+    font-family: var(--font-mono); font-size: 8px; font-weight: 700;
+    letter-spacing: 0.06em; line-height: 1;
+    border: 1px solid; border-radius: 3px;
+    flex-shrink: 0;
+  }
   .ws-dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex-shrink: 0; }
   .ws-count {
     font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums;

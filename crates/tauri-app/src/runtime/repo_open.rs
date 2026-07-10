@@ -64,6 +64,7 @@ pub async fn open_context(
             let mut rs = repo_util::repo_state(&root, count, Some(port));
             rs.indexed_at = indexed_at; // CONTRACT-3: DB is source of truth
             rs.branch = forge_git::current_branch(&root).await.map_err(|e| e.to_string())?;
+            rs.project = Some(repo_util::project_name(&root).await?);
             return Ok(rs);
         }
     }
@@ -161,6 +162,7 @@ pub async fn open_context(
     let mut repo_state = repo_util::repo_state(&root, features_count, Some(port));
     repo_state.indexed_at = indexed_at; // CONTRACT-3: DB is source of truth
     repo_state.branch = forge_git::current_branch(&root).await.map_err(|e| e.to_string())?;
+    repo_state.project = Some(repo_util::project_name(&root).await?);
     let _ = app.emit(events::REPO_CHANGED, &repo_state);
 
     // FZ-2: after opening, push the on-disk staleness/version verdict so the UI

@@ -24,6 +24,14 @@ pub fn repo_name(root: &Path) -> String {
         .unwrap_or_else(|| root.display().to_string())
 }
 
+/// Project identity for a context = the basename of its repo family's BASE
+/// checkout, so the base and every worktree of one project share it (tab
+/// badges when several projects are open at once).
+pub async fn project_name(root: &Path) -> Result<String, String> {
+    let base = forge_git::base_repo_root(root).await.map_err(|e| e.to_string())?;
+    Ok(repo_name(&base))
+}
+
 /// Assemble the [`RepoState`] returned by `open_repo` / emitted on `repo:changed`.
 ///
 /// `indexed_at` is left `None` here: CONTRACT-3 makes `repos.indexed_at` (DB)
@@ -38,6 +46,7 @@ pub fn repo_state(root: &Path, features_count: u32, daemon_port: Option<u16>) ->
         indexed_at: None,
         daemon_port,
         branch: None,
+        project: None,
     }
 }
 

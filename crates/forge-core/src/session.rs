@@ -17,6 +17,10 @@ pub struct RepoState {
     /// Current git branch (title-bar pill). `None` on a detached HEAD.
     #[serde(default)]
     pub branch: Option<String>,
+    /// Project identity = basename of the repo family's BASE checkout, shared by
+    /// the base and all its worktrees (tab badges when several projects are open).
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 /// Streamed to the frontend via the `index:progress` event during indexing.
@@ -84,6 +88,7 @@ mod tests {
             indexed_at: Some(Utc::now()),
             daemon_port: Some(49213),
             branch: Some("main".into()),
+            project: Some("repo".into()),
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"featuresCount\""));

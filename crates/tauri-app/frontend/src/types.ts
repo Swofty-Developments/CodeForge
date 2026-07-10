@@ -120,6 +120,9 @@ export interface RepoState {
   indexedAt: string | null;
   daemonPort: number | null;
   branch: string | null;
+  /** Basename of the repo family's BASE checkout — shared by the base and all
+   *  its worktrees; drives the tab project badges when several projects are open. */
+  project: string | null;
 }
 
 export interface IndexProgress {

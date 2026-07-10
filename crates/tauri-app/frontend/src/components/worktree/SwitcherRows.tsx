@@ -4,6 +4,8 @@
 import { Show } from "solid-js";
 import type { BranchInfo, RepoContext, Worktree } from "../../types";
 import { basename } from "./switcher-data";
+import { hueForSlug } from "../graph/colors";
+import { projectInitials } from "../WorktreeTabs";
 
 function BranchIcon() {
   return (
@@ -64,15 +66,34 @@ export function CreateRow(props: { name: string; from: string; onPick: () => voi
   );
 }
 
-/** An open context (tab): click switches to it. */
-export function ContextRow(props: { ctx: RepoContext; active: boolean; onPick: () => void }) {
+/** An open context (tab): click switches to it. `showProject` adds the initials
+ *  badge when the open tabs span more than one project. */
+export function ContextRow(props: {
+  ctx: RepoContext;
+  active: boolean;
+  showProject: boolean;
+  onPick: () => void;
+}) {
+  const project = () => props.ctx.state.project ?? props.ctx.state.name;
   return (
     <button
       class="ws-row"
       classList={{ "ws-row--active": props.active }}
-      title={props.ctx.state.path}
+      title={`${project()} — ${props.ctx.state.path}`}
       onClick={() => props.onPick()}
     >
+      <Show when={props.showProject}>
+        <span
+          class="ws-project"
+          style={{
+            color: hueForSlug(project()),
+            "border-color": `color-mix(in srgb, ${hueForSlug(project())} 45%, transparent)`,
+            background: `color-mix(in srgb, ${hueForSlug(project())} 12%, transparent)`,
+          }}
+        >
+          {projectInitials(project())}
+        </span>
+      </Show>
       <Show when={!props.ctx.isBase} fallback={<FolderIcon />}>
         <BranchIcon />
       </Show>
