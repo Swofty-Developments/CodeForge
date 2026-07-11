@@ -184,7 +184,9 @@ function createAppStore() {
   async function reindexStale(repoPath: string): Promise<void> {
     setStore("staleModal", null);
     try {
-      await ipc.reindexRepo(repoPath, true);
+      // Stale = known files drifted → the incremental path (force=false)
+      // refreshes just the affected features instead of a full decomposition.
+      await ipc.reindexRepo(repoPath, false);
     } catch (e) {
       pushError(String(e));
     }

@@ -69,8 +69,10 @@ pub async fn close_repo(state: State<'_, AppState>, path: String) -> Result<(), 
     Ok(())
 }
 
-/// Re-run the indexer. `force: false` preserves pinned features and merges by
-/// slug; `force: true` discards unpinned features first.
+/// Re-run the indexer. `force: false` takes the incremental path when the
+/// index is merely stale (refresh affected features only, no decomposition),
+/// falling back to a full cold start; `force: true` always cold-starts.
+/// Both merge by slug and preserve pinned features.
 #[tauri::command]
 pub async fn reindex_repo(
     app: tauri::AppHandle,

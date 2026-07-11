@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use forge_core::{Actor, EventKind, IndexProgress};
-use forge_index::{FeatureIndex, Indexer};
+use forge_index::{FeatureIndex, IndexState, Indexer};
 use forge_timeline::{NewEvent, TimelineStore};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, RwLock};
@@ -68,7 +68,7 @@ async fn run(ctx: ReindexCtx) {
     let _ = progress_task.await;
 
     match outcome {
-        Ok(Completion { report, indexed_at }) => {
+        Ok(Completion { report, indexed_at, incremental }) => {
             let count = ctx.index.read().await.features().len() as u32;
             append(
                 &ctx.timeline,
@@ -77,6 +77,7 @@ async fn run(ctx: ReindexCtx) {
                     "features": count,
                     "docsWritten": report.written,
                     "docsFailed": report.failed.len(),
+                    "incremental": incremental,
                 }),
             );
             let mut state = repo_util::repo_state(&ctx.repo_root, count, Some(ctx.daemon_port));
@@ -114,10 +115,21 @@ async fn run(ctx: ReindexCtx) {
 /// written and before a clean completion is emitted, so a failed decomposition,
 /// a failed index save, or a failed `indexed_at` write can never masquerade as
 /// success. The existing on-disk index survives a failed reindex verbatim.
+///
+/// `force: false` first attempts the incremental path (stale index, changed
+/// files attributable to existing features → prune + refresh only those docs,
+/// no LLM decomposition); `force: true` — and any case incremental can't
+/// handle — runs the full cold start.
 async fn run_indexed(
     ctx: &ReindexCtx,
     progress_tx: &mpsc::Sender<IndexProgress>,
 ) -> Result<Completion, String> {
+    if !ctx.force {
+        if let Some(done) = try_incremental(ctx, progress_tx).await? {
+            return Ok(done);
+        }
+    }
+
     let features = Indexer::cold_start(&ctx.repo_root, progress_tx.clone())
         .await
         .map_err(|e| e.to_string())?;
@@ -150,7 +162,80 @@ async fn run_indexed(
         .await
         .map_err(|e| format!("failed to record indexed_at: {e}"))?;
 
-    Ok(Completion { report, indexed_at })
+    Ok(Completion { report, indexed_at, incremental: false })
+}
+
+/// The incremental path: when the index is merely *stale* (manifest files
+/// changed or vanished) and every changed file belongs to an existing feature,
+/// skip the LLM decomposition entirely — prune dead paths, rewrite the
+/// manifest, and refresh only the affected features' docs. Returns `Ok(None)`
+/// when a full cold start is required instead (index `never`/`outdated`/
+/// `fresh`, or changed files no feature owns — new territory needs
+/// decomposition to discover features).
+async fn try_incremental(
+    ctx: &ReindexCtx,
+    progress_tx: &mpsc::Sender<IndexProgress>,
+) -> Result<Option<Completion>, String> {
+    // index_status re-hashes the manifest — blocking IO off the async thread.
+    let root = ctx.repo_root.clone();
+    let status = tokio::task::spawn_blocking(move || forge_index::index_status(&root))
+        .await
+        .map_err(|e| format!("index status task join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+    if status.state != IndexState::Stale {
+        return Ok(None);
+    }
+
+    let affected: Vec<forge_core::Feature> = {
+        let mut index = ctx.index.write().await;
+        let slugs = index.owners_of(&status.changed_files);
+        if slugs.is_empty() {
+            return Ok(None);
+        }
+        let removed = index.prune_missing_files(&slugs);
+        if !removed.is_empty() {
+            tracing::info!(?removed, "incremental reindex removed features with no surviving files");
+        }
+        index
+            .save()
+            .map_err(|e| format!("failed to save feature index: {e}"))?;
+        index
+            .write_meta()
+            .map_err(|e| format!("failed to write index meta: {e}"))?;
+        slugs
+            .iter()
+            .filter(|s| !removed.contains(s))
+            .filter_map(|s| index.get(s).cloned())
+            .collect()
+    };
+
+    let _ = progress_tx
+        .send(IndexProgress {
+            stage: "incremental".to_string(),
+            detail: format!(
+                "{} changed file{} → refreshing {} feature{}",
+                status.changed_files.len(),
+                if status.changed_files.len() == 1 { "" } else { "s" },
+                affected.len(),
+                if affected.len() == 1 { "" } else { "s" },
+            ),
+            done: 0,
+            total: affected.len() as u32,
+        })
+        .await;
+
+    let report = Indexer::write_feature_docs(&ctx.repo_root, &affected, progress_tx.clone())
+        .await
+        .map_err(|e| format!("incremental doc pass failed: {e}"))?;
+    if !report.failed.is_empty() {
+        tracing::warn!(failed = ?report.failed, "some feature docs failed to refresh incrementally");
+    }
+
+    let indexed_at = persist_indexed_at(&ctx.db, &ctx.repo_id)
+        .await
+        .map_err(|e| format!("failed to record indexed_at: {e}"))?;
+
+    Ok(Some(Completion { report, indexed_at, incremental: true }))
 }
 
 /// The successful reindex result: the doc report plus the `indexed_at` that was
@@ -159,6 +244,8 @@ async fn run_indexed(
 struct Completion {
     report: forge_index::DocReport,
     indexed_at: chrono::DateTime<chrono::Utc>,
+    /// True when the cheap stale-only path ran (no LLM decomposition).
+    incremental: bool,
 }
 
 /// Push an explicit `error` stage on `index:progress` so the UI shows the
