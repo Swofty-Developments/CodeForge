@@ -67,6 +67,47 @@ pub fn which(cmd: &str) -> Option<PathBuf> {
     None
 }
 
+/// Locate the Claude Code CLI: the resolved PATH first, then the well-known
+/// install locations PATH misses when the login-shell probe fails or the
+/// profile doesn't export them — the native installer (`~/.local/bin`), the
+/// legacy local install (`~/.claude/local`), and Homebrew (Apple-silicon and
+/// Intel prefixes).
+pub fn locate_claude() -> Option<PathBuf> {
+    if let Some(found) = which("claude") {
+        return Some(found);
+    }
+    well_known_claude_paths().into_iter().find(|p| is_executable(p))
+}
+
+/// Candidate `claude` install locations outside PATH, best-first.
+fn well_known_claude_paths() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    if let Some(home) = home {
+        let home = PathBuf::from(home);
+        candidates.push(home.join(".local/bin/claude"));
+        candidates.push(home.join(".claude/local/claude"));
+    }
+    candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
+    candidates.push(PathBuf::from("/usr/local/bin/claude"));
+    candidates
+}
+
+/// A regular file with an exec bit (symlinks followed, so Homebrew's Cellar
+/// links qualify). Non-unix: existence is the best available signal.
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &std::path::Path) -> bool {
+    path.is_file()
+}
+
 /// Resolve the user's login-shell environment by running:
 ///   `$SHELL -l -i -c 'env -0'`  (preferred, NUL-separated)
 ///   `$SHELL -l -c 'env'`        (fallback)
@@ -140,5 +181,30 @@ mod tests {
     #[test]
     fn which_finds_sh() {
         assert!(which("sh").is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_probe_requires_exec_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let plain = tmp.path().join("claude");
+        std::fs::write(&plain, "#!/bin/sh\n").expect("write");
+        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        assert!(!is_executable(&plain), "no exec bit");
+        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        assert!(is_executable(&plain), "exec bit set");
+        assert!(!is_executable(&tmp.path().join("missing")), "missing file");
+    }
+
+    #[test]
+    fn well_known_paths_cover_native_and_homebrew() {
+        let paths = well_known_claude_paths();
+        let rendered: Vec<String> =
+            paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        assert!(rendered.iter().any(|p| p.ends_with(".local/bin/claude")), "native installer");
+        assert!(rendered.iter().any(|p| p.ends_with(".claude/local/claude")), "legacy local");
+        assert!(rendered.contains(&"/opt/homebrew/bin/claude".to_string()), "brew arm64");
+        assert!(rendered.contains(&"/usr/local/bin/claude".to_string()), "brew intel");
     }
 }
