@@ -25,6 +25,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentEventPayload,
   BranchInfo,
+  ClaudeCliStatus,
   DaemonStatus,
   DiffByFeature,
   Feature,
@@ -175,6 +176,11 @@ export function listSessions(): Promise<SessionInfo[]> {
 /** Save a pasted clipboard image to a temp file; returns the path to attach. */
 export function savePastedImage(dataBase64: string, mime: string): Promise<string> {
   return invoke("save_pasted_image", { dataBase64, mime });
+}
+
+/** Claude CLI health check: locate (PATH + well-known installs) and run --version. */
+export function claudeCliStatus(): Promise<ClaudeCliStatus> {
+  return invoke("claude_cli_status");
 }
 
 // ── Terminals (FZ-3) ─────────────────────────────────────────────────────────

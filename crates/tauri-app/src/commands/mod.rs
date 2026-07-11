@@ -2,6 +2,7 @@
 //! `Result<T, String>` (errors formatted with `format!("{e:#}")` for anyhow
 //! chains); IDs and paths cross IPC as strings.
 
+pub mod cli;
 pub mod features;
 pub mod repo;
 pub mod sessions;
