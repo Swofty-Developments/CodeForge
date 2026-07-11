@@ -71,6 +71,7 @@ export interface AppStore {
   sidebarWidth: number;
   sessionPaneOpen: boolean;
   sessionPaneWidth: number;
+  sessionPaneFullscreen: boolean;
   /** Text waiting to be inserted into the session composer ("Ask Claude" flow). */
   composerPrefill: string | null;
   /** Bottom terminal panel (FZ-3) — worktree-scoped PTY tabs. */
@@ -117,6 +118,7 @@ function createAppStore() {
     sidebarWidth: 260,
     sessionPaneOpen: true,
     sessionPaneWidth: 380,
+    sessionPaneFullscreen: false,
     composerPrefill: null,
     terminals: [],
     activeTerminalId: null,
@@ -162,12 +164,41 @@ function createAppStore() {
   const staleKey = (p: string): string => `ff:stale-dismissed:${normPath(p)}`;
   const isStaleSuppressed = (p: string): boolean => localStorage.getItem(staleKey(p)) === "1";
 
-  /** index:status handler — surface the modal only for actionable states the user
-   *  hasn't muted. `fresh`/`never` are silent; each state is named, not guessed. */
+  /** Track which repo+state episodes have had their modal shown this session.
+   *  Cleared when the state transitions away (e.g. stale→fresh) or when the user
+   *  acts on the modal (reindex). This separates "status consumption" (always
+   *  update the dot) from "modal presentation" (show once per episode). */
+  const shownStaleModals = new Set<string>();
+
+  /** index:status event consumer — the backend's 10s poller emits on ANY status
+   *  change (including growing changedFiles). Two concerns, cleanly separated:
+   *
+   *  1. **Status tracking** (status bar dot) — always consume, keep current.
+   *  2. **Modal triggering** (re-index prompt) — show once per state episode.
+   *
+   *  Modal pops when: (a) state is stale/outdated, (b) not suppressed, (c) this
+   *  state episode hasn't been shown yet. When the state transitions back to
+   *  fresh/never, the episode ends and the flag is cleared. When the user acts
+   *  on the modal (reindex), the flag is cleared so a future stale→fresh→stale
+   *  cycle will re-prompt. */
   function handleIndexStatus(repoPath: string, status: IndexStatus): void {
     setStore("indexStatusByPath", repoPath, status);
-    if (status.state !== "stale" && status.state !== "outdated") return;
+
+    const episodeKey = `${repoPath}:${status.state}`;
+
+    // If the state transitioned to a non-actionable state, clear the shown flag
+    // so the next stale/outdated episode will prompt.
+    if (status.state !== "stale" && status.state !== "outdated") {
+      shownStaleModals.delete(episodeKey);
+      return;
+    }
+
+    // Don't re-show if the user suppressed this repo or we've already shown this episode.
     if (isStaleSuppressed(repoPath)) return;
+    if (shownStaleModals.has(episodeKey)) return;
+
+    // Show the modal and mark this episode as shown.
+    shownStaleModals.add(episodeKey);
     setStore("staleModal", { repoPath, status });
   }
 
@@ -180,8 +211,13 @@ function createAppStore() {
   }
 
   /** Re-index the modal's repo (force) and close. Targets that repoPath, not
-   *  necessarily the active context — they can differ per-worktree. */
+   *  necessarily the active context — they can differ per-worktree. Clear the
+   *  shown flag so a future stale episode will re-prompt. */
   async function reindexStale(repoPath: string): Promise<void> {
+    const current = store.staleModal;
+    if (current) {
+      shownStaleModals.delete(`${repoPath}:${current.status.state}`);
+    }
     setStore("staleModal", null);
     try {
       // Stale = known files drifted → the incremental path (force=false)
@@ -218,6 +254,10 @@ function createAppStore() {
 
   function toggleSessionPane(): void {
     setStore("sessionPaneOpen", !store.sessionPaneOpen);
+  }
+
+  function toggleSessionPaneFullscreen(): void {
+    setStore("sessionPaneFullscreen", !store.sessionPaneFullscreen);
   }
 
   // ── Event reducers (single global listeners, registered via initListeners) ─
@@ -309,6 +349,7 @@ function createAppStore() {
     setSidebarWidth,
     setSessionPaneWidth,
     toggleSessionPane,
+    toggleSessionPaneFullscreen,
     pushError,
     pushSuccess,
     dismissToast,

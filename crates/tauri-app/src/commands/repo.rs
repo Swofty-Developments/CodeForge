@@ -110,3 +110,4 @@ pub async fn daemon_status(state: State<'_, AppState>, repo_path: String) -> Res
         .unwrap_or(DaemonStatus { running: false, port: None });
     Ok(status)
 }
+

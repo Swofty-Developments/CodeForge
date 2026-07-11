@@ -16,6 +16,7 @@ function newSessionUi(info: SessionInfo, contextPath: string, permissionMode: Pe
     runState: "starting",
     messages: [],
     pendingApproval: null,
+    pendingQuestion: null,
     slashCommands: [],
     claudeSessionId: null,
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
@@ -86,15 +87,40 @@ export function createSessionSlice(
     return sendMessage(text);
   }
 
-  async function approveRequest(sessionId: string, requestId: string, approve: boolean): Promise<void> {
+  /** Answer a pending approval OR AskUserQuestion request. For questions,
+   *  `answers` maps question text → selected option label(s) — required on
+   *  approve, otherwise the tool reports the user didn't answer. */
+  async function approveRequest(
+    sessionId: string,
+    requestId: string,
+    approve: boolean,
+    answers?: Record<string, string>,
+  ): Promise<void> {
     try {
-      await ipc.approveSession(sessionId, requestId, approve);
+      await ipc.approveSession(sessionId, requestId, approve, answers);
     } catch (e) {
       pushError(String(e));
     }
     const idx = store.sessions.findIndex((s) => s.info.id === sessionId);
     if (idx >= 0 && store.sessions[idx].pendingApproval?.requestId === requestId) {
       setStore("sessions", idx, "pendingApproval", null);
+    }
+    if (idx >= 0 && store.sessions[idx].pendingQuestion?.requestId === requestId) {
+      setStore("sessions", idx, "pendingQuestion", null);
+    }
+  }
+
+  /**
+   * Abort the in-flight turn only — the chat transcript stays. The sidecar
+   * answers with `turn_aborted`, which finalizes the live message and resets
+   * runState (see session-reducer.ts). Contrast with stopSession, which kills
+   * the sidecar and removes the whole session (close-tab).
+   */
+  async function interruptSession(id: string): Promise<void> {
+    try {
+      await ipc.interruptSession(id);
+    } catch (e) {
+      pushError(String(e));
     }
   }
 
@@ -106,6 +132,41 @@ export function createSessionSlice(
     }
     setStore("sessions", (s) => s.filter((x) => x.info.id !== id));
     if (store.activeSessionId === id) setStore("activeSessionId", null);
+  }
+
+  /** Rename a session (live or past). Optimistic UI update + backend persist. */
+  async function renameSession(sessionId: string, title: string): Promise<void> {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      pushError("Session title cannot be empty");
+      return;
+    }
+    const idx = store.sessions.findIndex((s) => s.info.id === sessionId);
+    const prev = idx >= 0 ? store.sessions[idx].info.title : undefined;
+    if (idx >= 0) setStore("sessions", idx, "info", "title", trimmed);
+    try {
+      await ipc.renameSession(sessionId, trimmed);
+    } catch (e) {
+      if (idx >= 0 && prev) setStore("sessions", idx, "info", "title", prev);
+      pushError(String(e));
+    }
+  }
+
+  /** Resume a past session (spawns a fresh session with resume mode). */
+  async function resumeSession(claudeSessionId: string): Promise<void> {
+    if (!store.repo) return;
+    const contextPath = store.activeContextPath;
+    if (!contextPath) return;
+    try {
+      const info = await ipc.startSession({
+        repoPath: store.repo.path,
+        resumeSessionId: claudeSessionId,
+      });
+      setStore("sessions", store.sessions.length, newSessionUi(info, contextPath, "default"));
+      setStore("activeSessionId", info.id);
+    } catch (e) {
+      pushError(String(e));
+    }
   }
 
   /** "Ask Claude" flow: seed the composer and reveal the session pane. */
@@ -123,7 +184,10 @@ export function createSessionSlice(
     sendMessage,
     sendSessionInput,
     approveRequest,
+    interruptSession,
     stopSession,
+    renameSession,
+    resumeSession,
     prefillComposer,
     clearComposerPrefill,
     handleAgentEvent: createAgentEventHandler(store, setStore, pushError),

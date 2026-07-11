@@ -4,7 +4,7 @@
  * cards. Plus the typing indicator, approval card, and usage footer. */
 
 import { For, Match, Show, Switch, createEffect, createMemo, on, onCleanup } from "solid-js";
-import { ApprovalCard, ThinkingBlock, ToolCard, TypingIndicator } from "./blocks";
+import { ApprovalCard, QuestionCard, ThinkingBlock, ToolCard, TypingIndicator } from "./blocks";
 import { Markdown } from "./markdown";
 import type { ContentBlock, SessionMessage, SessionUi } from "../../types";
 
@@ -61,6 +61,7 @@ export function MessageStream(props: { session: SessionUi }) {
     const s = props.session;
     s.runState;
     s.pendingApproval;
+    s.pendingQuestion;
     for (const m of s.messages) {
       for (const b of m.blocks) {
         b.content;
@@ -127,6 +128,10 @@ export function MessageStream(props: { session: SessionUi }) {
 
       <Show when={props.session.pendingApproval}>
         {(approval) => <ApprovalCard sessionId={props.session.info.id} approval={approval()} />}
+      </Show>
+
+      <Show when={props.session.pendingQuestion}>
+        {(question) => <QuestionCard sessionId={props.session.info.id} question={question()} />}
       </Show>
 
       <Show when={showUsage()}>

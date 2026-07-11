@@ -15,10 +15,15 @@ const MODEL: &str = "claude-sonnet-4-5";
 /// Read-only exploration only — no Bash, no edits.
 const READ_ONLY_TOOLS: &str = "Read,Glob,Grep";
 const STDERR_SNIPPET_LEN: usize = 500;
+/// Max retries for transient failures (network issues, rate limits, etc).
+const MAX_RETRIES: u32 = 3;
+/// Initial retry delay in milliseconds.
+const RETRY_DELAY_MS: u64 = 1000;
 
 /// Run `claude -p <prompt> --output-format json` in `repo_root` and return the
 /// extracted result text. The binary resolves via the login-shell PATH so
-/// desktop-launched apps find the right install.
+/// desktop-launched apps find the right install. Retries up to MAX_RETRIES times
+/// on transient failures with exponential backoff.
 pub(crate) async fn run_headless_claude(repo_root: &Path, prompt: &str) -> Result<String> {
     // `locate_claude` checks the login-shell PATH, then the well-known install
     // locations (native installer, legacy local, Homebrew); a `None` here is
@@ -32,7 +37,50 @@ pub(crate) async fn run_headless_claude(repo_root: &Path, prompt: &str) -> Resul
         )
     })?;
 
-    let mut cmd = tokio::process::Command::new(&claude);
+    let mut last_error = None;
+    for attempt in 0..=MAX_RETRIES {
+        if attempt > 0 {
+            let delay = Duration::from_millis(RETRY_DELAY_MS * 2u64.pow(attempt - 1));
+            tracing::info!(
+                attempt,
+                delay_ms = delay.as_millis(),
+                "retrying headless claude after failure"
+            );
+            tokio::time::sleep(delay).await;
+        }
+
+        match run_headless_claude_once(&claude, repo_root, prompt).await {
+            Ok(result) => return Ok(result),
+            Err(e) if is_transient_error(&e) && attempt < MAX_RETRIES => {
+                tracing::warn!(attempt, error = %e, "transient indexer failure, will retry");
+                last_error = Some(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| Error::Indexer("all retries exhausted".into())))
+}
+
+/// Check if an error is likely transient and worth retrying.
+fn is_transient_error(err: &Error) -> bool {
+    let msg = err.to_string().to_lowercase();
+    msg.contains("timeout")
+        || msg.contains("connection")
+        || msg.contains("network")
+        || msg.contains("rate limit")
+        || msg.contains("temporarily unavailable")
+        || msg.contains("503")
+        || msg.contains("504")
+}
+
+/// Single attempt at running headless claude (no retries).
+async fn run_headless_claude_once(
+    claude: &std::path::Path,
+    repo_root: &Path,
+    prompt: &str,
+) -> Result<String> {
+    let mut cmd = tokio::process::Command::new(claude);
     // The prompt is piped on stdin, not passed as a positional arg: `--allowedTools`
     // is variadic (`<tools...>`) and would otherwise greedily swallow the prompt.
     cmd.arg("-p")
@@ -69,10 +117,18 @@ pub(crate) async fn run_headless_claude(repo_root: &Path, prompt: &str) -> Resul
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        tracing::error!(
+            status = %output.status,
+            stderr = %stderr,
+            stdout_preview = %snippet(&stdout),
+            "headless claude failed"
+        );
         return Err(Error::Indexer(format!(
-            "claude exited with {}: {}",
+            "claude exited with {}: stderr={} stdout_preview={}",
             output.status,
-            snippet(stderr.trim())
+            snippet(stderr.trim()),
+            snippet(stdout.trim())
         )));
     }
 

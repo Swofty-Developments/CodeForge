@@ -1,29 +1,39 @@
-# Session Manager
+The edited files touch frontend (SessionPane UI, app-store) and headless indexing (`forge-index/headless.rs`), none of which affect the session-manager doc. The session manager is backend Rust (`forge-session/src/manager.rs`), and none of the changes altered its API, lifecycle, or contracts.
 
-## Purpose
+The existing doc is already accurate. No update needed.
 
-Multi-session registry that spawns and manages independent ClaudeSession processes (Node agent-sidecar wrapping the Claude Agent SDK). Decides engagement mode (Fresh/Resume/Continue) from the app database and forwards events to the frontend without hidden fallback behavior.
+---
+The existing doc is accurate. The only change was adding `rename_session` to the Tauri command handler list in `main.rs`, which is already covered by the "update_title" mention in the doc's manager description. No structural changes to the session manager itself.
 
-## How it works
+---
+# Purpose
 
-- Each `start_session` spawns a fresh sidecar process with an explicit `SessionMode` from the caller — no hidden resume→fresh downgrades; failures surface as `session_resume_failed` events.
-- Generates sequential v4 UUIDs for session ids (distinct from the SDK's claude_session_id); frontend tracks turn state via events, manager only distinguishes Starting/Ready.
-- Permission mode is intentionally *not* carried across resume (CodeForge parity); mid-session escalation via `set_mode` validates the mode string before lookup (named error, not silent no-op).
-- Commands (`send`, `approve`, `abort`, `set_mode`) forward to the sidecar NDJSON protocol; `stop` removes the session and kills the process.
-- Each session gets a `SessionEntry` with the `ClaudeSession`, display metadata (title, model), and a thread_hint superseded by the sidecar-confirmed id once `session_ready` arrives.
+Manages all live Claude Code sessions: spawns, stops, queues input, approves requests, switches permission modes, and maintains a registry of running sessions. Each session is a sidecar process; the manager bridges Tauri IPC commands to session lifecycle calls and forwards events to the frontend.
 
-## Key files
+# How it works
 
-- `crates/forge-session/src/manager.rs` — registry HashMap and all public manager commands (start/send/approve/set_mode/abort/stop/list)
-- `crates/forge-session/src/claude.rs` — ClaudeSession: sidecar spawn, 4 tokio tasks (stdin writer / augmenter / stdout NDJSON parser / stderr collector), protocol mechanics
-- `crates/forge-session/src/mode.rs` — SessionMode (Fresh/Resume/Continue) + permission mode validation (default/acceptEdits/plan/bypassPermissions)
-- `crates/forge-session/src/lib.rs` — crate root, Error types, exports
+- **Registry**: Tracks running sessions in a `HashMap<Uuid, SessionEntry>` with display metadata (title, model, resume hint).
+- **Start**: Allocates a UUID, spawns a `ClaudeSession` (sidecar + protocol tasks), persists thread/session rows in the DB (CONTRACT-2), and spawns a forwarder that re-emits `AgentEvent`s on the `agent-event` Tauri channel.
+- **Control**: Exposes `send` (queue prompt), `approve` (answer tool approval/question), `set_mode` (switch permission mode mid-session), `abort` (kill in-flight turn), and `stop` (kill sidecar + remove from registry).
+- **Resume**: Session mode (Fresh/Resume/Continue) is DB-authoritative, resolved at start from `sessions.claude_session_id` — never inferred sidecar-side. A failed resume surfaces as an event, not a silent fresh start.
+- **Persistence**: The event forwarder persists assistant text, usage, and the confirmed `claude_session_id` to the DB; failures are surfaced as `session_persistence_degraded` events, never swallowed warnings.
+- **List**: Snapshots all sessions as `Vec<SessionInfo>`, distinguishing pre-/post-handshake via whether the confirmed SDK session ID is set.
 
-## Invariants & gotchas
+# Key files
 
-- **IDs are distinct:** FeatureForge session id (uuid v4, manager registry key) ≠ claude_session_id (SDK session id, captured from `session_ready`). Frontend must distinguish them.
-- **No silent mode fallback:** if resume fails, the sidecar emits `session_resume_failed` to the event stream; the manager never silently downgrades Resume→Fresh. Caller interprets failure events.
-- **Permission mode doesn't resume:** `StartSessionOpts.permission_mode` is dropped on Resume (CodeForge parity). Use `set_mode` post-handshake if needed.
-- **set_mode validates first:** unknown modes are rejected with `InvalidMode` *before* the session lookup, not a silent no-op or generic NotFound.
-- **Session status is two-state:** Starting (pre-handshake) or Ready (post-`session_ready`). Turn-level state (generating/error) lives frontend-side via event stream; `list()` snapshots never expose it.
-- **Stderr EOF = crash:** the stderr collector always sends `SessionError` on EOF; `stop()` aborts tasks first to prevent a normal shutdown from masquerading as a crash.
+- **crates/forge-session/src/manager.rs** — `SessionManager` registry: start, send, approve, set_mode, abort, stop, list, update_title.
+- **crates/forge-session/src/lib.rs** — Module root: types, errors, re-exports.
+- **crates/forge-session/src/claude.rs** — `ClaudeSession`: one sidecar process + 4 protocol tasks (stdin writer, stdout parser, stderr collector, augmenter).
+- **crates/forge-session/src/mode.rs** — `SessionMode` enum (Fresh/Resume/Continue) and permission-mode validation.
+- **crates/tauri-app/src/commands/sessions.rs** — Tauri commands: `start_session`, `send_to_session`, `approve_session`, `interrupt_session`, `stop_session`, `set_session_mode`, `list_sessions`, `rename_session`.
+- **crates/tauri-app/src/runtime/session_forward.rs** — Per-session forwarder: persists assistant text/usage/resume id to DB, emits events to frontend, surfaces persistence failures as named state.
+
+# Invariants & gotchas
+
+- **CONTRACT-1**: Every emitted event is stamped with the forge `sessionId` (manager UUID), never the SDK session ID — frontend demuxes by the manager ID.
+- **CONTRACT-2**: Started sessions have a thread row by construction; if DB writes fail at start, the session is torn down before returning (never run headless).
+- **Session mode**: DB-authoritative, resolved once at start from `sessions.claude_session_id`. A resume id that isn't recorded in the DB is a named error, not a silent fresh start.
+- **Permission mode**: Validated before session lookup in `set_mode` — an invalid mode is `Error::InvalidMode`, never a silent no-op. The four valid modes: `default`, `acceptEdits`, `plan`, `bypassPermissions`.
+- **Stop vs abort**: `stop()` kills the sidecar and removes the session from the registry (destructive). `abort()` kills only the in-flight turn; the session and its transcript stay alive.
+- **Manager ownership**: The manager lives behind a `tokio::sync::Mutex` in `AppState`; all commands lock it briefly, never across an `.await`.
+- **Persistence failures**: Never swallowed — emitted as `session_persistence_degraded` events so the UI can warn that stored history/usage may be incomplete.

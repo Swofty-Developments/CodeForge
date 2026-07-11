@@ -20,6 +20,12 @@ pub enum AgentEvent {
     TurnAborted { reason: String },
     /// The agent is requesting approval to execute a tool.
     ApprovalRequired { request_id: String, description: String },
+    /// The agent is asking the user a structured question (AskUserQuestion tool).
+    AskUserQuestion {
+        request_id: String,
+        /// The raw questions array from the SDK (rendered by the frontend).
+        questions: serde_json::Value,
+    },
     /// The session is ready to accept input.
     SessionReady {
         /// The Claude Agent SDK session ID (for resume), if available.

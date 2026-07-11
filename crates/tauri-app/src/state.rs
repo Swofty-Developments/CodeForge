@@ -21,6 +21,8 @@ pub struct RepoRuntime {
     pub repo_id: String,
     /// `timeline.subscribe()` → `timeline:event` forwarder; aborted on close.
     pub forwarder_task: tokio::task::JoinHandle<()>,
+    /// FZ-2 staleness poller → `index:status` emitter; aborted on close.
+    pub staleness_task: tokio::task::JoinHandle<()>,
     /// True while a reindex task holds the slot (one reindex per repo).
     pub reindexing: Arc<AtomicBool>,
 }

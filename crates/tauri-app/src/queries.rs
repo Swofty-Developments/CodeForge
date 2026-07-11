@@ -173,3 +173,51 @@ pub fn insert_usage_log(
     )?;
     Ok(())
 }
+
+/// A past session row (stopped, but resumable when claude_session_id is set).
+#[derive(Debug, Clone)]
+pub struct PastSession {
+    pub id: String,
+    pub thread_id: String,
+    pub claude_session_id: Option<String>,
+    pub title: String,
+    pub model: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// List past sessions for a repo (those with a `claude_session_id` — resumable).
+/// Ordered newest first, pulls from threads JOIN sessions. Live sessions (those
+/// in the SessionManager registry) must be filtered client-side or passed in as
+/// an exclusion list — the DB doesn't track which sessions are currently running.
+pub fn list_past_sessions(conn: &Connection, repo_id: &str) -> anyhow::Result<Vec<PastSession>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.thread_id, s.claude_session_id, t.title, s.model, s.created_at, t.updated_at
+         FROM sessions s
+         JOIN threads t ON s.thread_id = t.id
+         WHERE t.repo_id = ?1 AND s.claude_session_id IS NOT NULL
+         ORDER BY t.updated_at DESC",
+    )?;
+    let rows = stmt.query_map(params![repo_id], |row| {
+        Ok(PastSession {
+            id: row.get(0)?,
+            thread_id: row.get(1)?,
+            claude_session_id: row.get(2)?,
+            title: row.get(3)?,
+            model: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Update a thread's title (for session rename).
+pub fn update_thread_title(conn: &Connection, thread_id: &str, title: &str) -> anyhow::Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE threads SET title = ?1, updated_at = ?2 WHERE id = ?3",
+        params![title, now, thread_id],
+    )?;
+    Ok(())
+}

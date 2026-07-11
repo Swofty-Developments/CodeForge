@@ -3,7 +3,7 @@
  * mode / run-state), the streamed message view, and the composer. Layout/CSS live
  * in ./session/styles; the composer + slash menu + attachments live in Composer. */
 
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { appStore } from "../stores/app-store";
 import { MessageStream } from "./session/MessageStream";
 import { SessionHeader } from "./session/SessionHeader";
@@ -11,13 +11,15 @@ import { Composer } from "./session/Composer";
 import { closeSession, selectSession, startSessionWithModel } from "./session/local";
 import { injectSessionStyles } from "./session/styles";
 import { samePath } from "../stores/path";
-import type { PermissionMode, RunState, SessionUi } from "../types";
+import type { PastSession, PermissionMode, RunState, SessionUi } from "../types";
+import * as ipc from "../ipc";
 
 const MODEL_PRESETS: { value: string | null; name: string; desc: string }[] = [
   { value: null, name: "Default", desc: "CLI default model" },
   { value: "opus", name: "Opus", desc: "Most capable" },
   { value: "sonnet", name: "Sonnet", desc: "Fast + capable" },
   { value: "haiku", name: "Haiku", desc: "Fast + lightweight" },
+  { value: "fable", name: "Fable", desc: "Extended thinking" },
 ];
 
 function dotClass(runState: RunState): string {
@@ -37,6 +39,23 @@ export function SessionPane() {
   const [custom, setCustom] = createSignal("");
   // Mode for the NEXT session started here; an active session shows its own live mode.
   const [pendingMode, setPendingMode] = createSignal<PermissionMode>("default");
+  const [pastSessions, setPastSessions] = createSignal<PastSession[]>([]);
+  const [editingSessionId, setEditingSessionId] = createSignal<string | null>(null);
+  const [editingTitle, setEditingTitle] = createSignal("");
+
+  // Load past sessions when repo changes
+  createEffect(() => {
+    const repo = store.repo;
+    if (!repo) {
+      setPastSessions([]);
+      return;
+    }
+    void ipc.listPastSessions(repo.path).then((sessions) => {
+      // Filter out sessions that are currently live
+      const liveIds = new Set(store.sessions.map((s) => s.info.id));
+      setPastSessions(sessions.filter((s) => !liveIds.has(s.id)));
+    }).catch(console.error);
+  });
 
   // Only the active context's sessions are shown (W1: sessions are context-tagged).
   const visibleSessions = createMemo((): SessionUi[] =>
@@ -64,9 +83,11 @@ export function SessionPane() {
     await appStore.sendSessionInput(text);
   }
 
+  // Stop button = abort the in-flight turn; the chat stays. Closing the tab
+  // (sp-tab-close) is the destructive stopSession path.
   function onStop(): void {
     const s = active();
-    if (s) void appStore.stopSession(s.info.id);
+    if (s) void appStore.interruptSession(s.info.id);
   }
 
   function pickModel(model: string | null): void {
@@ -80,8 +101,44 @@ export function SessionPane() {
     if (m) pickModel(m);
   }
 
+  function startEdit(sessionId: string, currentTitle: string): void {
+    setEditingSessionId(sessionId);
+    setEditingTitle(currentTitle);
+  }
+
+  function cancelEdit(): void {
+    setEditingSessionId(null);
+    setEditingTitle("");
+  }
+
+  async function finishEdit(sessionId: string): Promise<void> {
+    const title = editingTitle().trim();
+    if (!title) {
+      cancelEdit();
+      return;
+    }
+    await appStore.renameSession(sessionId, title);
+    cancelEdit();
+  }
+
+  async function resumePastSession(claudeSessionId: string | null): Promise<void> {
+    if (!claudeSessionId) return;
+    await appStore.resumeSession(claudeSessionId);
+    // Refresh past sessions to remove the resumed one
+    const repo = store.repo;
+    if (repo) {
+      const sessions = await ipc.listPastSessions(repo.path);
+      const liveIds = new Set(store.sessions.map((s) => s.info.id));
+      setPastSessions(sessions.filter((s) => !liveIds.has(s.id)));
+    }
+  }
+
   return (
-    <div class="session-pane" style={{ width: `${store.sessionPaneWidth}px` }}>
+    <div
+      class="session-pane"
+      classList={{ "session-pane--fullscreen": store.sessionPaneFullscreen }}
+      style={{ width: `${store.sessionPaneWidth}px` }}
+    >
       <div class="sp-tabs">
         <div class="sp-tabs-scroll">
           <For each={visibleSessions()}>
@@ -90,10 +147,27 @@ export function SessionPane() {
                 class="sp-tab"
                 classList={{ "sp-tab--active": session.info.id === store.activeSessionId }}
                 onClick={() => selectSession(session.info.id)}
-                title={session.info.title}
+                onDblClick={() => startEdit(session.info.id, session.info.title)}
+                title={editingSessionId() === session.info.id ? "Editing..." : session.info.title}
               >
                 <span class={`status-dot ${dotClass(session.runState)}`} />
-                <span class="sp-tab-title">{session.info.title}</span>
+                <Show when={editingSessionId() === session.info.id} fallback={
+                  <span class="sp-tab-title">{session.info.title}</span>
+                }>
+                  <input
+                    class="sp-tab-edit"
+                    type="text"
+                    value={editingTitle()}
+                    onInput={(e) => setEditingTitle(e.currentTarget.value)}
+                    onBlur={() => void finishEdit(session.info.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void finishEdit(session.info.id);
+                      if (e.key === "Escape") cancelEdit();
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    ref={(el) => setTimeout(() => el.select(), 0)}
+                  />
+                </Show>
                 <button
                   class="sp-tab-close"
                   title="Stop session"
@@ -146,6 +220,24 @@ export function SessionPane() {
               </div>
             </Show>
           </div>
+          <button
+            class="sp-icon-btn"
+            title={store.sessionPaneFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            onClick={() => appStore.toggleSessionPaneFullscreen()}
+          >
+            <Show
+              when={store.sessionPaneFullscreen}
+              fallback={
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                </svg>
+              }
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+              </svg>
+            </Show>
+          </button>
           <button class="sp-icon-btn" title="Collapse pane" onClick={() => appStore.toggleSessionPane()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
               <path d="M13 18l6-6-6-6M6 18l6-6-6-6" />
@@ -163,11 +255,37 @@ export function SessionPane() {
           when={active()}
           fallback={
             <div class="sp-empty">
-              <div class="sp-empty-title">No session yet</div>
+              <div class="sp-empty-title">No active session</div>
               <div class="sp-empty-sub">
                 Ask for work below — a real <span class="sp-mono">claude</span> session starts
                 in this repo, with hooks feeding the timeline.
               </div>
+              <Show when={pastSessions().length > 0}>
+                <div class="sp-past-sessions">
+                  <div class="sp-past-title">Resume a session</div>
+                  <div class="sp-past-list">
+                    <For each={pastSessions()}>
+                      {(past) => (
+                        <button
+                          class="sp-past-item"
+                          onClick={() => void resumePastSession(past.claudeSessionId)}
+                          title={`Resume "${past.title}"`}
+                        >
+                          <div class="sp-past-item-title">{past.title}</div>
+                          <div class="sp-past-item-meta">
+                            <Show when={past.model}>
+                              <span class="sp-past-item-model">{past.model}</span>
+                            </Show>
+                            <span class="sp-past-item-date">
+                              {new Date(past.updatedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              </Show>
             </div>
           }
         >

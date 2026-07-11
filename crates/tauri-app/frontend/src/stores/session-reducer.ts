@@ -213,6 +213,14 @@ export function createAgentEventHandler(
           };
         });
         break;
+      case "ask_user_question":
+        mutate((s) => {
+          s.pendingQuestion = {
+            requestId: payload.requestId ?? "",
+            questions: payload.questions ?? [],
+          };
+        });
+        break;
       default:
         break;
     }

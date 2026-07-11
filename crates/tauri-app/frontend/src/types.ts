@@ -233,6 +233,16 @@ export interface SessionInfo {
   status: SessionStatus;
 }
 
+export interface PastSession {
+  id: string;
+  threadId: string;
+  claudeSessionId: string | null;
+  title: string;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StartSessionOpts {
   repoPath: string;
   model?: string;
@@ -308,6 +318,7 @@ export type AgentEventType =
   | "turn_completed"
   | "turn_aborted"
   | "approval_required"
+  | "ask_user_question"
   | "session_ready"
   | "slash_commands"
   | "session_error"
@@ -343,6 +354,8 @@ export interface AgentEventPayload {
   isError?: boolean;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Structured questions array for ask_user_question events. */
+  questions?: unknown;
   commands?: string[];
 }
 
@@ -405,6 +418,7 @@ export interface SessionUi {
   runState: RunState;
   messages: SessionMessage[];
   pendingApproval: { requestId: string; description: string } | null;
+  pendingQuestion: { requestId: string; questions: unknown } | null;
   slashCommands: string[];
   claudeSessionId: string | null;
   usage: SessionUsage;

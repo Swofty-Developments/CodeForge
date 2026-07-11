@@ -146,9 +146,9 @@ pub(crate) fn parse_sidecar_line(line: &str) -> Vec<AgentEvent> {
             request_id: str_of(obj, "requestId"),
             description: format!("{}: {}", str_of(obj, "toolName"), pretty(obj.get("input"))),
         }],
-        "ask_user_question" => vec![AgentEvent::ApprovalRequired {
+        "ask_user_question" => vec![AgentEvent::AskUserQuestion {
             request_id: str_of(obj, "requestId"),
-            description: format!("Question: {}", pretty(obj.get("questions"))),
+            questions: obj.get("questions").cloned().unwrap_or(serde_json::json!([])),
         }],
         "usage" => vec![AgentEvent::UsageReport {
             input_tokens: u64_of(obj, "inputTokens"),
@@ -251,9 +251,11 @@ mod tests {
             other => panic!("wrong event: {other:?}"),
         }
         match one(r#"{"type":"ask_user_question","requestId":"2","questions":[{"question":"Which one?"}]}"#) {
-            AgentEvent::ApprovalRequired { request_id, description } => {
+            AgentEvent::AskUserQuestion { request_id, questions } => {
                 assert_eq!(request_id, "2");
-                assert!(description.starts_with("Question: ") && description.contains("Which one?"));
+                assert!(questions.is_array());
+                let q = &questions.as_array().unwrap()[0];
+                assert_eq!(q["question"], "Which one?");
             }
             other => panic!("wrong event: {other:?}"),
         }

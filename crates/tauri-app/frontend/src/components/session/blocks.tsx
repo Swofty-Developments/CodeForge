@@ -1,7 +1,7 @@
 /* Stream building blocks: tool cards, thinking blocks, typing indicator, and
  * the approval-request card. Status tints follow the semantic alpha formula. */
 
-import { Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { appStore } from "../../stores/app-store";
 import type { ContentBlock } from "../../types";
 
@@ -97,7 +97,14 @@ export function ToolCard(props: { block: ContentBlock }) {
 
 export function ThinkingBlock(props: { block: ContentBlock; streaming: boolean }) {
   const [open, setOpen] = createSignal(false);
-  const preview = () => props.block.content.replace(/\s+/g, " ").slice(0, 100);
+  const flat = () => props.block.content.replace(/\s+/g, " ").trim();
+  // Done: the opening of the thought. Streaming: a live tail of what's being
+  // reasoned right now — never a bare row of dots with the content hidden.
+  const preview = () => flat().slice(0, 100);
+  const liveTail = () => {
+    const f = flat();
+    return f.length > 100 ? `…${f.slice(-100)}` : f;
+  };
 
   return (
     <div class="tb" classList={{ "tb--streaming": props.streaming }}>
@@ -108,6 +115,7 @@ export function ThinkingBlock(props: { block: ContentBlock; streaming: boolean }
           when={props.streaming}
           fallback={<span class="tb-preview">{preview()}</span>}
         >
+          <span class="tb-preview">{liveTail()}</span>
           <span class="tb-dots"><span /><span /><span /></span>
         </Show>
       </button>
@@ -169,6 +177,113 @@ export function ApprovalCard(props: {
       <div class="ac-actions">
         <button class="ac-deny" disabled={busy()} onClick={() => void respond(false)}>Deny</button>
         <button class="ac-approve" disabled={busy()} onClick={() => void respond(true)}>Approve</button>
+      </div>
+    </div>
+  );
+}
+
+export function QuestionCard(props: {
+  sessionId: string;
+  question: { requestId: string; questions: unknown };
+}) {
+  const [busy, setBusy] = createSignal(false);
+  // Per-question selected labels (array — multiSelect questions allow several).
+  const [selectedAnswers, setSelectedAnswers] = createSignal<Record<number, string[]>>({});
+
+  const questions = createMemo(() => {
+    const q = props.question.questions as any[];
+    return Array.isArray(q) ? q : [];
+  });
+
+  function selectOption(questionIndex: number, optionLabel: string, multiSelect: boolean) {
+    setSelectedAnswers((prev) => {
+      const current = prev[questionIndex] ?? [];
+      if (!multiSelect) return { ...prev, [questionIndex]: [optionLabel] };
+      // multiSelect: toggle
+      const next = current.includes(optionLabel)
+        ? current.filter((l) => l !== optionLabel)
+        : [...current, optionLabel];
+      return { ...prev, [questionIndex]: next };
+    });
+  }
+
+  async function respond(approve: boolean): Promise<void> {
+    if (busy()) return;
+    setBusy(true);
+    // Agent SDK contract: answers keyed by question TEXT, valued by the
+    // selected option label(s) (", "-joined for multiSelect). Approving
+    // without answers makes the tool report "The user did not answer the
+    // questions." — so only build them on approve.
+    let answers: Record<string, string> | undefined;
+    if (approve) {
+      answers = {};
+      const sel = selectedAnswers();
+      questions().forEach((q: any, i: number) => {
+        answers![q.question ?? String(i)] = (sel[i] ?? []).join(", ");
+      });
+    }
+    // Clear pendingQuestion optimistically; approveRequest clears it again defensively.
+    const idx = appStore.store.sessions.findIndex((s) => s.info.id === props.sessionId);
+    if (idx >= 0) {
+      appStore.setStore("sessions", idx, "pendingQuestion", null);
+    }
+    await appStore.approveRequest(props.sessionId, props.question.requestId, approve, answers);
+  }
+
+  const allAnswered = createMemo(() => {
+    const qs = questions();
+    if (qs.length === 0) return false;
+    for (let i = 0; i < qs.length; i++) {
+      if (!selectedAnswers()[i]?.length) return false;
+    }
+    return true;
+  });
+
+  return (
+    <div class="approval-card question-card">
+      <div class="ac-header">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span class="ac-title">Claude needs your input</span>
+      </div>
+      <div class="qc-questions">
+        <For each={questions()}>
+          {(q: any, idx) => (
+            <div class="qc-question">
+              <div class="qc-question-text">{q.question || "Question"}</div>
+              <Show when={q.multiSelect}>
+                <div class="qc-multiselect-hint">Select all that apply</div>
+              </Show>
+              <div class="qc-options">
+                <For each={q.options || []}>
+                  {(opt: any) => (
+                    <button
+                      class="qc-option"
+                      classList={{
+                        "qc-option--selected": !!selectedAnswers()[idx()]?.includes(opt.label),
+                      }}
+                      onClick={() => selectOption(idx(), opt.label, !!q.multiSelect)}
+                    >
+                      <span class="qc-option-label">{opt.label}</span>
+                      <Show when={opt.description}>
+                        <span class="qc-option-desc">{opt.description}</span>
+                      </Show>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+          )}
+        </For>
+      </div>
+      <div class="ac-actions">
+        <button class="ac-deny" disabled={busy()} onClick={() => void respond(false)}>Cancel</button>
+        <button class="ac-approve" disabled={busy() || !allAnswered()} onClick={() => void respond(true)}>
+          Submit
+        </button>
       </div>
     </div>
   );

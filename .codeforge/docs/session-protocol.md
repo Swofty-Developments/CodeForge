@@ -1,27 +1,33 @@
+All edited files are in the Tauri frontend (TypeScript/UI) and the headless indexing module. None touch the session-protocol feature's core Rust files (protocol.rs, payload.rs, types.rs, mode.rs). The living doc remains accurate.
+
+---
 # Session Protocol
 
-## Purpose
+**Purpose**
 
-Bidirectional NDJSON protocol between the Rust daemon and a Node.js agent sidecar. Rust sends `query` and approval response commands over stdin; the sidecar emits 17+ streaming event types over stdout to drive the UI.
+Defines Rust types and NDJSON codec for bidirectional sidecar communication: stdin commands (query, approval, mode-switch, abort) and stdout event streams (AgentEvent variants). Handles mode inference from DB state and stamps it into the first query.
 
-## How it works
+**How it works**
 
-- **One-time init augmentation**: The first `{"type":"query",...}` command gets `cwd`, `model`, `permissionMode`, and engagement mode (`fresh`/`resume`) injected from Rust state; subsequent queries in the same sidecar process are stamped `mode: continue` to keep the live SDK conversation going.
-- **Parse sidecar stdout**: Each NDJSON line maps to zero or more `AgentEvent`s (text/thinking deltas, turn lifecycle, tool calls, usage, errors). Unparseable lines are skipped, never fatal—the SDK may print stray non-JSON.
-- **Flat Tauri payload**: `AgentEvent` enums convert to `AgentEventPayload` (discriminated by `eventType` string, optional fields) for frontend demux by `sessionId`.
-- **Session resume**: `SessionMode::Resume` stamps `resumeSessionId` on the first query; if the SDK can't honor it, `SessionResumeFailed` fires—no silent downgrade.
-- **Empty delta filtering**: Zero-length text/thinking deltas are dropped at parse time to avoid no-op renders downstream.
+- `parse_sidecar_line` deserializes stdout NDJSON → `AgentEvent` enum (15 variants: content_delta, turn_started, tool_use_start, etc.); unparseable lines are skipped, never fatal.
+- `augment_query_if_needed` intercepts query commands, consuming init params (cwd, model, permissionMode, mode) once for the first query, then stamping `SessionMode::ContinueInProcess` on every follow-up.
+- `SessionMode` (Fresh | Resume{claude_session_id} | ContinueInProcess) is DB-authoritative — Rust decides the engagement mode once from `sessions.claude_session_id`, not sidecar-inferred retry logic.
+- First query gets `mode: resume` + `resumeSessionId` or `mode: fresh`; all subsequent queries in the same sidecar get `mode: continue`.
+- `AgentEventPayload` is the flat Tauri IPC shape (camelCase, skip_serializing_if none) mapped from `AgentEvent`; frontend demuxes by sessionId and switches on eventType.
+- Supports 4 SDK permission modes (default, acceptEdits, plan, bypassPermissions) validated against a const allowlist.
 
-## Key files
+**Key files**
 
-- `crates/forge-session/src/protocol.rs` — augments first query with init params, parses sidecar NDJSON into `AgentEvent`s
-- `crates/forge-session/src/payload.rs` — flat Tauri wire format for frontend event demux
-- `crates/forge-session/src/types.rs` — `AgentEvent` enum (17 variants for deltas, tool lifecycle, usage, errors)
+- `protocol.rs` — NDJSON parsers (`parse_sidecar_line` → AgentEvent) and query augmentation (`augment_query_if_needed` stamps mode/init params into first query).
+- `mode.rs` — SessionMode enum (Fresh, Resume, ContinueInProcess) and `wire()` → "fresh"|"resume"|"continue".
+- `types.rs` — AgentEvent enum (15 tagged variants: content_delta, turn_started, tool_use_start, approval_required, etc.).
+- `payload.rs` — AgentEventPayload flat struct for Tauri IPC; `from_event()` maps AgentEvent → camelCase shape, `persistence_degraded()` for Rust-originated errors.
 
-## Invariants & gotchas
+**Invariants & gotchas**
 
-- **Init consumed exactly once**: `SidecarInitParams` wrapped in `Mutex<Option<_>>` fires on the first `query`, then becomes `None`; follow-up queries get `mode: continue` with no cwd/model.
-- **Explicit fields win**: User-supplied `model`/`permissionMode` in a query command override init params (`entry().or_insert`); `cwd` and `mode` always stamped by Rust.
-- **Non-query passthrough**: Commands of any type other than `query` (e.g., `abort`) are not augmented and do not consume the init slot.
-- **Turn lifecycle guarantee**: `turn_completed` always fires (sidecar's `finally` block), even on errors or aborts.
-- **Rust-originated events**: `session_persistence_degraded` exists only in Rust (failed DB write); it is never a sidecar out-event.
+- Init params are consumed exactly once on first query (Mutex<Option>); non-query stdin passes through without consuming the slot.
+- Empty text_delta and thinking_delta are dropped in `parse_sidecar_line` to avoid no-op frontend renders.
+- Unknown sidecar event types are debug-logged and skipped, never fatal — the SDK may evolve or print stray non-JSON.
+- `SessionMode::Resume` failure → `SessionResumeFailed` event; never silent downgrade to Fresh.
+- Permission mode strings must match one of 4 consts or are rejected at command time, not sidecar time.
+- The wire `mode` field is distinct from `permissionMode` — one controls SDK engagement (fresh/resume/continue), the other controls approval policy.
