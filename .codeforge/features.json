@@ -1,8 +1,32 @@
 [
   {
-    "slug": "app-db",
+    "slug": "activity-badges",
+    "name": "Activity Badges",
+    "description": "Per-feature event counters shown as badges in the sidebar tree. Incremented on live timeline:event, capped at 99+, and cleared when the feature is selected.",
+    "entryPoints": [
+      "crates/tauri-app/frontend/src/components/sidebar/activity.ts"
+    ],
+    "files": [
+      {
+        "path": "crates/tauri-app/frontend/src/components/sidebar/activity.ts",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "badges",
+      "activity",
+      "ui"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "tauri-app/frontend/sidebar",
+    "updatedAt": "2026-07-10T03:06:00.318129Z"
+  },
+  {
+    "slug": "app-database",
     "name": "App Database",
-    "description": "SQLite database at ~/.codeforge/codeforge.db tracking repos, sessions, worktrees with WAL mode and idempotent migrations.",
+    "description": "SQLite database at ~/.codeforge/codeforge.db tracking repos (path, name, indexed_at), threads (repo_id FK), and sessions (thread_id FK, claude_session_id, title). Owns indexed_at as the source of truth.",
     "entryPoints": [
       "crates/tauri-app/src/db.rs"
     ],
@@ -14,29 +38,29 @@
       },
       {
         "path": "crates/tauri-app/src/migrations.rs",
-        "role": "support",
+        "role": "core",
         "pinned": false
       },
       {
         "path": "crates/tauri-app/src/queries.rs",
-        "role": "support",
+        "role": "core",
         "pinned": false
       }
     ],
     "tags": [
       "sqlite",
-      "persistence",
-      "migrations"
+      "database",
+      "persistence"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/persistence",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/database",
+    "updatedAt": "2026-07-10T03:06:00.318132Z"
   },
   {
     "slug": "app-shell",
     "name": "App Shell",
-    "description": "Root React component with sidebar, main panel, session pane, command palette, and keyboard shortcuts (Cmd+K, Cmd+\\, Cmd+J, view hotkeys, Escape).",
+    "description": "Top-level Tauri + SolidJS layout: TitleBar, WorktreeTabs, Sidebar (feature tree), main panel (TabBar + view switcher + SessionPane), StatusBar, and CommandPalette. Wires keyboard shortcuts and drag-resize handles.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/App.tsx"
     ],
@@ -53,97 +77,121 @@
       }
     ],
     "tags": [
-      "react",
       "ui",
-      "shell"
+      "shell",
+      "layout"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/shell",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318133Z"
   },
   {
-    "slug": "app-state",
-    "name": "App State",
-    "description": "Global Tauri app state holding the SQLite DB, per-repo RepoRuntime registry, SessionManager, and TerminalManager behind tokio::sync::Mutex.",
+    "slug": "branch-listing",
+    "name": "Branch Listing",
+    "description": "Enumerates local and remote-tracking branches via git for-each-ref, cross-references them against git worktree list to populate checked_out_at, and marks the HEAD branch.",
     "entryPoints": [
-      "crates/tauri-app/src/state.rs"
+      "crates/forge-git/src/branches.rs"
     ],
     "files": [
       {
-        "path": "crates/tauri-app/src/state.rs",
+        "path": "crates/forge-git/src/branches.rs",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/src/main.rs",
-        "role": "support",
+        "path": "crates/forge-git/src/branches_tests.rs",
+        "role": "test",
         "pinned": false
       }
     ],
     "tags": [
-      "state",
-      "tauri",
-      "lifecycle"
+      "git",
+      "branches",
+      "worktrees"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/state",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-git/branches",
+    "updatedAt": "2026-07-10T03:06:00.318133Z"
   },
   {
-    "slug": "app-store",
-    "name": "App Store",
-    "description": "Global Zustand store holding features, sessions, diff, timeline, active view, sidebar/session pane widths, and palette state with IPC-backed actions.",
+    "slug": "claude-session-sidecar",
+    "name": "Claude Session Sidecar",
+    "description": "Node.js sidecar wrapping @anthropic-ai/claude-agent-sdk. Speaks NDJSON over stdin/stdout, manages one Claude session per process, and forwards events (block_start, approval_needed, etc.) to the Rust runtime.",
     "entryPoints": [
-      "crates/tauri-app/frontend/src/stores/app-store.ts"
+      "crates/tauri-app/agent-sidecar/index.mjs"
     ],
     "files": [
       {
-        "path": "crates/tauri-app/frontend/src/stores/app-store.ts",
+        "path": "crates/tauri-app/agent-sidecar/index.mjs",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/stores/data-slice.ts",
-        "role": "support",
+        "path": "crates/forge-session/src/claude.rs",
+        "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/stores/session-slice.ts",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/stores/context-slice.ts",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/stores/terminal-slice.ts",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/stores/session-reducer.ts",
-        "role": "support",
+        "path": "crates/forge-session/src/protocol.rs",
+        "role": "core",
         "pinned": false
       }
     ],
     "tags": [
-      "state",
-      "zustand",
-      "store"
+      "sidecar",
+      "node",
+      "sdk"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/frontend/state",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-session/sidecar",
+    "updatedAt": "2026-07-10T03:06:00.318133Z"
+  },
+  {
+    "slug": "cold-start-indexing",
+    "name": "Cold-Start Indexing",
+    "description": "Headless claude -p decomposition pass that converts an unknown repo into a feature map. Spawns read-only CLI sessions with strict JSON output, validates candidate features, and writes living docs concurrently.",
+    "entryPoints": [
+      "crates/forge-index/src/indexer.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/forge-index/src/indexer.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-index/src/headless.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-index/src/prompt.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-index/src/parse.rs",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "indexing",
+      "claude",
+      "decomposition"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "forge-index/indexing",
+    "updatedAt": "2026-07-10T03:06:00.318134Z"
   },
   {
     "slug": "command-palette",
     "name": "Command Palette",
-    "description": "Cmd+K fuzzy-search palette over features, worktrees, and actions with keyboard nav, Escape to close, and instant filter.",
+    "description": "Cmd+K fuzzy-search palette for repo actions: open repo, reindex, create worktree, start session, and view switching. Scores by prefix match and substring proximity.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/CommandPalette.tsx"
     ],
@@ -157,17 +205,225 @@
     "tags": [
       "palette",
       "search",
+      "commands"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "tauri-app/frontend/palette",
+    "updatedAt": "2026-07-10T03:06:00.318135Z"
+  },
+  {
+    "slug": "composer",
+    "name": "Composer",
+    "description": "Multi-line text input at the bottom of the session pane. Supports Shift+Enter for newlines, Enter to submit, slash-command autocomplete, and composer-prefill from Ask Claude actions.",
+    "entryPoints": [
+      "crates/tauri-app/frontend/src/components/session/Composer.tsx"
+    ],
+    "files": [
+      {
+        "path": "crates/tauri-app/frontend/src/components/session/Composer.tsx",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/session/SlashMenu.tsx",
+        "role": "support",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/session/styles-composer.ts",
+        "role": "support",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "composer",
+      "input",
       "ui"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/frontend/chrome",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/frontend/session",
+    "updatedAt": "2026-07-10T03:06:00.318135Z"
   },
   {
-    "slug": "core-types",
-    "name": "Core Domain Types",
-    "description": "Shared domain types crossing the Tauri IPC boundary: Feature, TimelineEvent, DiffByFeature, SessionInfo, Worktree. Serde-serialized with camelCase.",
+    "slug": "context-slice",
+    "name": "Context Slice",
+    "description": "Multi-context state model. Tracks all open contexts (base + worktrees) as RepoContext entries, keyed by state.path. Derives the active repo getter from activeContextPath so existing views work unchanged.",
+    "entryPoints": [
+      "crates/tauri-app/frontend/src/stores/context-slice.ts"
+    ],
+    "files": [
+      {
+        "path": "crates/tauri-app/frontend/src/stores/context-slice.ts",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "state",
+      "contexts",
+      "worktrees"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "tauri-app/frontend/state",
+    "updatedAt": "2026-07-10T03:06:00.318136Z"
+  },
+  {
+    "slug": "daemon-http-server",
+    "name": "Daemon HTTP Server",
+    "description": "Per-repo local HTTP daemon listening on 127.0.0.1:0. Serves hook payloads from forward.sh, MCP queries, and daemon status. Writes port/pid to .codeforge/runtime/daemon.json.",
+    "entryPoints": [
+      "crates/forge-daemon/src/lib.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/forge-daemon/src/lib.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-daemon/src/http.rs",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "http",
+      "daemon",
+      "server"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "forge-daemon/http",
+    "updatedAt": "2026-07-10T03:06:00.318137Z"
+  },
+  {
+    "slug": "data-slice",
+    "name": "Data Slice",
+    "description": "Per-context data loads. Fetches features, timeline, diff, and feature docs scoped to the active repo context. Invalidates stale data when the active context switches.",
+    "entryPoints": [
+      "crates/tauri-app/frontend/src/stores/data-slice.ts"
+    ],
+    "files": [
+      {
+        "path": "crates/tauri-app/frontend/src/stores/data-slice.ts",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "state",
+      "data",
+      "loading"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "tauri-app/frontend/state",
+    "updatedAt": "2026-07-10T03:06:00.318137Z"
+  },
+  {
+    "slug": "diff-by-feature-grouping",
+    "name": "Diff by Feature Grouping",
+    "description": "Groups pending file changes by the features they belong to. Files in N features appear in each group with shared:true; unmapped files land in a synthetic Unmapped group.",
+    "entryPoints": [
+      "crates/forge-git/src/group.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/forge-git/src/group.rs",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "grouping",
+      "diff",
+      "features"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "forge-git/grouping",
+    "updatedAt": "2026-07-10T03:06:00.318138Z"
+  },
+  {
+    "slug": "diff-review-view",
+    "name": "Diff Review View",
+    "description": "Feature-grouped diff review accordion. Staged+unstaged+untracked diffs are parsed into hunks and grouped by feature. Files in multiple features appear under each with shared:true. Unmapped files land in a synthetic group.",
+    "entryPoints": [
+      "crates/tauri-app/frontend/src/views/DiffReview.tsx"
+    ],
+    "files": [
+      {
+        "path": "crates/tauri-app/frontend/src/views/DiffReview.tsx",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/diff/DiffFeatureGroup.tsx",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/diff/FileDiffRow.tsx",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/diff/DiffHunks.tsx",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/diff/diff-utils.ts",
+        "role": "support",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "diff",
+      "review",
+      "grouping"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "tauri-app/frontend/views",
+    "updatedAt": "2026-07-10T03:06:00.318138Z"
+  },
+  {
+    "slug": "doc-refresh-worker",
+    "name": "Doc Refresh Worker",
+    "description": "Living-doc auto-refresh flywheel. Listens for SessionEnded timeline events, reconstructs the turn's edited files, refreshes touched features' docs via headless claude, and records DocUpdated outcomes.",
+    "entryPoints": [
+      "crates/forge-index/src/refresh.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/forge-index/src/refresh.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-daemon/src/doc_refresh.rs",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "docs",
+      "refresh",
+      "automation"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "forge-index/docs",
+    "updatedAt": "2026-07-10T03:06:00.318139Z"
+  },
+  {
+    "slug": "domain-models",
+    "name": "Domain Models",
+    "description": "Core domain types and IPC contracts. Defines Feature, TimelineEvent, DiffByFeature, SessionInfo, RepoState, and their serde mappings across the Rust-TypeScript boundary.",
     "entryPoints": [
       "crates/forge-core/src/lib.rs"
     ],
@@ -210,144 +466,42 @@
     ],
     "tags": [
       "types",
-      "ipc",
-      "serde"
+      "serde",
+      "ipc"
     ],
     "pinned": false,
     "color": null,
     "group": "forge-core",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
-    "slug": "daemon-hooks",
-    "name": "Git Hook Ingestion",
-    "description": "Receives POST /hooks calls from .codeforge/hooks/forward.sh, parses tool use / session end events, and triggers doc refresh flywheel.",
+    "slug": "feature-color-picker",
+    "name": "Feature Color Picker",
+    "description": "Per-feature color override for graph nodes. Stores hex colors on Feature.color; null falls back to the default palette. Colors are persisted to features.json and survive re-index when pinned.",
     "entryPoints": [
-      "crates/forge-daemon/src/hooks.rs"
+      "crates/tauri-app/src/runtime/feature_color.rs"
     ],
     "files": [
       {
-        "path": "crates/forge-daemon/src/hooks.rs",
+        "path": "crates/tauri-app/src/runtime/feature_color.rs",
         "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-daemon/src/ingest.rs",
-        "role": "support",
         "pinned": false
       }
     ],
     "tags": [
-      "hooks",
-      "ingestion",
-      "events"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "forge-daemon/http",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "daemon-http",
-    "name": "Per-Repo HTTP Daemon",
-    "description": "Axum server bound to 127.0.0.1:0 receiving hooks and serving queries. Port written to .codeforge/runtime/daemon.json for external access.",
-    "entryPoints": [
-      "crates/forge-daemon/src/http.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/forge-daemon/src/http.rs",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-daemon/src/lib.rs",
-        "role": "support",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "http",
-      "daemon",
-      "axum"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "forge-daemon/http",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "diff-review",
-    "name": "Diff Review View",
-    "description": "Pending changes grouped by feature with sticky header, total +/- counts, accordion per group, and unmapped bucket always last.",
-    "entryPoints": [
-      "crates/tauri-app/frontend/src/views/DiffReview.tsx"
-    ],
-    "files": [
-      {
-        "path": "crates/tauri-app/frontend/src/views/DiffReview.tsx",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/components/diff/DiffFeatureGroup.tsx",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/components/diff/FileDiffRow.tsx",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/components/diff/DiffHunks.tsx",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/components/diff/diff-utils.ts",
-        "role": "support",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "diff",
-      "review",
+      "colors",
+      "graph",
       "ui"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/frontend/views",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/runtime/colors",
+    "updatedAt": "2026-07-10T03:06:00.318154Z"
   },
   {
-    "slug": "feature-commands",
-    "name": "Feature IPC Commands",
-    "description": "Tauri commands for get_features, get_feature, get_feature_doc, pin_feature, update_feature, set_feature_color exposed to the frontend.",
-    "entryPoints": [
-      "crates/tauri-app/src/commands/features.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/tauri-app/src/commands/features.rs",
-        "role": "core",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "ipc",
-      "commands",
-      "features"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "tauri-app/commands",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "feature-detail",
+    "slug": "feature-detail-view",
     "name": "Feature Detail View",
-    "description": "Main view showing one feature's description, entry points, files, recent activity timeline, and living doc with collapsible sections.",
+    "description": "Main view for a selected feature. Shows inline-editable name/description, entry points (clickable to open in editor), files grouped by role, living doc markdown, and recent activity with an Ask Claude hand-off.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/views/FeatureDetail.tsx"
     ],
@@ -359,17 +513,17 @@
       },
       {
         "path": "crates/tauri-app/frontend/src/components/feature/CollapsibleSection.tsx",
-        "role": "support",
+        "role": "core",
         "pinned": false
       },
       {
         "path": "crates/tauri-app/frontend/src/components/feature/FilesSection.tsx",
-        "role": "support",
+        "role": "core",
         "pinned": false
       },
       {
         "path": "crates/tauri-app/frontend/src/components/feature/RecentActivity.tsx",
-        "role": "support",
+        "role": "core",
         "pinned": false
       },
       {
@@ -384,19 +538,53 @@
       }
     ],
     "tags": [
+      "feature",
       "detail",
-      "view",
       "ui"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/views",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318154Z"
   },
   {
-    "slug": "feature-sidebar",
-    "name": "Feature Sidebar",
-    "description": "Left sidebar rendering the feature tree with hierarchical groups, pinned features, activity badges, collapse state, and recent commit times.",
+    "slug": "feature-index-storage",
+    "name": "Feature Index Storage",
+    "description": "In-memory feature index backed by .codeforge/features.json. Handles load/save, slug-based lookup, pinning, patching, and merge-reindex logic that preserves pinned entries.",
+    "entryPoints": [
+      "crates/forge-index/src/lib.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/forge-index/src/lib.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-index/src/merge.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-index/src/meta.rs",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "persistence",
+      "features",
+      "json"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "forge-index/storage",
+    "updatedAt": "2026-07-10T03:06:00.318155Z"
+  },
+  {
+    "slug": "feature-tree-sidebar",
+    "name": "Feature Tree Sidebar",
+    "description": "Left sidebar rendering the nested feature tree grouped by hierarchy. Shows activity badges, pinned stars, and time-since-last-update. Supports collapse/expand, selection, and context menus.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/Sidebar.tsx"
     ],
@@ -418,7 +606,7 @@
       },
       {
         "path": "crates/tauri-app/frontend/src/components/sidebar/tree.ts",
-        "role": "support",
+        "role": "core",
         "pinned": false
       },
       {
@@ -450,40 +638,12 @@
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/sidebar",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318156Z"
   },
   {
-    "slug": "git-branches",
-    "name": "Branch Listing",
-    "description": "Lists local and remote-tracking branches via git branch --list and git for-each-ref, with ahead/behind counts and checkout status.",
-    "entryPoints": [
-      "crates/forge-git/src/branches.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/forge-git/src/branches.rs",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-git/src/branches_tests.rs",
-        "role": "test",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "git",
-      "branches"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "forge-git/worktree",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "git-diff",
+    "slug": "git-diff-extraction",
     "name": "Git Diff Extraction",
-    "description": "Shells out to git diff HEAD and git status --porcelain=v2 to extract pending changes, parse hunks, and group by feature via the classifier.",
+    "description": "Shells out to git diff HEAD and git status --porcelain=v2, parses unified diff hunks, synthesizes all-added diffs for untracked text files, and caps total diff lines at a hard limit.",
     "entryPoints": [
       "crates/forge-git/src/lib.rs"
     ],
@@ -499,23 +659,18 @@
         "pinned": false
       },
       {
-        "path": "crates/forge-git/src/group.rs",
+        "path": "crates/forge-git/src/status.rs",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/forge-git/src/status.rs",
-        "role": "support",
-        "pinned": false
-      },
-      {
         "path": "crates/forge-git/src/untracked.rs",
-        "role": "support",
+        "role": "core",
         "pinned": false
       },
       {
         "path": "crates/forge-git/src/truncate.rs",
-        "role": "support",
+        "role": "core",
         "pinned": false
       }
     ],
@@ -527,51 +682,56 @@
     "pinned": false,
     "color": null,
     "group": "forge-git/diff",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318156Z"
   },
   {
-    "slug": "git-worktree",
-    "name": "Git Worktree Management",
-    "description": "Creates, lists, removes, and merges git worktrees via CLI. Detached HEAD, no merge-base, and conflicts are named states, not silent fallbacks.",
+    "slug": "global-app-store",
+    "name": "Global App Store",
+    "description": "Single createRoot(createStore) singleton holding all UI state. Actions are factored into slices: session-slice (agent events), context-slice (multi-context model), data-slice (per-context loads), terminal-slice.",
     "entryPoints": [
-      "crates/forge-git/src/worktree.rs"
+      "crates/tauri-app/frontend/src/stores/app-store.ts"
     ],
     "files": [
       {
-        "path": "crates/forge-git/src/worktree.rs",
+        "path": "crates/tauri-app/frontend/src/stores/app-store.ts",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/forge-git/src/worktree_parse.rs",
-        "role": "support",
+        "path": "crates/tauri-app/frontend/src/stores/session-slice.ts",
+        "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/src/commands/worktrees.rs",
-        "role": "support",
+        "path": "crates/tauri-app/frontend/src/stores/context-slice.ts",
+        "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/src/runtime/worktree_fs.rs",
-        "role": "support",
+        "path": "crates/tauri-app/frontend/src/stores/data-slice.ts",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/stores/terminal-slice.ts",
+        "role": "core",
         "pinned": false
       }
     ],
     "tags": [
-      "git",
-      "worktree",
-      "branches"
+      "state",
+      "store",
+      "solidjs"
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-git/worktree",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/frontend/state",
+    "updatedAt": "2026-07-10T03:06:00.318157Z"
   },
   {
     "slug": "graph-view",
-    "name": "Feature Graph View",
-    "description": "Interactive force-directed SVG graph with nodes as features, edges as shared files, drag-to-reposition, color picker popover, and reduced-motion support.",
+    "name": "Graph View",
+    "description": "Force-directed graph visualization of feature-to-feature relationships via shared files. Uses d3-force simulation, supports drag, pan, zoom, and a popover showing file overlaps when you click a node.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/views/GraphView.tsx"
     ],
@@ -582,13 +742,13 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/graph/graph-sim.ts",
+        "path": "crates/tauri-app/frontend/src/components/graph/NodePopover.tsx",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/graph/NodePopover.tsx",
-        "role": "support",
+        "path": "crates/tauri-app/frontend/src/components/graph/graph-sim.ts",
+        "role": "core",
         "pinned": false
       },
       {
@@ -600,114 +760,94 @@
     "tags": [
       "graph",
       "visualization",
-      "force-directed"
+      "d3"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/views",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318157Z"
   },
   {
-    "slug": "index-decomposition",
-    "name": "Feature Index Decomposition",
-    "description": "Cold-start repository indexing that drives headless Claude to decompose a codebase into a feature map. Returns structured JSON of features with entry points, files, and metadata.",
+    "slug": "hook-ingestion",
+    "name": "Hook Ingestion",
+    "description": "Parses Claude Code hook payloads (PostToolUse/Stop/SessionStart) forwarded by .codeforge/hooks/forward.sh into timeline events. Classifies edited paths into feature slugs and appends to the timeline.",
     "entryPoints": [
-      "crates/forge-index/src/indexer.rs"
+      "crates/forge-daemon/src/ingest.rs"
     ],
     "files": [
       {
-        "path": "crates/forge-index/src/indexer.rs",
+        "path": "crates/forge-daemon/src/ingest.rs",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/forge-index/src/headless.rs",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-index/src/prompt.rs",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-index/src/parse.rs",
-        "role": "support",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "indexing",
-      "llm",
-      "feature-map"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "forge-index/indexing",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "index-merge",
-    "name": "Index Merge",
-    "description": "Merges new feature decomposition results into the existing index while preserving pinned features and user-authored content.",
-    "entryPoints": [
-      "crates/forge-index/src/merge.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/forge-index/src/merge.rs",
+        "path": "crates/forge-daemon/src/hooks.rs",
         "role": "core",
         "pinned": false
       }
     ],
     "tags": [
-      "merge",
-      "indexing",
-      "preservation"
+      "hooks",
+      "parsing",
+      "events"
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-index/storage",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-daemon/hooks",
+    "updatedAt": "2026-07-10T03:06:00.318158Z"
   },
   {
-    "slug": "index-storage",
-    "name": "Feature Index Storage",
-    "description": "Loads and saves the feature index from .codeforge/features.json with stable slug ordering, atomic writes, and path-to-feature classification.",
+    "slug": "index-staleness-detection",
+    "name": "Index Staleness Detection",
+    "description": "Version checking and manifest hashing to determine if .codeforge/features.json is fresh, outdated, or corrupt. Stores content hashes in index-meta.json to detect drift without re-indexing.",
     "entryPoints": [
-      "crates/forge-index/src/lib.rs"
+      "crates/forge-index/src/meta.rs"
     ],
     "files": [
-      {
-        "path": "crates/forge-index/src/lib.rs",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-index/src/classify.rs",
-        "role": "core",
-        "pinned": false
-      },
       {
         "path": "crates/forge-index/src/meta.rs",
-        "role": "support",
+        "role": "core",
         "pinned": false
       }
     ],
     "tags": [
-      "storage",
-      "persistence",
-      "index"
+      "versioning",
+      "validation",
+      "staleness"
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-index/storage",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-index/staleness",
+    "updatedAt": "2026-07-10T03:06:00.318158Z"
+  },
+  {
+    "slug": "indexing-runtime",
+    "name": "Indexing Runtime",
+    "description": "Orchestrates cold-start and incremental re-indexing: spawns the headless indexer, merges results (pinned survive), saves features.json, writes docs, bookends with IndexStarted/IndexCompleted timeline events, and streams progress.",
+    "entryPoints": [
+      "crates/tauri-app/src/runtime/indexing.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/tauri-app/src/runtime/indexing.rs",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "indexing",
+      "orchestration",
+      "runtime"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "tauri-app/runtime/indexing",
+    "updatedAt": "2026-07-10T03:06:00.318158Z"
   },
   {
     "slug": "init-repo-modal",
     "name": "Init Repo Modal",
-    "description": "Modal offering to run git init when opening a directory that is not a git repository, creating an unborn main branch.",
+    "description": "Dialog prompting the user to git init a non-git directory when they try to open it. Offers to create an unborn main branch; cancellation closes the dialog without opening the path.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/InitRepoModal.tsx"
     ],
@@ -720,18 +860,18 @@
     ],
     "tags": [
       "modal",
-      "git-init",
-      "ui"
+      "git",
+      "init"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/modals",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318159Z"
   },
   {
-    "slug": "integration-kit",
+    "slug": "integration-kit-installer",
     "name": "Integration Kit Installer",
-    "description": "Idempotent installer merging hooks into .claude/settings.json, registering forge-mcp in .mcp.json, and appending a marker section to CLAUDE.md.",
+    "description": "Idempotent installer that merges CodeForge hooks into .claude/settings.json, registers the forge-mcp stdio server in .mcp.json, and appends a marked section to CLAUDE.md instructing agents to consult the feature index.",
     "entryPoints": [
       "crates/forge-daemon/src/kit.rs"
     ],
@@ -749,81 +889,71 @@
     ],
     "tags": [
       "installer",
-      "hooks",
-      "mcp"
+      "setup",
+      "hooks"
     ],
     "pinned": false,
     "color": null,
     "group": "forge-daemon/kit",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318159Z"
   },
   {
-    "slug": "ipc-bindings",
-    "name": "IPC Type Bindings",
-    "description": "TypeScript mirror of Rust domain types crossing the Tauri IPC boundary with camelCase matching serde(rename_all).",
+    "slug": "ipc-layer",
+    "name": "IPC Layer",
+    "description": "TypeScript wrappers around Tauri IPC invoke calls. Mirrors the Rust command signatures, handles JSON marshalling, and provides typed return values for the frontend.",
     "entryPoints": [
-      "crates/tauri-app/frontend/src/types.ts"
+      "crates/tauri-app/frontend/src/ipc.ts"
     ],
     "files": [
       {
-        "path": "crates/tauri-app/frontend/src/types.ts",
+        "path": "crates/tauri-app/frontend/src/ipc.ts",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/ipc.ts",
+        "path": "crates/tauri-app/frontend/src/types.ts",
         "role": "support",
         "pinned": false
       }
     ],
     "tags": [
-      "types",
       "ipc",
-      "typescript"
+      "typescript",
+      "tauri"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/ipc",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
-    "slug": "living-docs",
-    "name": "Living Documentation",
-    "description": "Auto-refresh feature documentation after agent turns by folding file edits, commands, and recorded notes into .codeforge/docs/<slug>.md via headless Claude.",
+    "slug": "mcp-binary-install",
+    "name": "MCP Binary Install",
+    "description": "Copies the forge-mcp binary from the Tauri bundle to ~/.codeforge/bin/forge-mcp on app start. Ensures the MCP server is available at a stable path for .mcp.json registration.",
     "entryPoints": [
-      "crates/forge-index/src/refresh.rs"
+      "crates/tauri-app/src/runtime/mcp.rs"
     ],
     "files": [
       {
-        "path": "crates/forge-index/src/refresh.rs",
+        "path": "crates/tauri-app/src/runtime/mcp.rs",
         "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-daemon/src/doc_refresh.rs",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-index/src/prompt.rs",
-        "role": "support",
         "pinned": false
       }
     ],
     "tags": [
-      "documentation",
-      "llm",
-      "auto-refresh"
+      "mcp",
+      "install",
+      "binary"
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-index/docs",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/runtime/mcp",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
-    "slug": "mcp-server",
-    "name": "MCP Server",
-    "description": "Stdio JSON-RPC 2.0 server proxying to the per-repo daemon. Tools: list_features, get_feature, which_features, feature_timeline, record_note.",
+    "slug": "mcp-stdio-server",
+    "name": "MCP Stdio Server",
+    "description": "The forge-mcp binary exposing list_features, get_feature, which_features, feature_timeline, and record_note as MCP tools. Agents query the feature index and append notes to the timeline.",
     "entryPoints": [
       "crates/forge-daemon/src/bin/forge-mcp.rs"
     ],
@@ -836,18 +966,18 @@
     ],
     "tags": [
       "mcp",
-      "jsonrpc",
+      "stdio",
       "tools"
     ],
     "pinned": false,
     "color": null,
     "group": "forge-daemon/mcp",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318164Z"
   },
   {
     "slug": "merge-result-panel",
     "name": "Merge Result Panel",
-    "description": "Toast panel showing worktree merge outcomes: success, conflicts, or ahead-only (FF-only disabled).",
+    "description": "Toast-style panel at the bottom showing merge outcomes. Clean merges display a success message; conflicts list the conflicted file paths and suggest manual resolution.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/MergeResultPanel.tsx"
     ],
@@ -859,19 +989,43 @@
       }
     ],
     "tags": [
-      "toast",
       "merge",
+      "conflicts",
       "ui"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/frontend/modals",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/frontend/merge",
+    "updatedAt": "2026-07-10T03:06:00.318165Z"
+  },
+  {
+    "slug": "path-classification",
+    "name": "Path Classification",
+    "description": "Maps changed file paths to feature slugs via exact file match or nearest-directory fallback. Powers real-time hook ingestion and diff-by-feature grouping.",
+    "entryPoints": [
+      "crates/forge-index/src/classify.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/forge-index/src/classify.rs",
+        "role": "core",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "classifier",
+      "paths",
+      "features"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "forge-index/classifier",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
     "slug": "reindex-queue",
     "name": "Reindex Queue",
-    "description": "Debounced reindex queue that triggers cold-start decomposition when feature_slugs.txt changes, preventing redundant re-indexes.",
+    "description": "SQLite-backed queue of unmapped file paths awaiting classification. Hooks add paths that didn't match any feature; the queue triggers incremental re-indexing when the count crosses a threshold.",
     "entryPoints": [
       "crates/forge-daemon/src/reindex_queue.rs"
     ],
@@ -883,43 +1037,19 @@
       }
     ],
     "tags": [
-      "indexing",
-      "debounce",
-      "queue"
+      "queue",
+      "reindex",
+      "sqlite"
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-daemon/indexing",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-daemon/reindex",
+    "updatedAt": "2026-07-10T03:06:00.318168Z"
   },
   {
-    "slug": "repo-indexing",
-    "name": "Repo Indexing Flow",
-    "description": "Runs the cold-start indexer, merges results, writes docs, updates index-meta.json, and emits index:progress events to the frontend.",
-    "entryPoints": [
-      "crates/tauri-app/src/runtime/indexing.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/tauri-app/src/runtime/indexing.rs",
-        "role": "core",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "indexing",
-      "progress",
-      "events"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "tauri-app/runtime",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "repo-open",
-    "name": "Repo Context Lifecycle",
-    "description": "Opens a repo by creating a RepoRuntime: loads the index, spawns the timeline store, starts the daemon, installs the integration kit, and opens sessions.",
+    "slug": "repo-open-runtime",
+    "name": "Repo Open Runtime",
+    "description": "Opens a path as a repo context: installs the kit, opens timeline+index, starts the daemon, upserts the repos table row, wires the timeline→timeline:event forwarder, registers RepoRuntime, and kicks off cold-start indexing when never indexed.",
     "entryPoints": [
       "crates/tauri-app/src/runtime/repo_open.rs"
     ],
@@ -930,93 +1060,25 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/src/runtime/mod.rs",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/src/commands/repo.rs",
+        "path": "crates/tauri-app/src/runtime/repo_util.rs",
         "role": "support",
         "pinned": false
       }
     ],
     "tags": [
-      "lifecycle",
       "repo",
-      "initialization"
+      "open",
+      "runtime"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/runtime",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "session-claude",
-    "name": "Claude Session Process",
-    "description": "Spawns and manages one Node sidecar process, parsing its NDJSON output into AgentEvents and forwarding to the UI via mpsc.",
-    "entryPoints": [
-      "crates/forge-session/src/claude.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/forge-session/src/claude.rs",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-session/src/mode.rs",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-session/src/locate.rs",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/forge-session/src/shell_env.rs",
-        "role": "support",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "process",
-      "spawn",
-      "lifecycle"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "forge-session/process",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "session-commands",
-    "name": "Session IPC Commands",
-    "description": "Tauri commands for start_session, send_session_input, approve_session, stop_session, list_sessions, set_session_mode.",
-    "entryPoints": [
-      "crates/tauri-app/src/commands/sessions.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/tauri-app/src/commands/sessions.rs",
-        "role": "core",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "ipc",
-      "commands",
-      "sessions"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "tauri-app/commands",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/runtime/repo",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
     "slug": "session-forward",
-    "name": "Session Event Forwarding",
-    "description": "Forwards AgentEvents from the session manager's mpsc to the frontend as session:<id> Tauri events, handling timeline recording and approval tracking.",
+    "name": "Session Forward",
+    "description": "Relays AgentEvents from the sidecar's mpsc stream to frontend events (agent-event) and persists sessions/turns to the app database. Extracts thread_id and writes blocks to the sessions table.",
     "entryPoints": [
       "crates/tauri-app/src/runtime/session_forward.rs"
     ],
@@ -1028,19 +1090,19 @@
       }
     ],
     "tags": [
-      "events",
-      "sessions",
-      "forwarding"
+      "session",
+      "forwarding",
+      "events"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/runtime",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/runtime/session",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
     "slug": "session-manager",
     "name": "Session Manager",
-    "description": "Multi-session registry spawning ClaudeSession processes via the Node agent-sidecar. Handles fresh/resume modes and permission escalation.",
+    "description": "Multi-session registry spawning and routing commands to individual ClaudeSession handles. Tracks session metadata, permission modes, and resume targets. Owned by AppState behind a tokio Mutex.",
     "entryPoints": [
       "crates/forge-session/src/manager.rs"
     ],
@@ -1051,7 +1113,12 @@
         "pinned": false
       },
       {
-        "path": "crates/forge-session/src/lib.rs",
+        "path": "crates/forge-session/src/mode.rs",
+        "role": "support",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-session/src/types.rs",
         "role": "support",
         "pinned": false
       }
@@ -1059,17 +1126,17 @@
     "tags": [
       "sessions",
       "manager",
-      "lifecycle"
+      "registry"
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-session",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-session/manager",
+    "updatedAt": "2026-07-10T03:06:00.318172Z"
   },
   {
     "slug": "session-pane",
     "name": "Session Pane",
-    "description": "Right pane with session tabs, message stream, composer, mode controls, and approval UI. Handles streaming deltas, tool use, and slash commands.",
+    "description": "Right-hand draggable pane embedding a Claude Code session. Shows message stream (markdown + thinking blocks), approval requests, composer with slash commands, and session header with mode control.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/SessionPane.tsx"
     ],
@@ -1091,11 +1158,21 @@
       },
       {
         "path": "crates/tauri-app/frontend/src/components/session/SessionHeader.tsx",
-        "role": "support",
+        "role": "core",
         "pinned": false
       },
       {
         "path": "crates/tauri-app/frontend/src/components/session/ModeControl.tsx",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/session/blocks.tsx",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/session/markdown.tsx",
         "role": "support",
         "pinned": false
       },
@@ -1105,12 +1182,7 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/session/blocks.tsx",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/components/session/markdown.tsx",
+        "path": "crates/tauri-app/frontend/src/components/session/local.ts",
         "role": "support",
         "pinned": false
       },
@@ -1120,12 +1192,7 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/session/local.ts",
-        "role": "support",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/frontend/src/components/session/styles.ts",
+        "path": "crates/tauri-app/frontend/src/components/session/styles-chrome.ts",
         "role": "support",
         "pinned": false
       },
@@ -1135,30 +1202,30 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/session/styles-chrome.ts",
+        "path": "crates/tauri-app/frontend/src/components/session/styles-stream.ts",
         "role": "support",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/session/styles-stream.ts",
+        "path": "crates/tauri-app/frontend/src/components/session/styles.ts",
         "role": "support",
         "pinned": false
       }
     ],
     "tags": [
       "session",
-      "chat",
-      "ui"
+      "claude",
+      "chat"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/session",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318172Z"
   },
   {
     "slug": "session-protocol",
     "name": "Session Protocol",
-    "description": "NDJSON protocol between Rust and Node sidecar: query commands, approval responses, mode changes, and streaming event types.",
+    "description": "NDJSON-over-stdio protocol between Rust and the Node sidecar. Defines in-messages (send_message, respond_to_approval, interrupt) and out-events (block_start, approval_needed, session_resume_failed).",
     "entryPoints": [
       "crates/forge-session/src/protocol.rs"
     ],
@@ -1172,11 +1239,6 @@
         "path": "crates/forge-session/src/payload.rs",
         "role": "support",
         "pinned": false
-      },
-      {
-        "path": "crates/forge-session/src/types.rs",
-        "role": "support",
-        "pinned": false
       }
     ],
     "tags": [
@@ -1186,42 +1248,42 @@
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-session/sidecar",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-session/protocol",
+    "updatedAt": "2026-07-10T03:06:00.318173Z"
   },
   {
-    "slug": "session-sidecar",
-    "name": "Agent Sidecar",
-    "description": "Node.js process wrapping @anthropic-ai/claude-agent-sdk query(). Communicates via NDJSON over stdin/stdout for session lifecycle and streaming events.",
+    "slug": "shell-environment",
+    "name": "Shell Environment",
+    "description": "Login-shell PATH resolution and environment inheritance for headless claude spawns. Ensures desktop-launched apps find the same claude binary as the user's terminal.",
     "entryPoints": [
-      "crates/tauri-app/agent-sidecar/index.mjs"
+      "crates/forge-session/src/shell_env.rs"
     ],
     "files": [
       {
-        "path": "crates/tauri-app/agent-sidecar/index.mjs",
+        "path": "crates/forge-session/src/shell_env.rs",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/agent-sidecar/package.json",
-        "role": "config",
+        "path": "crates/forge-session/src/locate.rs",
+        "role": "support",
         "pinned": false
       }
     ],
     "tags": [
-      "nodejs",
-      "sidecar",
-      "sdk"
+      "environment",
+      "path",
+      "shell"
     ],
     "pinned": false,
     "color": null,
-    "group": "forge-session/sidecar",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-session/env",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
     "slug": "stale-modal",
-    "name": "Stale Index Modal",
-    "description": "Modal prompting to re-index when the feature index is stale, triggered by index:stale events from the staleness poller.",
+    "name": "Stale Modal",
+    "description": "Prompt when index-meta.json reveals the on-disk index is outdated or corrupt. Offers to re-index now or dismiss. Triggered by staleness detection after repo open or when a changed file doesn't classify.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/StaleModal.tsx"
     ],
@@ -1235,41 +1297,17 @@
     "tags": [
       "modal",
       "staleness",
-      "ui"
+      "reindex"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/modals",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "staleness-detection",
-    "name": "Index Staleness Detection",
-    "description": "Polls .codeforge/index-meta.json to detect manifest changes and emit index:stale events when the feature index needs a re-index.",
-    "entryPoints": [
-      "crates/tauri-app/src/runtime/staleness.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/tauri-app/src/runtime/staleness.rs",
-        "role": "core",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "polling",
-      "staleness",
-      "index"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "tauri-app/runtime",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
     "slug": "status-bar",
     "name": "Status Bar",
-    "description": "Bottom status bar with git branch, index status, active session indicator, and terminal toggle button.",
+    "description": "Bottom bar showing repo name, feature count, index freshness dot (green/yellow/red), daemon status, and indexing progress. Clicking the daemon badge opens localhost:<port>/status in the browser.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/StatusBar.tsx"
     ],
@@ -1281,19 +1319,19 @@
       }
     ],
     "tags": [
-      "statusbar",
+      "status-bar",
       "chrome",
       "ui"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/chrome",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318176Z"
   },
   {
     "slug": "tab-bar",
     "name": "Tab Bar",
-    "description": "Main panel tab bar for switching between Feature / Graph / Timeline / Diff views with Cmd+1-4 hotkeys.",
+    "description": "Horizontal view-switcher bar above the main panel with Feature, Graph, Timeline, and Diff tabs. Highlights the active view and emits view-switch events on click.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/TabBar.tsx"
     ],
@@ -1306,47 +1344,96 @@
     ],
     "tags": [
       "tabs",
-      "chrome",
+      "navigation",
       "ui"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/chrome",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318177Z"
   },
   {
-    "slug": "terminal-panel",
-    "name": "Terminal Panel",
-    "description": "Bottom xterm.js panel with tab-per-terminal, PTY lifecycle tied to frontend visibility, and base64-decoded output streaming.",
+    "slug": "tauri-commands",
+    "name": "Tauri Commands",
+    "description": "IPC command handlers exposed to the frontend: open_repo, reindex_repo, get_features, start_session, list_worktrees, create_worktree, merge_worktree, and terminal lifecycle. Bridges Tauri events to AppState.",
     "entryPoints": [
-      "crates/tauri-app/frontend/src/components/terminal/TerminalPanel.tsx"
+      "crates/tauri-app/src/main.rs"
     ],
     "files": [
       {
-        "path": "crates/tauri-app/frontend/src/components/terminal/TerminalPanel.tsx",
+        "path": "crates/tauri-app/src/commands/repo.rs",
         "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/terminal/TerminalInstance.tsx",
+        "path": "crates/tauri-app/src/commands/features.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/src/commands/timeline.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/src/commands/sessions.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/src/commands/worktrees.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/src/commands/terminals.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/src/commands/mod.rs",
+        "role": "support",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "tauri",
+      "ipc",
+      "commands"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "tauri-app/commands",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
+  },
+  {
+    "slug": "tauri-events",
+    "name": "Tauri Events",
+    "description": "Event name constants for frontend-bound emissions: repo:changed, index:progress, timeline:event, agent-event. The single source of truth for event names so typos surface at compile time.",
+    "entryPoints": [
+      "crates/tauri-app/src/events.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/tauri-app/src/events.rs",
         "role": "core",
         "pinned": false
       }
     ],
     "tags": [
-      "terminal",
-      "xterm",
-      "ui"
+      "events",
+      "constants",
+      "tauri"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/frontend/terminal",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/events",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
-    "slug": "terminal-pty",
-    "name": "Embedded Terminals",
-    "description": "Portable PTY terminals per worktree using portable_pty. Output streams as base64-encoded events; input writes raw UTF-8 to the master.",
+    "slug": "terminal-manager",
+    "name": "Terminal Manager",
+    "description": "PTY session registry backed by portable-pty. Spawns login shells (zsh/bash) per worktree, forwards stdin writes, emits terminal-output events, and cleans up on close.",
     "entryPoints": [
       "crates/tauri-app/src/terminal/mod.rs"
     ],
@@ -1357,59 +1444,25 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/src/terminal/manager.rs",
+        "path": "crates/tauri-app/frontend/src/components/terminal/TerminalPanel.tsx",
         "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/src/terminal/pty.rs",
-        "role": "core",
-        "pinned": false
-      },
-      {
-        "path": "crates/tauri-app/src/commands/terminals.rs",
-        "role": "support",
         "pinned": false
       }
     ],
     "tags": [
-      "pty",
       "terminal",
+      "pty",
       "shell"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/terminal",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
-    "slug": "timeline-commands",
-    "name": "Timeline IPC Commands",
-    "description": "Tauri commands for get_timeline and get_diff_by_feature, querying the timeline store and git diff with feature grouping.",
-    "entryPoints": [
-      "crates/tauri-app/src/commands/timeline.rs"
-    ],
-    "files": [
-      {
-        "path": "crates/tauri-app/src/commands/timeline.rs",
-        "role": "core",
-        "pinned": false
-      }
-    ],
-    "tags": [
-      "ipc",
-      "commands",
-      "timeline"
-    ],
-    "pinned": false,
-    "color": null,
-    "group": "tauri-app/commands",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
-  },
-  {
-    "slug": "timeline-store",
-    "name": "Timeline Store",
-    "description": "Append-only SQLite event log at .codeforge/runtime/timeline.db with live broadcast subscriptions, query filtering, and session slicing.",
+    "slug": "timeline-storage",
+    "name": "Timeline Storage",
+    "description": "Append-only SQLite event log at .codeforge/runtime/timeline.db. WAL mode, broadcast subscriptions, and query API with feature-slug filtering and backward paging.",
     "entryPoints": [
       "crates/forge-timeline/src/lib.rs"
     ],
@@ -1421,19 +1474,19 @@
       }
     ],
     "tags": [
+      "sqlite",
       "timeline",
-      "events",
-      "sqlite"
+      "events"
     ],
     "pinned": false,
     "color": null,
     "group": "forge-timeline",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318184Z"
   },
   {
     "slug": "timeline-view",
     "name": "Timeline View",
-    "description": "Reverse-chron immutable event list with client-side filtering, live timeline:event subscriptions, and paged rendering capped at RENDER_STEP.",
+    "description": "Reverse-chron immutable event feed with filter bar (by feature, actor, event kind). Live events stream in via timeline:event, older events page via beforeId cursor. Caps rendered rows at 500 per load.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/views/TimelineView.tsx"
     ],
@@ -1454,30 +1507,30 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/timeline/use-timeline-events.ts",
-        "role": "support",
+        "path": "crates/tauri-app/frontend/src/components/timeline/timeline-utils.ts",
+        "role": "core",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/timeline/timeline-utils.ts",
+        "path": "crates/tauri-app/frontend/src/components/timeline/use-timeline-events.ts",
         "role": "support",
         "pinned": false
       }
     ],
     "tags": [
       "timeline",
-      "view",
+      "events",
       "filtering"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/views",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318184Z"
   },
   {
     "slug": "title-bar",
     "name": "Title Bar",
-    "description": "Custom window title bar with traffic lights, repo name, worktree switcher button, and drag region for frameless Tauri window.",
+    "description": "Custom title bar with window controls (close/minimize/maximize), project name, current branch pill, and Worktrees menu. Uses Tauri's data-tauri-drag-region for dragging.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/TitleBar.tsx"
     ],
@@ -1489,19 +1542,19 @@
       }
     ],
     "tags": [
-      "titlebar",
+      "title-bar",
       "chrome",
       "ui"
     ],
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/chrome",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318185Z"
   },
   {
     "slug": "welcome-view",
     "name": "Welcome View",
-    "description": "Landing view prompting to open a repo via Tauri dialog when no repo is active.",
+    "description": "Landing screen shown when no repo is open. Displays the CodeForge logo and an Open Repository button that triggers the Tauri folder picker.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/views/Welcome.tsx"
     ],
@@ -1520,36 +1573,70 @@
     "pinned": false,
     "color": null,
     "group": "tauri-app/frontend/views",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "updatedAt": "2026-07-10T03:06:00.318188Z"
   },
   {
-    "slug": "worktree-commands",
-    "name": "Worktree IPC Commands",
-    "description": "Tauri commands for list_worktrees, create_worktree, remove_worktree, merge_worktree, list_branches, fetch_remotes, add_worktree_for_branch.",
+    "slug": "worktree-lifecycle",
+    "name": "Worktree Lifecycle",
+    "description": "git worktree add/remove/list operations with named error states for every failure mode. Creates worktrees under .codeforge-worktrees/, refuses to remove the base, and prevents double-checkouts.",
     "entryPoints": [
-      "crates/tauri-app/src/commands/worktrees.rs"
+      "crates/forge-git/src/worktree.rs"
     ],
     "files": [
       {
-        "path": "crates/tauri-app/src/commands/worktrees.rs",
+        "path": "crates/forge-git/src/worktree.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-git/src/worktree_parse.rs",
+        "role": "core",
+        "pinned": false
+      },
+      {
+        "path": "crates/forge-git/src/worktree_tests.rs",
+        "role": "test",
+        "pinned": false
+      }
+    ],
+    "tags": [
+      "git",
+      "worktrees",
+      "lifecycle"
+    ],
+    "pinned": false,
+    "color": null,
+    "group": "forge-git/worktrees",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
+  },
+  {
+    "slug": "worktree-merge",
+    "name": "Worktree Merge",
+    "description": "Merges a worktree's branch into the base via git merge --no-ff. Surfaces MergeResult with named states: clean success, conflict (list of paths), or detached-head rejection.",
+    "entryPoints": [
+      "crates/forge-git/src/worktree.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/forge-git/src/worktree.rs",
         "role": "core",
         "pinned": false
       }
     ],
     "tags": [
-      "ipc",
-      "commands",
+      "git",
+      "merge",
       "worktrees"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/commands",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "forge-git/merge",
+    "updatedAt": "2026-07-10T03:06:00.312634Z"
   },
   {
     "slug": "worktree-switcher",
     "name": "Worktree Switcher",
-    "description": "Modal worktree picker with create/remove/merge actions, ahead/behind badges, dirty indicators, and branch-based worktree creation.",
+    "description": "Popover listing all local and remote branches, their checkout state, and actions to create/open worktrees. Triggered from the tab strip + button or TitleBar Worktrees menu.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/worktree/WorktreeSwitcher.tsx"
     ],
@@ -1565,30 +1652,30 @@
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/worktree/switcher-data.ts",
+        "path": "crates/tauri-app/frontend/src/components/worktree/switcher-css.ts",
         "role": "support",
         "pinned": false
       },
       {
-        "path": "crates/tauri-app/frontend/src/components/worktree/switcher-css.ts",
+        "path": "crates/tauri-app/frontend/src/components/worktree/switcher-data.ts",
         "role": "support",
         "pinned": false
       }
     ],
     "tags": [
-      "worktree",
+      "worktrees",
       "switcher",
-      "modal"
+      "branches"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/frontend/worktree",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/frontend/worktrees",
+    "updatedAt": "2026-07-10T03:06:00.318192Z"
   },
   {
     "slug": "worktree-tabs",
     "name": "Worktree Tabs",
-    "description": "Top tab bar showing open worktrees with project identity badges when multiple projects are open, switching via Tauri window focus events.",
+    "description": "Horizontal tab strip below the title bar showing all worktrees (base + branches). Each tab displays branch name, ahead/behind counts, dirty state, and project identity badges when multiple projects are open.",
     "entryPoints": [
       "crates/tauri-app/frontend/src/components/WorktreeTabs.tsx"
     ],
@@ -1597,16 +1684,21 @@
         "path": "crates/tauri-app/frontend/src/components/WorktreeTabs.tsx",
         "role": "core",
         "pinned": false
+      },
+      {
+        "path": "crates/tauri-app/frontend/src/components/worktree/switcher-data.ts",
+        "role": "support",
+        "pinned": false
       }
     ],
     "tags": [
+      "worktrees",
       "tabs",
-      "worktree",
       "ui"
     ],
     "pinned": false,
     "color": null,
-    "group": "tauri-app/frontend/worktree",
-    "updatedAt": "2026-07-10T01:41:11.028544Z"
+    "group": "tauri-app/frontend/worktrees",
+    "updatedAt": "2026-07-10T03:06:00.318192Z"
   }
 ]

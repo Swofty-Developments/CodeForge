@@ -1,11 +1,23 @@
 /* Welcome view — open-repo CTA wired to the dialog plugin + open_repo command. */
 
-import { Show } from "solid-js";
+import { Show, createSignal, onMount } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appStore } from "../stores/app-store";
+import * as ipc from "../ipc";
+import type { ClaudeCliStatus } from "../types";
 
 export function Welcome() {
   const { store } = appStore;
+  const [cliStatus, setCliStatus] = createSignal<ClaudeCliStatus | null>(null);
+
+  onMount(async () => {
+    try {
+      const status = await ipc.checkClaudeCli();
+      setCliStatus(status);
+    } catch (err) {
+      console.error("Failed to check Claude CLI:", err);
+    }
+  });
 
   async function pickRepo() {
     const dir = await open({ directory: true, multiple: false, title: "Open a repository" });
@@ -42,6 +54,33 @@ export function Welcome() {
           <span class="kbd-hint"><kbd>⌘K</kbd> command palette</span>
           <span class="kbd-hint"><kbd>⌘\</kbd> session pane</span>
         </div>
+        <Show when={cliStatus() && (!cliStatus()!.installed || !cliStatus()!.authenticated)}>
+          <div class="welcome-cli-warning">
+            <div class="welcome-cli-warning-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 8v4m0 4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+              </svg>
+            </div>
+            <div class="welcome-cli-warning-content">
+              <Show when={!cliStatus()!.installed}>
+                <p class="welcome-cli-warning-title">Claude CLI not found</p>
+                <p class="welcome-cli-warning-text">
+                  FeatureForge requires the Claude CLI to index your codebase. Install{" "}
+                  <a href="https://claude.com/claude-code" target="_blank" rel="noopener noreferrer">
+                    Claude Code
+                  </a>{" "}
+                  and ensure <code>claude</code> is on your PATH.
+                </p>
+              </Show>
+              <Show when={cliStatus()!.installed && !cliStatus()!.authenticated}>
+                <p class="welcome-cli-warning-title">Claude CLI not authenticated</p>
+                <p class="welcome-cli-warning-text">
+                  Run <code>claude login</code> in your terminal to authenticate.
+                </p>
+              </Show>
+            </div>
+          </div>
+        </Show>
         <Show when={store.lastError}>
           <div class="welcome-error">{store.lastError}</div>
         </Show>
@@ -110,6 +149,48 @@ export function Welcome() {
           font-size: 10px;
           font-family: var(--font-mono);
           margin-right: 4px;
+        }
+        .welcome-cli-warning {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          margin-top: var(--space-5);
+          padding: 12px 14px;
+          background: rgba(var(--yellow-rgb, 255, 193, 7), 0.08);
+          border: 1px solid rgba(var(--yellow-rgb, 255, 193, 7), 0.25);
+          border-radius: var(--radius-md);
+          text-align: left;
+        }
+        .welcome-cli-warning-icon {
+          flex-shrink: 0;
+          color: rgba(var(--yellow-rgb, 255, 193, 7), 1);
+          margin-top: 2px;
+        }
+        .welcome-cli-warning-content {
+          flex: 1;
+        }
+        .welcome-cli-warning-title {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text);
+          margin-bottom: 4px;
+        }
+        .welcome-cli-warning-text {
+          font-size: 11.5px;
+          line-height: 1.5;
+          color: var(--text-secondary);
+        }
+        .welcome-cli-warning-text a {
+          color: var(--primary);
+          text-decoration: underline;
+        }
+        .welcome-cli-warning-text code {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          padding: 2px 4px;
+          background: var(--bg-muted);
+          border-radius: var(--radius-sm);
+          color: var(--text);
         }
         .welcome-error {
           margin-top: var(--space-4);

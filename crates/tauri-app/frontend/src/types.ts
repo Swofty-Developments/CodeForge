@@ -227,6 +227,16 @@ export interface SessionInfo {
   status: SessionStatus;
 }
 
+export interface PastSession {
+  id: string;
+  threadId: string;
+  claudeSessionId: string | null;
+  title: string;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StartSessionOpts {
   repoPath: string;
   model?: string;
@@ -238,6 +248,13 @@ export interface StartSessionOpts {
 export interface DaemonStatus {
   running: boolean;
   port: number | null;
+}
+
+/** Wire shape returned by the `check_claude_cli` IPC command. */
+export interface ClaudeCliStatus {
+  installed: boolean;
+  version: string | null;
+  authenticated: boolean;
 }
 
 /** Store-side daemon model — three explicit, separately-painted states. An
@@ -302,6 +319,7 @@ export type AgentEventType =
   | "turn_completed"
   | "turn_aborted"
   | "approval_required"
+  | "ask_user_question"
   | "session_ready"
   | "slash_commands"
   | "session_error"
@@ -337,6 +355,8 @@ export interface AgentEventPayload {
   isError?: boolean;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Structured questions array for ask_user_question events. */
+  questions?: unknown;
   commands?: string[];
 }
 
@@ -399,6 +419,7 @@ export interface SessionUi {
   runState: RunState;
   messages: SessionMessage[];
   pendingApproval: { requestId: string; description: string } | null;
+  pendingQuestion: { requestId: string; questions: unknown } | null;
   slashCommands: string[];
   claudeSessionId: string | null;
   usage: SessionUsage;

@@ -126,6 +126,11 @@ pub async fn open_context(
     let reindexing = Arc::new(AtomicBool::new(false));
     let features_count = index.read().await.features().len() as u32;
 
+    // FZ-2: staleness poller — checks the on-disk verdict immediately and then
+    // every POLL_INTERVAL, emitting `index:status` on change so the UI can
+    // prompt a re-index. Never auto-reindexes — the UI decides.
+    let staleness_task = staleness::spawn_poller(app.clone(), root.clone(), reindexing.clone());
+
     {
         let mut repos = state.repos.lock().await;
         repos.insert(
@@ -136,6 +141,7 @@ pub async fn open_context(
                 timeline: timeline.clone(),
                 repo_id: repo_id.clone(),
                 forwarder_task,
+                staleness_task,
                 reindexing: reindexing.clone(),
             },
         );
@@ -164,16 +170,13 @@ pub async fn open_context(
     repo_state.branch = forge_git::current_branch(&root).await.map_err(|e| e.to_string())?;
     repo_state.project = Some(repo_util::project_name(&root).await?);
     let _ = app.emit(events::REPO_CHANGED, &repo_state);
-
-    // FZ-2: after opening, push the on-disk staleness/version verdict so the UI
-    // can prompt a re-index. Never auto-reindexes — the UI decides.
-    staleness::emit_status(&app, &root).await;
     Ok(repo_state)
 }
 
 /// Tear down the context rooted at `root`: stop every session mapped to it (a
-/// session can't outlive its context), abort the timeline forwarder, shut the
-/// daemon down, drop the [`RepoRuntime`]. Returns `true` if a context was open
+/// session can't outlive its context), abort the timeline forwarder and the
+/// staleness poller, shut the daemon down, drop the [`RepoRuntime`]. Returns
+/// `true` if a context was open
 /// (and is now closed), `false` if nothing was open. Reused by `close_repo`
 /// (which turns `false` into a named error) and `remove_worktree` (for which a
 /// not-open worktree is a legitimate no-op before the git removal).
@@ -182,7 +185,7 @@ pub async fn close_context(state: &AppState, root: &Path) -> Result<bool, String
         let mut repos = state.repos.lock().await;
         repos.remove(root)
     };
-    let Some(RepoRuntime { daemon, forwarder_task, .. }) = runtime else {
+    let Some(RepoRuntime { daemon, forwarder_task, staleness_task, .. }) = runtime else {
         return Ok(false);
     };
 
@@ -206,6 +209,7 @@ pub async fn close_context(state: &AppState, root: &Path) -> Result<bool, String
     }
 
     forwarder_task.abort();
+    staleness_task.abort();
     daemon.shutdown().await;
     Ok(true)
 }

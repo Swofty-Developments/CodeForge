@@ -73,9 +73,16 @@ impl SessionManager {
         self.get(id)?.send_message(text)
     }
 
-    /// Answer a pending approval request on a session.
-    pub fn approve(&self, id: &str, request_id: &str, approve: bool) -> Result<()> {
-        self.get(id)?.respond_to_approval(request_id, approve, None)
+    /// Answer a pending approval request on a session. `answers` is set only
+    /// for AskUserQuestion responses (question text → selected label).
+    pub fn approve(
+        &self,
+        id: &str,
+        request_id: &str,
+        approve: bool,
+        answers: Option<serde_json::Value>,
+    ) -> Result<()> {
+        self.get(id)?.respond_to_approval(request_id, approve, None, answers)
     }
 
     /// Switch a session's permission mode mid-session. `mode` must be one of the
@@ -124,6 +131,19 @@ impl SessionManager {
             .collect()
     }
 
+    /// Update a live session's title in memory (for rename). The DB title is
+    /// updated separately by the caller. Returns `NotFound` if the session isn't
+    /// running.
+    pub fn update_title(&mut self, id: &str, title: String) -> Result<()> {
+        let uuid = parse_id(id)?;
+        let entry = self
+            .sessions
+            .get_mut(&uuid)
+            .ok_or_else(|| crate::Error::NotFound(id.to_string()))?;
+        entry.title = title;
+        Ok(())
+    }
+
     fn get(&self, id: &str) -> Result<&ClaudeSession> {
         let uuid = parse_id(id)?;
         self.sessions
@@ -149,7 +169,7 @@ mod tests {
         assert!(matches!(mgr.send("not-a-uuid", "hi"), Err(crate::Error::NotFound(_))));
         let ghost = Uuid::new_v4().to_string();
         assert!(matches!(mgr.abort(&ghost), Err(crate::Error::NotFound(_))));
-        assert!(matches!(mgr.approve(&ghost, "1", true), Err(crate::Error::NotFound(_))));
+        assert!(matches!(mgr.approve(&ghost, "1", true, None), Err(crate::Error::NotFound(_))));
         assert!(matches!(mgr.stop(&ghost).await, Err(crate::Error::NotFound(_))));
     }
 

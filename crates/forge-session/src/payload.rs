@@ -55,6 +55,9 @@ pub struct AgentEventPayload {
     pub cache_write_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commands: Option<Vec<String>>,
+    /// Structured questions for ask_user_question events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub questions: Option<serde_json::Value>,
 }
 
 impl AgentEventPayload {
@@ -90,6 +93,11 @@ impl AgentEventPayload {
                 p.event_type = "approval_required".into();
                 p.request_id = Some(request_id.clone());
                 p.description = Some(description.clone());
+            }
+            AgentEvent::AskUserQuestion { request_id, questions } => {
+                p.event_type = "ask_user_question".into();
+                p.request_id = Some(request_id.clone());
+                p.questions = Some(questions.clone());
             }
             AgentEvent::SessionReady { claude_session_id, model } => {
                 p.event_type = "session_ready".into();

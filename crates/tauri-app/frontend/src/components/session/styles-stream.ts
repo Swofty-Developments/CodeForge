@@ -214,4 +214,74 @@ export const STREAM_CSS = `
 .ac-approve { background: var(--green); color: #22271f; }
 .ac-approve:hover { filter: brightness(1.08); }
 .ac-deny:disabled, .ac-approve:disabled { opacity: 0.5; cursor: default; }
+
+/* ══ Question Card ══ */
+.question-card .qc-questions {
+  margin: var(--space-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.qc-question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.qc-question-text {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
+}
+.qc-multiselect-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.qc-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.qc-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-muted);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s var(--ease-out);
+  text-align: left;
+}
+.qc-option:hover {
+  background: var(--bg-accent);
+  border-color: var(--border-strong);
+}
+.qc-option--selected {
+  background: rgba(var(--primary-rgb), 0.12);
+  border-color: var(--primary);
+}
+.qc-option--selected:hover {
+  background: rgba(var(--primary-rgb), 0.18);
+  border-color: var(--primary);
+}
+.qc-option-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.qc-option--selected .qc-option-label {
+  color: var(--primary);
+}
+.qc-option-desc {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+.qc-option--selected .qc-option-desc {
+  color: var(--text-secondary);
+}
 `;

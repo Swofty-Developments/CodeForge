@@ -121,8 +121,18 @@ impl ClaudeSession {
             .map_err(|_| crate::Error::Sidecar("sidecar stdin channel closed".into()))
     }
 
-    /// Answer a pending `approval_request`.
-    pub fn respond_to_approval(&self, request_id: &str, approve: bool, message: Option<&str>) -> Result<()> {
+    /// Answer a pending `approval_request` or `ask_user_question`. For
+    /// AskUserQuestion, `answers` carries `{ "<question text>": "<label>" }` —
+    /// the sidecar folds it into the tool's `updatedInput` (Agent SDK contract);
+    /// approving a question without answers yields "The user did not answer
+    /// the questions." on the tool result.
+    pub fn respond_to_approval(
+        &self,
+        request_id: &str,
+        approve: bool,
+        message: Option<&str>,
+        answers: Option<serde_json::Value>,
+    ) -> Result<()> {
         let mut msg = serde_json::json!({
             "type": "approval_response",
             "requestId": request_id,
@@ -130,6 +140,9 @@ impl ClaudeSession {
         });
         if let Some(m) = message {
             msg["message"] = serde_json::Value::String(m.to_string());
+        }
+        if let Some(a) = answers {
+            msg["answers"] = a;
         }
         self.stdin_tx
             .try_send(msg.to_string())

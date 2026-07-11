@@ -14,7 +14,7 @@
  *   "agent-event"     AgentEventPayload (all session streaming, demux by sessionId)
  *   "timeline:event"  { repoPath, event: TimelineEvent } (FZ-5: per-context)
  *   "index:progress"  IndexProgress
- *   "index:status"    { repoPath, status: IndexStatus } (FZ-2, emitted on open_repo)
+ *   "index:status"    { repoPath, status: IndexStatus } (FZ-2, 10s poller; emitted on open and on verdict change)
  *   "repo:changed"    RepoState
  *   "terminal:data"   { id, data } — data is BASE64-encoded PTY output (FZ-3)
  *   "terminal:exit"   { id, code } — child process ended
@@ -25,6 +25,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentEventPayload,
   BranchInfo,
+  ClaudeCliStatus,
   DaemonStatus,
   DiffByFeature,
   Feature,
@@ -32,6 +33,7 @@ import type {
   IndexProgress,
   IndexStatus,
   MergeResult,
+  PastSession,
   PermissionMode,
   RepoState,
   SessionInfo,
@@ -64,6 +66,11 @@ export function reindexRepo(repoPath: string, force: boolean): Promise<void> {
 
 export function daemonStatus(repoPath: string): Promise<DaemonStatus> {
   return invoke("daemon_status", { repoPath });
+}
+
+/** Check if the Claude CLI is installed and authenticated. */
+export function checkClaudeCli(): Promise<ClaudeCliStatus> {
+  return invoke("check_claude_cli");
 }
 
 /** FZ-2: whether the repo's on-disk feature index is fresh / stale / outdated. */
@@ -156,8 +163,20 @@ export function sendSessionInput(id: string, text: string): Promise<void> {
   return invoke("send_session_input", { id, text });
 }
 
-export function approveSession(id: string, requestId: string, approve: boolean): Promise<void> {
-  return invoke("approve_session", { id, requestId, approve });
+/** `answers` is set only when answering an AskUserQuestion request:
+ *  a record of question text → selected option label(s). */
+export function approveSession(
+  id: string,
+  requestId: string,
+  approve: boolean,
+  answers?: Record<string, string>,
+): Promise<void> {
+  return invoke("approve_session", { id, requestId, approve, answers: answers ?? null });
+}
+
+/** Abort the in-flight turn; the session and its transcript stay alive. */
+export function interruptSession(id: string): Promise<void> {
+  return invoke("interrupt_session", { id });
 }
 
 export function stopSession(id: string): Promise<void> {
@@ -170,6 +189,14 @@ export function setSessionMode(sessionId: string, mode: PermissionMode): Promise
 
 export function listSessions(): Promise<SessionInfo[]> {
   return invoke("list_sessions");
+}
+
+export function listPastSessions(repoPath: string): Promise<PastSession[]> {
+  return invoke("list_past_sessions", { repoPath });
+}
+
+export function renameSession(sessionId: string, title: string): Promise<void> {
+  return invoke("rename_session", { sessionId, title });
 }
 
 // ── Terminals (FZ-3) ─────────────────────────────────────────────────────────

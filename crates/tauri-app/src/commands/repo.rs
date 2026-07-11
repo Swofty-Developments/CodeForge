@@ -108,3 +108,71 @@ pub async fn daemon_status(state: State<'_, AppState>, repo_path: String) -> Res
         .unwrap_or(DaemonStatus { running: false, port: None });
     Ok(status)
 }
+
+/// Check if the Claude CLI is installed and authenticated. Returns status info.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeCliStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub authenticated: bool,
+}
+
+#[tauri::command]
+pub async fn check_claude_cli() -> Result<ClaudeCliStatus, String> {
+    // Check if `claude` exists on PATH using the shell_env resolver
+    let claude_path = forge_session::shell_env::which("claude");
+
+    if claude_path.is_none() {
+        return Ok(ClaudeCliStatus {
+            installed: false,
+            version: None,
+            authenticated: false,
+        });
+    }
+
+    // Try to get version
+    let version_output = tokio::process::Command::new("claude")
+        .arg("--version")
+        .output()
+        .await
+        .ok();
+
+    let version = version_output
+        .and_then(|out| {
+            if out.status.success() {
+                String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        });
+
+    // Try a simple headless command to check authentication
+    // If it fails with auth errors, we know they're not authenticated
+    let test_output = tokio::process::Command::new("claude")
+        .arg("-p")
+        .arg("--output-format")
+        .arg("json")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+        .ok();
+
+    let authenticated = test_output
+        .map(|out| {
+            let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
+            // If stderr contains auth-related errors, they're not authenticated
+            !stderr.contains("not authenticated")
+                && !stderr.contains("login required")
+                && !stderr.contains("auth")
+        })
+        .unwrap_or(false);
+
+    Ok(ClaudeCliStatus {
+        installed: true,
+        version,
+        authenticated,
+    })
+}

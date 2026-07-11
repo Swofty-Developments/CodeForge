@@ -12,7 +12,11 @@
  *     The sidecar sets exactly one of options.resume / options.continue / neither
  *     from it — it NEVER infers resumability from prior-query state or SDK error
  *     strings.
- *   { type: "approval_response", requestId, decision, message? }
+ *   { type: "approval_response", requestId, decision, message?, answers? }
+ *     answers (AskUserQuestion only): { "<question text>": "<selected label>" } —
+ *     merged into the tool's updatedInput per the Agent SDK contract. Approving
+ *     without answers makes the tool report "The user did not answer the
+ *     questions.", so the Rust side always sends answers for question requests.
  *   { type: "set_mode", mode }
  *     mode is one of default|acceptEdits|plan|bypassPermissions. The SDK's
  *     Query.setPermissionMode() control request is streaming-input only; this
@@ -63,10 +67,18 @@ let currentAbort = null;
 // Counter for generating unique approval request IDs.
 let approvalCounter = 0;
 
-// Incremental streaming state — the SDK yields full message snapshots,
-// so we diff against the previous lengths to emit only new characters.
-let lastTextLen = 0;
-let lastThinkingLen = 0;
+// Incremental streaming state. A single turn yields MANY assistant messages
+// (one per API round-trip between tool calls), and the SDK may re-yield
+// growing snapshots of the same message. Diff per (message id, block index):
+// snapshots of the same message emit only the new chars; a NEW message resets
+// to zero. (The old global per-turn counters truncated every post-tool-call
+// message — mid-turn thinking/text was silently dropped or emitted as
+// corrupted tails.)
+let streamMsgId = null;
+let streamBlockLens = [];
+// Tool ids already announced this turn — guards duplicate tool cards if the
+// same message snapshot is yielded more than once.
+let streamToolIdsSeen = new Set();
 
 // The four SDK permission modes a session may run under.
 const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"];
@@ -202,7 +214,18 @@ async function handleQuery(cmd) {
       pendingApprovals.set(requestId, {
         resolve: (resp) => {
           if (resp.decision === "allow") {
-            resolve({ behavior: "allow", updatedInput: input });
+            // AskUserQuestion contract (Agent SDK): updatedInput must carry the
+            // original questions PLUS an `answers` record keyed by question
+            // text, valued by the selected option label(s). Without answers the
+            // tool resolves to "The user did not answer the questions."
+            if (toolName === "AskUserQuestion" && resp.answers && typeof resp.answers === "object") {
+              resolve({
+                behavior: "allow",
+                updatedInput: { questions: input.questions || [], answers: resp.answers },
+              });
+            } else {
+              resolve({ behavior: "allow", updatedInput: input });
+            }
           } else {
             resolve({ behavior: "deny", message: resp.message || "User denied this action" });
           }
@@ -223,9 +246,10 @@ async function handleQuery(cmd) {
   let resumeReported = false;
   let turnEmitted = false;
 
-  // Reset incremental streaming counters for new query.
-  lastTextLen = 0;
-  lastThinkingLen = 0;
+  // Reset incremental streaming state for the new query turn.
+  streamMsgId = null;
+  streamBlockLens = [];
+  streamToolIdsSeen = new Set();
 
   // Emit turn_started so the frontend shows "generating" state
   emit({ type: "turn_started" });
@@ -303,8 +327,8 @@ async function handleQuery(cmd) {
           });
         }
 
-        lastTextLen = 0;
-        lastThinkingLen = 0;
+        streamMsgId = null;
+        streamBlockLens = [];
         emit({ type: "turn_completed", sessionId: capturedSessionId || "" });
         turnEmitted = true;
         continue;
@@ -319,30 +343,43 @@ async function handleQuery(cmd) {
         continue;
       }
 
-      // assistant message — extract content blocks (incremental diff)
+      // assistant message — extract content blocks (incremental diff).
+      // Diff state is per (message id, block index): a NEW assistant message
+      // (each API round-trip between tool calls yields one) starts from zero,
+      // while a re-yielded snapshot of the same message emits only new chars.
       if (msgType === "assistant" && message.message?.content) {
-        for (const block of message.message.content) {
+        const msgId = message.message.id ?? null;
+        if (msgId !== streamMsgId) {
+          streamMsgId = msgId;
+          streamBlockLens = [];
+        }
+        for (const [i, block] of message.message.content.entries()) {
+          const prev = streamBlockLens[i] ?? 0;
           if (block.type === "text" && block.text) {
-            const newText = block.text.slice(lastTextLen);
+            const newText = block.text.slice(prev);
             if (newText) emit({ type: "text_delta", text: newText });
-            lastTextLen = block.text.length;
+            streamBlockLens[i] = block.text.length;
           } else if (block.type === "tool_use") {
-            emit({
-              type: "tool_use_start",
-              toolId: block.id ?? "",
-              toolName: block.name ?? "tool",
-            });
-            if (block.input) {
+            const toolId = block.id ?? "";
+            if (!streamToolIdsSeen.has(toolId)) {
+              streamToolIdsSeen.add(toolId);
               emit({
-                type: "tool_use_input",
-                toolId: block.id ?? "",
-                inputJson: JSON.stringify(block.input),
+                type: "tool_use_start",
+                toolId,
+                toolName: block.name ?? "tool",
               });
+              if (block.input) {
+                emit({
+                  type: "tool_use_input",
+                  toolId,
+                  inputJson: JSON.stringify(block.input),
+                });
+              }
             }
           } else if (block.type === "thinking" && block.thinking) {
-            const newThinking = block.thinking.slice(lastThinkingLen);
+            const newThinking = block.thinking.slice(prev);
             if (newThinking) emit({ type: "thinking_delta", text: newThinking });
-            lastThinkingLen = block.thinking.length;
+            streamBlockLens[i] = block.thinking.length;
           }
         }
         continue;
@@ -460,11 +497,11 @@ function handleStreamEvent(event) {
 }
 
 function handleApprovalResponse(cmd) {
-  const { requestId, decision, message } = cmd;
+  const { requestId, decision, message, answers } = cmd;
   const pending = pendingApprovals.get(requestId);
   if (pending) {
     pendingApprovals.delete(requestId);
-    pending.resolve({ decision, message });
+    pending.resolve({ decision, message, answers });
   }
 }
 
