@@ -88,6 +88,12 @@ export interface DocUpdatedPayload {
   detail: string;
 }
 
+/** Claude CLI health verdict from `claude_cli_status` (tagged, no conflation). */
+export type ClaudeCliStatus =
+  | { state: "ok"; path: string; version: string; shellEnvResolved: boolean }
+  | { state: "broken"; path: string; detail: string; shellEnvResolved: boolean }
+  | { state: "notFound"; shellEnvResolved: boolean };
+
 interface TimelineEventBase {
   id: number;
   ts: string; // RFC3339

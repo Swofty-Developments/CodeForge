@@ -62,6 +62,7 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
+            commands::cli::claude_cli_status,
             commands::repo::open_repo,
             commands::repo::init_repo,
             commands::repo::close_repo,

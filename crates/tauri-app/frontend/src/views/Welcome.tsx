@@ -1,11 +1,21 @@
-/* Welcome view — open-repo CTA wired to the dialog plugin + open_repo command. */
+/* Welcome view — open-repo CTA wired to the dialog plugin + open_repo command,
+ * plus the Claude CLI health check (ok / broken / notFound, named states). */
 
-import { Show } from "solid-js";
+import { Show, Switch, Match, createSignal, onMount } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appStore } from "../stores/app-store";
+import { claudeCliStatus } from "../ipc";
+import type { ClaudeCliStatus } from "../types";
 
 export function Welcome() {
   const { store } = appStore;
+  const [cli, setCli] = createSignal<ClaudeCliStatus | null>(null);
+
+  onMount(() => {
+    claudeCliStatus()
+      .then(setCli)
+      .catch((e) => appStore.pushError(`Claude CLI check failed: ${String(e)}`));
+  });
 
   async function pickRepo() {
     const dir = await open({ directory: true, multiple: false, title: "Open a repository" });
@@ -45,6 +55,43 @@ export function Welcome() {
         <Show when={store.lastError}>
           <div class="welcome-error">{store.lastError}</div>
         </Show>
+
+        <Switch>
+          <Match when={cli()?.state === "ok" && cli()}>
+            {(ok) => {
+              const s = ok() as Extract<ClaudeCliStatus, { state: "ok" }>;
+              return <div class="welcome-cli-ok">{s.version} · {s.path}</div>;
+            }}
+          </Match>
+          <Match when={cli()?.state === "notFound" && cli()}>
+            {(missing) => (
+              <div class="welcome-cli-warn">
+                <div class="welcome-cli-warn-title">Claude Code CLI not found</div>
+                <div>Sessions and indexing need it. Install with either:</div>
+                <code>brew install --cask claude-code</code>
+                <code>curl -fsSL https://claude.ai/install.sh | bash</code>
+                <Show when={!missing().shellEnvResolved}>
+                  <div class="welcome-cli-warn-note">
+                    Your login-shell PATH could not be read, so an existing install outside the
+                    standard locations may also be invisible to CodeForge.
+                  </div>
+                </Show>
+              </div>
+            )}
+          </Match>
+          <Match when={cli()?.state === "broken" && cli()}>
+            {(broken) => {
+              const s = broken() as Extract<ClaudeCliStatus, { state: "broken" }>;
+              return (
+                <div class="welcome-cli-warn">
+                  <div class="welcome-cli-warn-title">Claude Code CLI found but not runnable</div>
+                  <code>{s.path}</code>
+                  <div class="welcome-cli-warn-note">{s.detail}</div>
+                </div>
+              );
+            }}
+          </Match>
+        </Switch>
       </div>
 
       <style>{`
@@ -121,6 +168,31 @@ export function Welcome() {
           word-break: break-word;
           user-select: text; -webkit-user-select: text;
         }
+        .welcome-cli-ok {
+          margin-top: var(--space-5);
+          font-size: 10px; font-family: var(--font-mono);
+          color: var(--text-tertiary);
+        }
+        .welcome-cli-warn {
+          margin-top: var(--space-5);
+          text-align: left;
+          display: flex; flex-direction: column; gap: 6px;
+          font-size: 11px;
+          padding: 10px 12px; border-radius: var(--radius-sm);
+          background: rgba(var(--amber-rgb), 0.08);
+          border: 1px solid rgba(var(--amber-rgb), 0.2);
+          color: var(--text-secondary);
+        }
+        .welcome-cli-warn-title { color: var(--amber); font-weight: 600; }
+        .welcome-cli-warn code {
+          font-family: var(--font-mono); font-size: 10.5px;
+          padding: 3px 6px; border-radius: var(--radius-sm);
+          background: var(--bg-muted); border: 1px solid var(--border);
+          color: var(--text);
+          user-select: text; -webkit-user-select: text;
+          width: fit-content;
+        }
+        .welcome-cli-warn-note { color: var(--text-tertiary); word-break: break-word; }
       `}</style>
     </div>
   );
