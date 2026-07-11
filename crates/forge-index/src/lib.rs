@@ -171,6 +171,52 @@ impl FeatureIndex {
         classify::classify(&self.repo_root, &self.features, paths)
     }
 
+    /// Slugs of features that reference any of `rel_paths` (repo-relative,
+    /// `/`-separated — the index-meta manifest keys) as an entry point or file.
+    /// Exact membership only; no directory-prefix widening.
+    pub fn owners_of(&self, rel_paths: &[String]) -> Vec<String> {
+        let set: std::collections::BTreeSet<&str> =
+            rel_paths.iter().map(String::as_str).collect();
+        self.features
+            .iter()
+            .filter(|f| {
+                f.entry_points
+                    .iter()
+                    .chain(f.files.iter().map(|file| &file.path))
+                    .any(|p| set.contains(p.to_string_lossy().replace('\\', "/").as_str()))
+            })
+            .map(|f| f.slug.clone())
+            .collect()
+    }
+
+    /// Drop references to files that no longer exist on disk from the named
+    /// features. An unpinned feature left with no paths at all is removed (its
+    /// subject matter is gone); pinned features survive minus the dead paths.
+    /// Returns the slugs of removed features.
+    pub fn prune_missing_files(&mut self, slugs: &[String]) -> Vec<String> {
+        let root = self.repo_root.clone();
+        for feature in self.features.iter_mut().filter(|f| slugs.contains(&f.slug)) {
+            let before = feature.entry_points.len() + feature.files.len();
+            feature.entry_points.retain(|p| root.join(p).exists());
+            feature.files.retain(|f| root.join(&f.path).exists());
+            if feature.entry_points.len() + feature.files.len() != before {
+                feature.updated_at = Utc::now();
+            }
+        }
+        let mut removed = Vec::new();
+        self.features.retain(|f| {
+            let dead = !f.pinned
+                && slugs.contains(&f.slug)
+                && f.entry_points.is_empty()
+                && f.files.is_empty();
+            if dead {
+                removed.push(f.slug.clone());
+            }
+            !dead
+        });
+        removed
+    }
+
     /// The repo this index belongs to.
     pub fn repo_root(&self) -> &Path {
         &self.repo_root
@@ -333,6 +379,45 @@ mod tests {
 
         assert_eq!(index.get("pinned").unwrap().group.as_deref(), Some("hand/edited"));
         assert_eq!(index.get("unpinned").unwrap().group.as_deref(), Some("crates/forge-index"));
+    }
+
+    #[test]
+    fn owners_of_matches_exact_membership_only() {
+        let tmp = TempDir::new("owners");
+        let mut index = FeatureIndex::load(tmp.path()).expect("load");
+        index.upsert(feature("auth", false)); // references src/auth.rs
+        index.upsert(feature("billing", false)); // references src/billing.rs
+
+        assert_eq!(index.owners_of(&["src/auth.rs".to_string()]), vec!["auth"]);
+        // A sibling under src/ is NOT an owner — no directory-prefix widening.
+        assert!(index.owners_of(&["src/other.rs".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn prune_missing_files_drops_dead_paths_and_empty_unpinned_features() {
+        let tmp = TempDir::new("prune");
+        tmp.write("src/kept.rs", "fn kept() {}");
+        let mut index = FeatureIndex::load(tmp.path()).expect("load");
+
+        // "kept" has one real file; "gone" (unpinned) and "gone-pinned" (pinned)
+        // reference only files that don't exist on disk.
+        index.upsert(feature("kept", false));
+        index.get("kept").unwrap(); // sanity
+        index.upsert(feature("gone", false));
+        index.upsert(feature("gone-pinned", true));
+        // Point "kept" at the real file.
+        let mut kept = index.get("kept").unwrap().clone();
+        kept.files[0].path = PathBuf::from("src/kept.rs");
+        index.upsert(kept);
+
+        let slugs: Vec<String> =
+            ["kept", "gone", "gone-pinned"].iter().map(|s| s.to_string()).collect();
+        let removed = index.prune_missing_files(&slugs);
+
+        assert_eq!(removed, vec!["gone".to_string()]);
+        assert!(index.get("kept").is_some(), "feature with a live file survives");
+        let pinned = index.get("gone-pinned").expect("pinned survives even when empty");
+        assert!(pinned.files.is_empty(), "dead paths pruned from pinned feature");
     }
 
     #[test]

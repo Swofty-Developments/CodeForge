@@ -25,13 +25,14 @@ const RETRY_DELAY_MS: u64 = 1000;
 /// desktop-launched apps find the right install. Retries up to MAX_RETRIES times
 /// on transient failures with exponential backoff.
 pub(crate) async fn run_headless_claude(repo_root: &Path, prompt: &str) -> Result<String> {
-    // `which` checks the login-shell PATH first, then the process PATH; a `None`
-    // here is definitive — there is no `claude` to fall back to. Name it rather
-    // than spawning a bare "claude" that would fail with a confusing ENOENT.
-    let claude = forge_session::shell_env::which("claude").ok_or_else(|| {
+    // `locate_claude` checks the login-shell PATH, then the well-known install
+    // locations (native installer, legacy local, Homebrew); a `None` here is
+    // definitive — there is no `claude` to fall back to. Name it rather than
+    // spawning a bare "claude" that would fail with a confusing ENOENT.
+    let claude = forge_session::shell_env::locate_claude().ok_or_else(|| {
         Error::Indexer(
-            "Claude CLI not found on PATH — install Claude Code (https://claude.com/claude-code) \
-             and ensure `claude` is on your login shell PATH"
+            "Claude Code CLI not found — install it (`brew install --cask claude-code` or \
+             `curl -fsSL https://claude.ai/install.sh | bash`) and reopen the app"
                 .into(),
         )
     })?;

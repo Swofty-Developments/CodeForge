@@ -12,6 +12,10 @@ function fmtTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
+function fmtCost(usd: number): string {
+  return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
+}
+
 export function MessageStream(props: { session: SessionUi }) {
   const messages = () => props.session.messages;
   const generating = () => props.session.runState === "generating";
@@ -133,6 +137,7 @@ export function MessageStream(props: { session: SessionUi }) {
       <Show when={showUsage()}>
         <div class="sp-usage">
           {fmtTokens(props.session.usage.inputTokens)} in · {fmtTokens(props.session.usage.outputTokens)} out
+          <Show when={props.session.usage.costUsd > 0}> · {fmtCost(props.session.usage.costUsd)}</Show>
           <Show when={props.session.info.model}> · {props.session.info.model}</Show>
         </div>
       </Show>

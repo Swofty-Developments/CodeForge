@@ -88,6 +88,12 @@ export interface DocUpdatedPayload {
   detail: string;
 }
 
+/** Claude CLI health verdict from `claude_cli_status` (tagged, no conflation). */
+export type ClaudeCliStatus =
+  | { state: "ok"; path: string; version: string; shellEnvResolved: boolean }
+  | { state: "broken"; path: string; detail: string; shellEnvResolved: boolean }
+  | { state: "notFound"; shellEnvResolved: boolean };
+
 interface TimelineEventBase {
   id: number;
   ts: string; // RFC3339
@@ -108,7 +114,7 @@ export type TimelineEvent =
   | (TimelineEventBase & { kind: "feature_pinned"; payload: FeaturePinnedPayload })
   | (TimelineEventBase & { kind: "feature_edited"; payload: FeatureEditedPayload })
   | (TimelineEventBase & { kind: "doc_updated"; payload: DocUpdatedPayload })
-  | (TimelineEventBase & { kind: "tests_run"; payload: unknown });
+  | (TimelineEventBase & { kind: "tests_run"; payload: CommandRunPayload });
 
 export interface TimelineFilter {
   featureSlug?: string;
@@ -248,13 +254,6 @@ export interface StartSessionOpts {
 export interface DaemonStatus {
   running: boolean;
   port: number | null;
-}
-
-/** Wire shape returned by the `check_claude_cli` IPC command. */
-export interface ClaudeCliStatus {
-  installed: boolean;
-  version: string | null;
-  authenticated: boolean;
 }
 
 /** Store-side daemon model — three explicit, separately-painted states. An

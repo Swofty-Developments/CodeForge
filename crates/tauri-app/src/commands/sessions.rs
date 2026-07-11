@@ -396,3 +396,32 @@ async fn create_thread_and_session(
 
     Ok(thread_id)
 }
+
+/// Persist a pasted clipboard image to a temp file and return its path, so the
+/// composer can attach it as an `@<path>` reference like any picked file
+/// (attachments pass paths only; the agent's own tools read the bytes).
+#[tauri::command]
+pub async fn save_pasted_image(data_base64: String, mime: String) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let ext = match mime.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        other => return Err(format!("unsupported pasted image type: {other}")),
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|e| format!("invalid pasted image data: {e}"))?;
+
+    let dir = std::env::temp_dir().join("codeforge-pasted");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("create paste dir: {e}"))?;
+    let path = dir.join(format!("paste-{}.{ext}", uuid::Uuid::new_v4()));
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| format!("write pasted image: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}

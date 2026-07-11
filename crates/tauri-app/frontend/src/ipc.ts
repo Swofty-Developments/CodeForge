@@ -69,9 +69,6 @@ export function daemonStatus(repoPath: string): Promise<DaemonStatus> {
 }
 
 /** Check if the Claude CLI is installed and authenticated. */
-export function checkClaudeCli(): Promise<ClaudeCliStatus> {
-  return invoke("check_claude_cli");
-}
 
 /** FZ-2: whether the repo's on-disk feature index is fresh / stale / outdated. */
 export function indexStatus(repoPath: string): Promise<IndexStatus> {
@@ -197,6 +194,16 @@ export function listPastSessions(repoPath: string): Promise<PastSession[]> {
 
 export function renameSession(sessionId: string, title: string): Promise<void> {
   return invoke("rename_session", { sessionId, title });
+}
+
+/** Save a pasted clipboard image to a temp file; returns the path to attach. */
+export function savePastedImage(dataBase64: string, mime: string): Promise<string> {
+  return invoke("save_pasted_image", { dataBase64, mime });
+}
+
+/** Claude CLI health check: locate (PATH + well-known installs) and run --version. */
+export function claudeCliStatus(): Promise<ClaudeCliStatus> {
+  return invoke("claude_cli_status");
 }
 
 // ── Terminals (FZ-3) ─────────────────────────────────────────────────────────

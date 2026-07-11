@@ -5,8 +5,9 @@
 import { For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appStore } from "../stores/app-store";
+import { getFeatureDoc, getTimeline } from "../ipc";
 
-type Category = "action" | "view" | "feature";
+type Category = "action" | "view" | "feature" | "file" | "doc" | "note";
 
 interface Cmd {
   id: string;
@@ -14,6 +15,11 @@ interface Cmd {
   category: Category;
   run: () => void | Promise<void>;
 }
+
+/** How many rows each content group (files / docs / notes) may contribute. */
+const MAX_PER_GROUP = 8;
+/** Content search kicks in at this query length; below it, commands + features only. */
+const MIN_CONTENT_QUERY = 2;
 
 /** Greedy left-to-right subsequence match. `[]` = matches all (empty query). */
 function fuzzyMatch(query: string, text: string): number[] | null {
@@ -26,6 +32,27 @@ function fuzzyMatch(query: string, text: string): number[] | null {
     if (t[ti] === q[qi]) { hits.push(ti); qi++; }
   }
   return qi === q.length ? hits : null;
+}
+
+/** Case-insensitive substring match returning the matched index range. */
+function substrMatch(query: string, text: string): number[] | null {
+  const start = text.toLowerCase().indexOf(query.toLowerCase());
+  if (start < 0) return null;
+  return Array.from({ length: query.length }, (_, i) => start + i);
+}
+
+/** First line of `body` containing `query` (case-insensitive), trimmed. */
+function matchingLine(body: string, query: string): string | null {
+  const q = query.toLowerCase();
+  for (const line of body.split("\n")) {
+    if (line.toLowerCase().includes(q)) return line.trim();
+  }
+  return null;
+}
+
+function truncate(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
 }
 
 function Highlight(props: { text: string; match: number[] }) {
@@ -44,6 +71,12 @@ export function CommandPalette() {
   const { store } = appStore;
   const [query, setQuery] = createSignal("");
   const [selected, setSelected] = createSignal(0);
+  // Content-search corpus, loaded once per palette open: living-doc bodies and
+  // timeline notes. `corpusError` is a named state shown at the list foot —
+  // command/feature search still works without the corpus.
+  const [docs, setDocs] = createSignal<{ slug: string; name: string; body: string }[]>([]);
+  const [notes, setNotes] = createSignal<{ id: number; text: string }[]>([]);
+  const [corpusError, setCorpusError] = createSignal<string | null>(null);
   let inputRef: HTMLInputElement | undefined;
   let listRef: HTMLDivElement | undefined;
 
@@ -64,16 +97,71 @@ export function CommandPalette() {
 
   const results = createMemo<{ cmd: Cmd; match: number[] }[]>(() => {
     const q = query().trim();
+    const openFeature = (slug: string) => () => appStore.openFeatureDetail(slug);
     const features: Cmd[] = store.features.map((f) => ({
       id: `feature-${f.slug}`,
       label: f.name,
       category: "feature" as const,
-      run: () => appStore.openFeatureDetail(f.slug),
+      run: openFeature(f.slug),
     }));
     const out: { cmd: Cmd; match: number[] }[] = [];
     for (const cmd of [...baseCmds, ...features]) {
       const match = fuzzyMatch(q, cmd.label);
       if (match) out.push({ cmd, match });
+    }
+    if (q.length < MIN_CONTENT_QUERY) return out;
+
+    // Features whose *description or tags* match when the name fuzzy-miss'd.
+    for (const f of store.features) {
+      if (fuzzyMatch(q, f.name)) continue;
+      if (substrMatch(q, f.description) || substrMatch(q, f.tags.join(" "))) {
+        out.push({
+          cmd: { id: `feature-${f.slug}`, label: f.name, category: "feature", run: openFeature(f.slug) },
+          match: [],
+        });
+      }
+    }
+
+    // File paths across all features (deduped; a shared file lands on its first owner).
+    const seenPaths = new Set<string>();
+    let nFiles = 0;
+    outer: for (const f of store.features) {
+      for (const file of f.files) {
+        if (seenPaths.has(file.path)) continue;
+        seenPaths.add(file.path);
+        const match = fuzzyMatch(q, file.path);
+        if (!match) continue;
+        out.push({
+          cmd: { id: `file-${file.path}`, label: file.path, category: "file", run: openFeature(f.slug) },
+          match,
+        });
+        if (++nFiles >= MAX_PER_GROUP) break outer;
+      }
+    }
+
+    // Living-doc bodies: show the first matching line under the feature's name.
+    let nDocs = 0;
+    for (const d of docs()) {
+      const line = matchingLine(d.body, q);
+      if (line === null) continue;
+      const label = `${d.name} — ${truncate(line, 64)}`;
+      out.push({
+        cmd: { id: `doc-${d.slug}`, label, category: "doc", run: openFeature(d.slug) },
+        match: substrMatch(q, label) ?? [],
+      });
+      if (++nDocs >= MAX_PER_GROUP) break;
+    }
+
+    // Timeline notes; selecting one jumps to the timeline view.
+    let nNotes = 0;
+    for (const n of notes()) {
+      if (!substrMatch(q, n.text)) continue;
+      const label = truncate(n.text, 72);
+      out.push({
+        cmd: { id: `note-${n.id}`, label, category: "note", run: () => appStore.setActiveView("timeline") },
+        match: substrMatch(q, label) ?? [],
+      });
+      if (++nNotes >= MAX_PER_GROUP) break;
     }
     return out;
   });
@@ -105,7 +193,25 @@ export function CommandPalette() {
     queueMicrotask(() => listRef?.querySelector(".cmd-palette-item.selected")?.scrollIntoView({ block: "nearest" }));
   });
 
-  onMount(() => inputRef?.focus());
+  onMount(() => {
+    inputRef?.focus();
+    const repoPath = store.repo?.path;
+    if (!repoPath) return;
+    void Promise.all(
+      store.features.map(async (f) => ({
+        slug: f.slug,
+        name: f.name,
+        body: (await getFeatureDoc(repoPath, f.slug)) ?? "",
+      }))
+    )
+      .then((ds) => setDocs(ds.filter((d) => d.body.length > 0)))
+      .catch((e) => setCorpusError(String(e)));
+    void getTimeline(repoPath, { kinds: ["note"], limit: 200 })
+      .then((evs) =>
+        setNotes(evs.flatMap((ev) => (ev.kind === "note" ? [{ id: ev.id, text: ev.payload.text }] : [])))
+      )
+      .catch((e) => setCorpusError(String(e)));
+  });
 
   return (
     <div class="cmd-palette-overlay" onClick={() => appStore.setPaletteOpen(false)}>
@@ -117,7 +223,7 @@ export function CommandPalette() {
           <input
             ref={inputRef}
             class="cmd-palette-input"
-            placeholder="Type a command or feature…"
+            placeholder="Search commands, features, files, docs, notes…"
             value={query()}
             onInput={(e) => { setQuery(e.currentTarget.value); setSelected(0); }}
             onKeyDown={onKeyDown}
@@ -142,6 +248,9 @@ export function CommandPalette() {
                     "cat-action": r.cmd.category === "action",
                     "cat-view": r.cmd.category === "view",
                     "cat-feature": r.cmd.category === "feature",
+                    "cat-file": r.cmd.category === "file",
+                    "cat-doc": r.cmd.category === "doc",
+                    "cat-note": r.cmd.category === "note",
                   }}
                 >
                   {r.cmd.category}
@@ -151,6 +260,9 @@ export function CommandPalette() {
           </For>
           <Show when={results().length === 0}>
             <div class="cmd-palette-empty">No matches</div>
+          </Show>
+          <Show when={corpusError()}>
+            <div class="cmd-palette-corpus-err">Doc/note search unavailable: {corpusError()}</div>
           </Show>
         </div>
       </div>
@@ -223,7 +335,16 @@ export function CommandPalette() {
         .cat-action  { color: var(--green);   background: rgba(var(--green-rgb), 0.1); }
         .cat-view    { color: var(--amber);   background: rgba(var(--amber-rgb), 0.1); }
         .cat-feature { color: var(--primary); background: rgba(var(--primary-rgb), 0.1); font-family: var(--font-mono); }
+        .cat-file    { color: var(--sky);     background: rgba(var(--sky-rgb), 0.1); font-family: var(--font-mono); }
+        .cat-doc     { color: var(--purple);  background: rgba(var(--purple-rgb), 0.1); }
+        .cat-note    { color: var(--text-secondary); background: var(--bg-muted); }
         .cmd-palette-empty { padding: var(--space-6); text-align: center; color: var(--text-tertiary); font-size: 13px; }
+        .cmd-palette-corpus-err {
+          padding: var(--space-2) var(--space-3);
+          border-top: 1px solid var(--border);
+          color: var(--text-tertiary);
+          font-size: 11px;
+        }
       `}</style>
     </div>
   );

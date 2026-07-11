@@ -62,12 +62,12 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
+            commands::cli::claude_cli_status,
             commands::repo::open_repo,
             commands::repo::init_repo,
             commands::repo::close_repo,
             commands::repo::reindex_repo,
             commands::repo::daemon_status,
-            commands::repo::check_claude_cli,
             commands::features::get_features,
             commands::features::get_feature,
             commands::features::get_feature_doc,
@@ -86,6 +86,7 @@ fn main() {
             commands::sessions::set_session_mode,
             commands::sessions::list_past_sessions,
             commands::sessions::rename_session,
+            commands::sessions::save_pasted_image,
             commands::worktrees::list_worktrees,
             commands::worktrees::create_worktree,
             commands::worktrees::remove_worktree,
