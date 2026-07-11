@@ -7,12 +7,22 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { appStore } from "../../stores/app-store";
+import { savePastedImage } from "../../ipc";
 import { ModeControl } from "./ModeControl";
 import { SlashMenu, filterSlashCommands } from "./SlashMenu";
 import { basename, withAttachments } from "./attachments";
 import type { PermissionMode, SessionUi } from "../../types";
 
 const MAX_COMPOSER_PX = 168; // ~8 lines at 13.5px / 1.45
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",", 2)[1] ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
 
 export function Composer(props: {
   disabled: boolean;
@@ -111,6 +121,25 @@ export function Composer(props: {
     setAttachments((prev) => prev.filter((p) => p !== path));
   }
 
+  // Pasted images have no path, so they are written to a temp file backend-side
+  // and attached as a path like any picked file. Text pastes pass through.
+  function onPaste(e: ClipboardEvent): void {
+    const images = Array.from(e.clipboardData?.items ?? []).filter((it) =>
+      it.type.startsWith("image/")
+    );
+    if (images.length === 0 || props.disabled) return;
+    e.preventDefault();
+    for (const item of images) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const mime = item.type;
+      void blobToBase64(blob)
+        .then((data) => savePastedImage(data, mime))
+        .then((path) => addPaths([path]))
+        .catch((err) => appStore.pushError(`Pasted image failed to attach: ${String(err)}`));
+    }
+  }
+
   async function pickFiles(): Promise<void> {
     if (props.disabled) return;
     const res = await open({ multiple: true });
@@ -201,6 +230,7 @@ export function Composer(props: {
             value={input()}
             onInput={(e) => onInput(e.currentTarget.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
           />
           <Show when={slashOpen()}>
             <SlashMenu items={slashItems()} selected={slashSel()} onPick={pickSlash} onHover={setSlashSel} />

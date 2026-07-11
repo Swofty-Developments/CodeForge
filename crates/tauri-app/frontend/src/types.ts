@@ -108,7 +108,7 @@ export type TimelineEvent =
   | (TimelineEventBase & { kind: "feature_pinned"; payload: FeaturePinnedPayload })
   | (TimelineEventBase & { kind: "feature_edited"; payload: FeatureEditedPayload })
   | (TimelineEventBase & { kind: "doc_updated"; payload: DocUpdatedPayload })
-  | (TimelineEventBase & { kind: "tests_run"; payload: unknown });
+  | (TimelineEventBase & { kind: "tests_run"; payload: CommandRunPayload });
 
 export interface TimelineFilter {
   featureSlug?: string;

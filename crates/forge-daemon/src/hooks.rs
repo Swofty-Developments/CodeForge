@@ -66,14 +66,49 @@ fn parse_post_tool_use(raw: &Value) -> Option<(EventKind, Value, Vec<PathBuf>)> 
         Some((EventKind::FileEdited, payload, edited))
     } else if tool_name == "Bash" {
         let command = input_str("command")?;
+        let kind = if is_test_command(&command) {
+            EventKind::TestsRun
+        } else {
+            EventKind::CommandRun
+        };
         let payload = serde_json::json!({
             "command": command,
             "description": input_str("description"),
         });
-        Some((EventKind::CommandRun, payload, vec![]))
+        Some((kind, payload, vec![]))
     } else {
         None
     }
+}
+
+/// Test-runner detection: standalone runners or `<tool> test` invocations,
+/// anywhere in a compound command line.
+fn is_test_command(command: &str) -> bool {
+    const STANDALONE: [&str; 8] = [
+        "pytest", "jest", "vitest", "mocha", "rspec", "phpunit", "tox", "ctest",
+    ];
+    const TEST_SUBCOMMAND: [&str; 9] = [
+        "cargo", "go", "npm", "pnpm", "yarn", "bun", "dotnet", "mix", "mvn",
+    ];
+    let tokens: Vec<&str> = command
+        .split(|c: char| c.is_whitespace() || matches!(c, ';' | '(' | ')'))
+        .filter(|t| !t.is_empty() && *t != "&&" && *t != "||")
+        .collect();
+    tokens.iter().enumerate().any(|(i, tok)| {
+        let base = tok.rsplit('/').next().unwrap_or(tok);
+        if STANDALONE.contains(&base) {
+            return true;
+        }
+        if base == "gradle" || base == "gradlew" {
+            return tokens.get(i + 1).is_some_and(|next| *next == "test");
+        }
+        TEST_SUBCOMMAND.contains(&base)
+            && tokens.get(i + 1).is_some_and(|next| {
+                *next == "test"
+                    || *next == "nextest"
+                    || (*next == "run" && tokens.get(i + 2).is_some_and(|n| n.starts_with("test")))
+            })
+    })
 }
 
 #[cfg(test)]
@@ -113,13 +148,57 @@ mod tests {
         let raw = serde_json::json!({
             "hook_event_name": "PostToolUse",
             "tool_name": "Bash",
-            "tool_input": { "command": "cargo test", "description": "Run tests" }
+            "tool_input": { "command": "cargo build", "description": "Build" }
         });
         let parsed = parse_hook_event(&raw).unwrap();
         assert_eq!(parsed.kind, EventKind::CommandRun);
-        assert_eq!(parsed.payload["command"], "cargo test");
-        assert_eq!(parsed.payload["description"], "Run tests");
+        assert_eq!(parsed.payload["command"], "cargo build");
+        assert_eq!(parsed.payload["description"], "Build");
         assert!(parsed.edited_paths.is_empty());
+    }
+
+    #[test]
+    fn bash_test_commands_map_to_tests_run() {
+        for cmd in [
+            "cargo test",
+            "cargo nextest run",
+            "cd api && cargo test -p forge-core",
+            "npm test",
+            "npm run test:unit",
+            "pnpm test --filter web",
+            "go test ./...",
+            "python -m pytest tests/",
+            "./node_modules/.bin/vitest run",
+            "./gradlew test",
+        ] {
+            let raw = serde_json::json!({
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "tool_input": { "command": cmd }
+            });
+            let parsed = parse_hook_event(&raw).unwrap();
+            assert_eq!(parsed.kind, EventKind::TestsRun, "command: {cmd}");
+            assert_eq!(parsed.payload["command"], cmd);
+        }
+    }
+
+    #[test]
+    fn bash_non_test_commands_stay_command_run() {
+        for cmd in [
+            "cargo build",
+            "npm run dev",
+            "go build ./...",
+            "ls tests/",
+            "git commit -m 'test: add coverage'",
+        ] {
+            let raw = serde_json::json!({
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "tool_input": { "command": cmd }
+            });
+            let parsed = parse_hook_event(&raw).unwrap();
+            assert_eq!(parsed.kind, EventKind::CommandRun, "command: {cmd}");
+        }
     }
 
     #[test]

@@ -27,7 +27,7 @@ export function Welcome() {
           </svg>
         </div>
         <h1 class="welcome-title">
-          <span>Feature</span><span class="welcome-title-accent">Forge</span>
+          <span>Code</span><span class="welcome-title-accent">Forge</span>
         </h1>
         <p class="welcome-sub">
           Open a repository and see <em>features</em>, not files.

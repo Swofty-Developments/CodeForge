@@ -172,6 +172,11 @@ export function listSessions(): Promise<SessionInfo[]> {
   return invoke("list_sessions");
 }
 
+/** Save a pasted clipboard image to a temp file; returns the path to attach. */
+export function savePastedImage(dataBase64: string, mime: string): Promise<string> {
+  return invoke("save_pasted_image", { dataBase64, mime });
+}
+
 // ── Terminals (FZ-3) ─────────────────────────────────────────────────────────
 
 /** Spawn a PTY rooted at `cwd` (the active worktree). Returns its terminal id. */

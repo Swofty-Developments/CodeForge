@@ -40,6 +40,7 @@ export function summarize(ev: TimelineEvent): string {
     case "file_edited":
       return ev.payload.path || kindLabel(ev.kind);
     case "command_run":
+    case "tests_run":
       return ev.payload.command || kindLabel(ev.kind);
     case "note":
       return ev.payload.text || kindLabel(ev.kind);
@@ -62,9 +63,6 @@ export function summarize(ev: TimelineEvent): string {
       return ev.payload.outcome === "failed"
         ? `doc refresh failed: ${ev.payload.slug}`
         : `doc refreshed: ${ev.payload.slug}`;
-    case "tests_run":
-      // The backend does not yet emit a payload for this kind (see contractNotes).
-      return kindLabel(ev.kind);
   }
 }
 
