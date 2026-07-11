@@ -82,6 +82,7 @@ fn main() {
             commands::sessions::stop_session,
             commands::sessions::list_sessions,
             commands::sessions::set_session_mode,
+            commands::sessions::save_pasted_image,
             commands::worktrees::list_worktrees,
             commands::worktrees::create_worktree,
             commands::worktrees::remove_worktree,
