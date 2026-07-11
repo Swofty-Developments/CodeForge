@@ -2,28 +2,26 @@
 
 ## Purpose
 
-Bridges the `forge-session` sidecar's `AgentEvent` stream to the Tauri frontend via the single `agent-event` channel, stamping every payload with the session ID for frontend demux and persisting durable side-effects (messages, usage, resume ID) to the app SQLite database.
+Subscribes to a per-session `AgentEvent` stream from the session manager and forwards each event to the Tauri frontend via the `agent-event` IPC channel while durably persisting assistant messages, usage logs, and Claude session (resume) IDs to SQLite.
 
 ## How it works
 
-- Spawns one Tokio task per session that consumes the `AgentEvent` rx channel and emits a flat `AgentEventPayload` to the `agent-event` Tauri channel for each event.
-- Buffers `ContentDelta` fragments until `TurnCompleted`, then persists the full assistant message to the `messages` table.
-- Writes `UsageReport` events to `usage_log` and `SessionReady` resume IDs to `sessions.claude_session_id` via `spawn_blocking` to avoid holding the `Arc<Mutex<Database>>` across async awaits.
-- On any DB write failure, emits a `session_persistence_degraded` event (visible to the UI) and logs an error — persistence failures are never swallowed.
-- Stamps every payload with the forge `sessionId` (the session-manager UUID / IPC routing key) plus the Claude SDK `threadId` (seeded from resume hint, then updated once `SessionReady` confirms the real one).
-- Aborts (`TurnAborted` / `SessionError`) clear the assistant text buffer without persisting.
+- Every spawned session gets one `spawn_forwarder` task that drains a `tokio::mpsc::Receiver<AgentEvent>` in a loop until the session dies.
+- Each event is stamped with the **session-manager ID** (`sessionId`) before emission so the frontend can demux by this single routing key; `threadId` carries the Claude SDK session uuid for display/resume only.
+- Assistant text is buffered from `ContentDelta` events and flushed to the `messages` table on `TurnCompleted`; `TurnAborted` and `SessionError` clear the buffer without persisting.
+- Usage logs (tokens, cost, model) are written to the `usage_logs` table on every `UsageReport` event; the Claude resume ID is written to `sessions.claude_session_id` when `SessionReady` arrives with a uuid.
+- All DB writes run via `spawn_blocking` to avoid holding the `Arc<Mutex<Database>>` across an `.await`; a persistence failure emits a `session_persistence_degraded` event and logs an error instead of silently swallowing it.
+- The forwarder ends when the session manager drops the sender (the `rx.recv()` loop exits on `None`).
 
 ## Key files
 
-- `crates/tauri-app/src/runtime/session_forward.rs` — core forwarder: event loop, payload emission, DB persistence calls, degraded-state reporting.
-- `crates/forge-session/src/payload.rs` — flat `AgentEventPayload` struct (camelCase, optional fields) and `from_event` / `persistence_degraded` constructors.
-- `crates/tauri-app/src/events.rs` — frozen Tauri event channel names (`AGENT_EVENT = "agent-event"`), mirrored in `frontend/src/ipc.ts`.
+- `crates/tauri-app/src/runtime/session_forward.rs` — forwarder loop: event routing, buffering, persistence, and degraded-state reporting.
 
 ## Invariants & gotchas
 
-- **CONTRACT-1**: every payload must carry the forge `sessionId` so the frontend can demux a shared channel; `threadId` is display-only / resume-only, not a routing key.
-- **CONTRACT-2**: the thread row must exist before the forwarder spawns (caller's responsibility); all writes are unconditional — a missing row is a panic-worthy invariant violation, not a graceful skip.
-- DB writes must go through `spawn_blocking` + `tokio::spawn_blocking` — never lock the `Arc<Mutex<Database>>` across an async `.await` or the runtime stalls.
-- Persistence failures are a **named, surfaced state** (`session_persistence_degraded` event + error log), never a benign warning — the UI must know the session's stored history is incomplete.
-- The assistant text buffer is cleared on abort/error — partial turns are never persisted, only complete `TurnCompleted` messages.
-- `sessionId` stamping happens before emission (`AgentEventPayload::from_event` takes it as a parameter); a missing stamp would route events to the wrong session or drop them entirely.
+- **CONTRACT-1**: every emitted payload carries the session-manager ID as `sessionId`; the frontend multiplexes by this ID space.
+- **CONTRACT-2**: the `threads.id` row for `app_thread_id` MUST exist before `spawn_forwarder` is called — persistence writes are unconditional; a missing row is a fatal logic error upstream.
+- **No silent failures**: if any DB write fails (messages, usage, resume id), the forwarder MUST emit a `session_persistence_degraded` event and log an error — the failure is surfaced state, not a warning.
+- **DB mutex discipline**: never hold the `Arc<Mutex<Database>>` guard across an `.await` — all writes go through `spawn_blocking` so the mutex is always unlocked during async suspension.
+- **Buffer flushing**: only `TurnCompleted` persists the accumulated assistant text; `TurnAborted` / `SessionError` must clear the buffer without writing (a failed turn is not durable).
+- **Resume ID timing**: the `sdk_thread_hint` seeds the `threadId` field until `SessionReady` confirms the real Claude session uuid; once confirmed, the resume ID is persisted to `sessions.claude_session_id`.

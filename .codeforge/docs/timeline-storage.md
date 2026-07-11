@@ -1,28 +1,27 @@
+The existing doc is already accurate — the files edited this turn (`app-store.ts`, `headless.rs`, `SessionPane.tsx`, `styles-chrome.ts`) are unrelated to the timeline storage implementation. No changes needed.
+
+---
 # Timeline Storage
 
-## Purpose
+**Purpose**  
+Append-only event log per repository, stored in SQLite at `.codeforge/runtime/timeline.db`, for recording agent/human/system activity and supporting live subscriptions via tokio broadcast channels.
 
-Append-only per-repo event log backed by SQLite (WAL mode). Events are immutable once appended; supports filtering, live subscriptions via broadcast channel, and stores event payloads as JSON.
+**How it works**  
+- Opens (or creates) `timeline.db` in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and 5s busy timeout; runs idempotent migrations to create the `events` table.
+- `append(NewEvent)` assigns an `id` (SQLite rowid) and microsecond-truncated UTC timestamp, writes the event as a single row, and broadcasts it to all subscribers.
+- `query(TimelineFilter)` filters by feature slug (JSON array membership), actor, event kinds, since timestamp, and `before_id` cursor; returns events newest-first with a default limit of 200.
+- `subscribe()` returns a tokio `broadcast::Receiver` that receives every event appended after the subscription.
+- Connection is behind a `std::Mutex` for in-process synchronization; WAL keeps external readers non-blocking.
+- Enums (`Actor`, `EventKind`) are serialized as snake_case strings; timestamps as fixed-width RFC3339 micros for lexicographic order.
 
-## How it works
+**Key files**  
+- **`crates/forge-timeline/src/lib.rs`** — `TimelineStore` implementation: open, append, query, subscribe, migrations, enum serialization, row parsing.
+- **`crates/forge-core/src/timeline.rs`** — domain types: `TimelineEvent`, `NewEvent`, `Actor`, `EventKind`, `TimelineFilter`.
 
-- Database lives at `<repo_root>/.codeforge/runtime/timeline.db`, with WAL journaling and `PRAGMA synchronous=NORMAL` for performance.
-- `NewEvent` (without `id`/`ts`) is appended via `TimelineStore::append()`, which assigns a `rowid` and UTC timestamp (truncated to microsecond precision), writes to the `events` table, and broadcasts the stored event to all subscribers.
-- Single SQLite connection behind a `std::Mutex` serialises this-process writes; WAL mode keeps external readers non-blocking.
-- `query()` builds a SQL `WHERE` clause from a `TimelineFilter` (feature slug via `json_each`, actor, kinds, since, before_id pagination), always returning newest-first (`ORDER BY id DESC`), default limit 200.
-- `subscribe()` returns a `tokio::sync::broadcast::Receiver` that receives every event appended after the subscription.
-- Enums (`Actor`, `EventKind`) serialise to snake_case strings for stable column storage; payloads and `feature_slugs` are stored as JSON text.
-
-## Key files
-
-- **`crates/forge-timeline/src/lib.rs`** — single-file crate: `TimelineStore`, migrations, `append()`, `query()`, broadcast channel, row/column conversions.
-- **`crates/forge-timeline/tests/store.rs`** — integration tests covering filters, pagination (`before_id`), subscriptions, persistence across reopens, concurrent appends.
-
-## Invariants & gotchas
-
-- **Events are immutable.** Once appended, `id` and `ts` never change; no UPDATE/DELETE operations exist.
-- **Timestamps are RFC3339 microsecond strings** stored as TEXT (`YYYY-MM-DDTHH:MM:SS.ffffffZ`) so lexicographic string comparison (`ts >= ?`) is chronologically correct.
-- **`feature_slugs` is exact-match only.** Filtering by `"auth"` does NOT match an event tagged `["auth-flow"]`—the filter uses `json_each(feature_slugs).value = ?`.
-- **Broadcast channel capacity is 512.** Slow subscribers lag and miss events (acceptable by contract); high-rate appenders may overrun the channel.
-- **`before_id` paginates strictly older events.** `before_id: Some(42)` returns only `id < 42`, so when the result is empty, no older events exist.
-- **Single connection is sync-locked.** Long queries or high concurrent append rates can block; external readers must tolerate `busy_timeout=5000` (5s).
+**Invariants & gotchas**  
+- Events are immutable once appended; `id` is append-only (rowid).
+- Timestamps are truncated to microseconds at write time so round-trip equality holds; lexicographic string comparison on `ts` equals chronological order.
+- `feature_slugs` is a JSON array stored as TEXT; filter queries use `json_each` for membership.
+- The connection mutex serializes writes; lagged or slow subscribers may drop events (broadcast channel capacity 512).
+- `before_id` must be strictly less-than for pagination (never `<=`) because `id` order equals time order.
+- `enum_to_str` serializes enums via `serde_json::to_value` expecting a `String` variant; non-string serde representations break the contract.

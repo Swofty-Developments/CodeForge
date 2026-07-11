@@ -2,28 +2,30 @@
 
 ## Purpose
 
-Initializes a repository context (base or worktree) by installing the integration kit, loading the feature index and timeline, starting the daemon HTTP server, and triggering cold-start indexing if the repo has never been indexed. All open contexts share the same code path.
+Initializes a repository context: validates the path, installs the MCP integration kit, loads feature index and timeline, starts the HTTP daemon, registers the runtime, upserts the database entry, spawns a staleness poller, and kicks off cold-start indexing when `repos.indexed_at IS NULL`. Returns the `RepoState` to the frontend including index status and identity.
 
 ## How it works
 
-- **Idempotent entry** — `open_context` canonicalizes the path and returns early if already open (re-reporting current state from the in-memory `RepoRuntime`).
-- **Kit + daemon** — installs the MCP binary and hook kit into `.codeforge/`, opens the timeline store and feature index from disk, starts a daemon HTTP server on an ephemeral port.
-- **Database upsert** — upserts the `repos` row and reads `indexed_at`; when `NULL` (CONTRACT-3: never indexed), spawns cold-start indexing in the background.
-- **Live wiring** — subscribes to timeline events and spawns a forwarder task emitting `timeline:event` tagged with this context's canonical path (FZ-5); spawns a staleness poller emitting `index:status` on every verdict change.
-- **Runtime registration** — inserts the `RepoRuntime` into `AppState.repos` keyed by canonical path, making the index/timeline/daemon accessible to commands.
-- **Context teardown** — `close_context` stops all sessions rooted at the path (a session cannot outlive its context), aborts the forwarder and staleness tasks, shuts the daemon down, and removes the runtime from `AppState.repos`.
+- **Idempotent**: an already-open repo returns its current state without re-initialization (line 56–69).
+- **Integration kit**: ensures `~/.codeforge/bin/forge-mcp` is current, then calls `forge_daemon::install_kit()` to register it in `.mcp.json` (lines 72–73).
+- **Runtime assembly**: opens `TimelineStore` and `FeatureIndex` from disk, starts the HTTP daemon with clones of those, upserts the `repos` row, and reads back `indexed_at` from the database (lines 75–103). `indexed_at IS NULL` means never indexed (CONTRACT-3).
+- **Live event forwarding**: subscribes to the timeline and spawns a task that emits `timeline:event { repoPath, event }` (FZ-5) so the frontend appends events only to the matching context, never leaking across worktrees (lines 106–124).
+- **Staleness poller**: spawns a background task that re-checks index status every 10 seconds and emits `index:status` when the verdict changes (line 132). Skips checks while reindexing.
+- **Cold-start indexing**: when `indexed_at IS NULL`, spawns a reindex task that runs the headless indexer, merges results (pinned features survive), writes docs, records `indexed_at = now()` to the database, and bookends the work with `IndexStarted`/`IndexCompleted` timeline events (lines 151–166).
 
 ## Key files
 
-- **repo_open.rs** — `open_context` (setup), `close_context` (teardown), timeline forwarder, `indexed_at` DB reads (CONTRACT-3).
-- **repo_util.rs** — path canonicalization, git-repo detection, `repo_name` / `project_name` derivation, pure `RepoState` assembly (does not set `indexed_at`).
-- **state.rs** — `RepoRuntime` definition (daemon handle, index, timeline, tasks, `reindexing` flag); `AppState` map keyed by canonical path.
+- **`crates/tauri-app/src/runtime/repo_open.rs`** (core) — `open_context()` orchestrates the entire flow; `close_context()` tears down runtime, stops sessions, aborts tasks, shuts daemon.
+- **`crates/tauri-app/src/runtime/mcp.rs`** — locates the freshly built `forge-mcp` binary (sibling of exe or `target/{debug,release}`), copies to `~/.codeforge/bin/forge-mcp` when newer.
+- **`crates/tauri-app/src/runtime/staleness.rs`** — spawns a poller that hashes the manifest every 10 seconds and emits `index:status` on change; skips while reindexing.
+- **`crates/tauri-app/src/runtime/indexing.rs`** — runs the indexer, merges, saves, writes docs, records `indexed_at`, streams `index:progress`, emits `repo:changed`.
+- **`crates/tauri-app/src/commands/repo.rs`** — `open_repo` command validates path and delegates to `open_context`; `init_repo` runs `git init -b main` then opens.
 
 ## Invariants & gotchas
 
-- **CONTRACT-3: `repos.indexed_at` (database) is the single source of truth** — `RepoState.indexed_at` is always loaded from the DB via `queries::get_repo_indexed_at`, never derived or cached elsewhere. `IS NULL` means never indexed.
-- **W1: worktrees become independent contexts** — a worktree is keyed by its own canonical path in `AppState.repos`, not the base repo's; it gets its own daemon, index, timeline, and staleness poller.
-- **FZ-5: live events tagged by context path** — the timeline forwarder wraps each event in `TimelineEventEnvelope { repo_path, event }` so the frontend appends events only to the active context (no cross-worktree leak).
-- **Cold-start only when `indexed_at IS NULL`** — opening an already-indexed repo (even if stale) does not auto-reindex; the staleness poller emits the verdict and the UI prompts the user.
-- **Canonical path as map key** — every command must canonicalize its `repo_path` argument so lookups into `AppState.repos` hit the same key; `open_context` canonicalizes again for safety.
-- **Session teardown on context close** — `close_context` stops every session in `session_repos` mapped to the closing root before removing the runtime, preventing sidecars from outliving their index/timeline handles.
+- **CONTRACT-3**: `repos.indexed_at IS NULL` ⇔ never indexed. The database is the single source of truth; a null value triggers cold-start (line 103).
+- **FZ-5**: timeline events must carry the emitting context's canonical path (`{ repoPath, event }`) so the frontend filters by path and never leaks events across worktrees (lines 107–118).
+- **Idempotent open**: an already-open repo skips daemon/timeline setup and just reports current state; the caller must canonicalize paths so the `repos` map key matches across `open_repo`, `create_worktree`, and every command (lines 53–69).
+- **One reindex at a time**: `reindexing` is an `AtomicBool` per repo; `spawn_reindex` returns `Err` when one is already running (enforced in `indexing.rs:42–45`).
+- **Integration kit before daemon**: `install_kit()` must succeed before daemon start, or the MCP server won't be registered. If the binary can't be located and no existing copy exists, `ensure_mcp_binary()` returns `Err` and open fails (lines 72–73).
+- **Sessions can't outlive their context**: `close_context()` stops every session mapped to the repo before dropping the runtime, so no sidecar keeps running against a closed context (lines 194–209).

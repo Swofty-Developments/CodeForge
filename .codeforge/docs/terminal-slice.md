@@ -1,30 +1,29 @@
-The changes are entirely in `app-store.ts` and deal with staleness detection and modal triggering logic for index status. The terminal slice itself was not touched at all.
-
----
 # Terminal Slice
 
 ## Purpose
 
-Manages state for the bottom terminal panel: a tab list of PTY instances, the active terminal ID, panel visibility, and height. Each terminal is worktree-scoped — its `cwd` is locked to the active context path at creation time, so switching contexts changes where **new** terminals spawn without moving existing ones.
+Manages the bottom terminal panel's PTY tab bookkeeping: opening, closing, switching, resizing, and tracking exit status. Each terminal is worktree-scoped — its `cwd` is bound at open time to `store.activeContextPath`, so new terminals follow the active worktree while existing ones keep their original path.
 
 ## How it works
 
-- `openTerminal()` spawns a PTY via IPC (`ipc.openTerminal(cwd)`), adds a tab to `terminals[]`, sets it active, and shows the panel.
-- `closeTerminal(id)` kills the PTY backend-side and removes the tab; if closing the active tab, re-points to the nearest neighbour.
-- `markTerminalExited(id)` is called on `terminal:exit` event — keeps the tab visible (output readable) but flips `exited: true`.
-- `toggleTerminalPanel()` shows/hides the panel; if opening an empty panel and a repo is loaded, auto-spawns the first terminal.
-- Panel height is clamped to `[120px, 80% of window height]` and persists in `terminalPanelHeight`.
-- Each tab's title is the basename of its `cwd` (last path segment).
+- **Opening a terminal** calls `ipc.openTerminal(cwd)` to spawn a PTY in the backend, then adds a `TerminalTab` record (`{id, title, cwd, exited: false}`) to `store.terminals` and flips `terminalPanelOpen` to true.
+- **Tab title** is the last path segment of `cwd` (e.g. `/repo/worktrees/feature-branch` → `feature-branch`).
+- **Closing** kills the PTY via `ipc.closeTerminal(id)`, then removes the tab and re-points `activeTerminalId` to a surviving neighbour (or `null` if the list empties).
+- **Exit events** mark `exited: true` but keep the tab around so the user can still read output; the panel view shows a visual "exited" indicator.
+- **Panel height** is clamped to `[120px, 80% of viewport height]` and persists in `terminalPanelHeight`.
+- **Toggle (Cmd+J)** flips `terminalPanelOpen`; if opening an empty panel, spawns the first terminal automatically (when `activeContextPath` is non-null).
 
 ## Key files
 
-- **`terminal-slice.ts`** — state shape (`TerminalTab[]`, active ID, panel visibility/height) and actions (open, close, mark exited, toggle panel).
+- **`stores/terminal-slice.ts`** — tab bookkeeping actions: open, close, toggle, resize, mark-exited. Does not own xterm wiring or event listeners.
+- **`stores/app-store.ts`** — global state shape: `terminals[]`, `activeTerminalId`, `terminalPanelOpen`, `terminalPanelHeight`.
+- **`types.ts`** — `TerminalTab` interface (`id`, `title`, `cwd`, `exited`).
+- **`ipc.ts`** — `openTerminal(cwd, shell?)` and `closeTerminal(id)` invoke Tauri commands that manage the PTY lifecycle in Rust.
 
 ## Invariants & gotchas
 
-- **Worktree-scoped at creation**: a terminal's `cwd` is read from `store.activeContextPath` when `openTerminal()` runs and never updated — switching contexts doesn't move existing terminals.
-- **Tab survives exit**: when a PTY process dies (`terminal:exit`), the tab stays in the strip with `exited: true` so the user can read the final output; explicitly calling `closeTerminal` removes it.
-- **Active-tab repair**: removing the active terminal repoints `activeTerminalId` to the neighbour at `min(idx, remaining.length - 1)`, or `null` if the strip is empty.
-- **120px floor**: panel height cannot go below `MIN_PANEL_H = 120` to keep the terminal usable.
-- **Auto-spawn on toggle**: opening the panel when no terminals exist and a repo is loaded (`activeContextPath` is set) spawns one immediately — otherwise the user sees an empty panel.
-- **xterm wiring lives elsewhere**: the actual xterm.js instances and `terminal:data`/`terminal:exit` listeners are in `components/terminal/**`; this slice is the tab bookkeeping only.
+- **Worktree-scoped `cwd`** — bound at open time to `activeContextPath`, not refreshed when the context changes. Switching worktrees changes where *new* terminals land, but existing ones stay rooted where they started.
+- **Exited tabs stay in the list** — `closeTerminal` is the only way to remove a tab; `terminal:exit` events just flip `exited: true` so output remains readable. The panel view must filter or style exited tabs accordingly.
+- **Auto-spawn on toggle** — toggling the panel open when `terminals.length === 0` spawns a terminal if a context is active; callers toggling the panel should expect this side-effect.
+- **Active tab re-pointing** — removing the active terminal picks the neighbour at `min(idx, remaining.length - 1)`, which biases toward the tab to the right if removing a middle tab.
+- **Panel height is clamped** — `setTerminalPanelHeight` clamps to `[MIN_PANEL_H, 80% of innerHeight]` every time, so the UI resize handle must enforce the same bounds client-side to avoid jitter.

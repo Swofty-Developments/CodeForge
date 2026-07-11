@@ -1,35 +1,33 @@
+All edited files are in the Tauri frontend (TypeScript/UI) and the headless indexing module. None touch the session-protocol feature's core Rust files (protocol.rs, payload.rs, types.rs, mode.rs). The living doc remains accurate.
+
+---
 # Session Protocol
 
-## Purpose
+**Purpose**
 
-Defines the NDJSON event stream protocol between FeatureForge's Tauri backend and the Claude Agent SDK sidecar process. Each line of sidecar stdout is parsed into an `AgentEvent` and forwarded to the frontend as a flat `AgentEventPayload`.
+Defines Rust types and NDJSON codec for bidirectional sidecar communication: stdin commands (query, approval, mode-switch, abort) and stdout event streams (AgentEvent variants). Handles mode inference from DB state and stamps it into the first query.
 
-## How it works
+**How it works**
 
-- **`AgentEvent` enum** (types.rs) — 14 tagged variants: `SessionReady`, `TurnStarted`, `ContentDelta`, `ThinkingDelta`, `ToolUseStart`, `ToolInputDelta`, `ToolUseEnd`, `ToolResult`, `ApprovalRequired`, `AskUserQuestion`, `TurnCompleted`, `TurnAborted`, `UsageReport`, `SessionError`, `SessionResumeFailed`, `SlashCommands`. Serde-tagged `snake_case` serialization.
-- **`parse_sidecar_line`** (protocol.rs) — consumes one NDJSON line from sidecar stdout; unknown/malformed lines are silently skipped (the SDK/CLI may print non-JSON debug output). Empty deltas are dropped to avoid no-op renders. Maps `ready` (sidecar boot, no SDK session id yet) and `session_ready` (SDK init message with `sessionId` + `model`) to distinct `SessionReady` events with optional fields.
-- **`augment_query_if_needed`** (protocol.rs) — intercepts outbound `{"type":"query"}` commands and stamps the engagement mode (`fresh` / `resume` / `continue`) + first-query-only `cwd`/`model`/`permissionMode` from `SidecarInitParams` (consumed exactly once). Follow-up queries in the same sidecar session get `mode: "continue"`. Explicit `model` / `permissionMode` on the command win over init defaults; `cwd` and `mode` are always stamped by the backend.
-- **`AgentEventPayload::from_event`** (payload.rs) — flattens `AgentEvent` into a camelCase Tauri IPC payload with `eventType` discriminator, `sessionId`, `threadId`, and 15+ optional fields. The frontend demuxes by `sessionId` and switches on `eventType`.
-- **`SessionMode`** (mode.rs) — 3-variant enum (`Fresh`, `Resume {claude_session_id}`, `ContinueInProcess`) decided once at query time from the DB-authoritative `sessions.claude_session_id`. Replaces old try-resume-catch-fresh cascades; the sidecar never infers resumability from error strings.
-- **Per-message incremental diffing** (agent-sidecar/index.mjs) — the sidecar diffs assistant-message content against `streamBlockLens[i]` keyed by `(streamMsgId, block index)`. When a new assistant message id appears (each API round-trip between tool calls yields one), `streamMsgId` and `streamBlockLens` reset to zero; repeated snapshots of the same message emit only new chars. This prevents mid-turn reasoning/text from being sliced by the PREVIOUS message's cumulative length. Tool cards are deduped with a per-turn `streamToolIdsSeen` set.
-- **`AskUserQuestion` event** (types.rs, protocol.rs, payload.rs) — native protocol support for the SDK's `ask_user_question` out-event. The raw `questions` array from the sidecar passes through as `serde_json::Value` (Rust) / `unknown` (TS), rendered by the frontend. `request_id` disambiguates concurrent questions.
+- `parse_sidecar_line` deserializes stdout NDJSON → `AgentEvent` enum (15 variants: content_delta, turn_started, tool_use_start, etc.); unparseable lines are skipped, never fatal.
+- `augment_query_if_needed` intercepts query commands, consuming init params (cwd, model, permissionMode, mode) once for the first query, then stamping `SessionMode::ContinueInProcess` on every follow-up.
+- `SessionMode` (Fresh | Resume{claude_session_id} | ContinueInProcess) is DB-authoritative — Rust decides the engagement mode once from `sessions.claude_session_id`, not sidecar-inferred retry logic.
+- First query gets `mode: resume` + `resumeSessionId` or `mode: fresh`; all subsequent queries in the same sidecar get `mode: continue`.
+- `AgentEventPayload` is the flat Tauri IPC shape (camelCase, skip_serializing_if none) mapped from `AgentEvent`; frontend demuxes by sessionId and switches on eventType.
+- Supports 4 SDK permission modes (default, acceptEdits, plan, bypassPermissions) validated against a const allowlist.
 
-## Key files
+**Key files**
 
-- **protocol.rs** — NDJSON parser (`parse_sidecar_line`), first-query augmentation (`augment_query_if_needed`), init-params injection.
-- **types.rs** — `AgentEvent` enum (internal, serde-tagged `snake_case`).
-- **payload.rs** — `AgentEventPayload` flat union (Tauri IPC, camelCase); `from_event` mapper; `persistence_degraded` Rust-originated event.
-- **mode.rs** — `SessionMode` enum (Fresh/Resume/ContinueInProcess) and permission-mode validation (`PERMISSION_MODES`, `is_valid_permission_mode`).
-- **agent-sidecar/index.mjs** — Node.js sidecar wrapping `@anthropic-ai/claude-agent-sdk`; per-message streaming-diff logic (lines 235–370).
+- `protocol.rs` — NDJSON parsers (`parse_sidecar_line` → AgentEvent) and query augmentation (`augment_query_if_needed` stamps mode/init params into first query).
+- `mode.rs` — SessionMode enum (Fresh, Resume, ContinueInProcess) and `wire()` → "fresh"|"resume"|"continue".
+- `types.rs` — AgentEvent enum (15 tagged variants: content_delta, turn_started, tool_use_start, approval_required, etc.).
+- `payload.rs` — AgentEventPayload flat struct for Tauri IPC; `from_event()` maps AgentEvent → camelCase shape, `persistence_degraded()` for Rust-originated errors.
 
-## Invariants & gotchas
+**Invariants & gotchas**
 
-- **One-time init consumption**: `SidecarInitParams` in the `Mutex<Option<...>>` is `.take()`'d on the first `query`; re-running `augment_query_if_needed` on subsequent queries in the same sidecar yields `mode: "continue"` with no `cwd`/`model`/`resumeSessionId`.
-- **Non-query commands pass through**: `augment_query_if_needed` only touches `{"type":"query"}`; `abort` and other control messages are returned unchanged without consuming the init slot.
-- **Silent skip, never fatal**: `parse_sidecar_line` drops unparseable JSON, unknown event types, empty deltas, and non-object values (the SDK may print warnings/logs). Never propagate unknown events — the frontend switches on a closed set.
-- **Mode is DB-authoritative**: `SessionMode` is decided once from `sessions.claude_session_id` at session start. The sidecar sets `options.resume` / `options.continue` / neither from the stamped `mode` field; it never infers resumability from prior state or error strings.
-- **Resume failure is explicit**: `SessionResumeFailed` is a first-class event; never silently downgrade to a fresh session if `Resume` is requested.
-- **`AgentEventPayload.message` is overloaded**: carries `claude_session_id` for `SessionReady` / `SessionResumeFailed`, error text for `SessionError`, generic message for `persistence_degraded`. The frontend disambiguates via `eventType`.
-- **Streaming diff is per-message**: a single agentic turn yields MANY assistant messages (one per API round-trip). Before the per-message fix, global `lastTextLen`/`lastThinkingLen` counters truncated every post-tool-call message by the PREVIOUS message's length, emitting nothing (dropped as empty in protocol.rs) or corrupted tails. The UI showed only the shimmer typing indicator. Now `streamMsgId` / `streamBlockLens` reset when a new message id appears; duplicate tool cards are guarded by `streamToolIdsSeen`.
-- **ThinkingBlock shows live tail**: while streaming, `ThinkingBlock` shows a 100-char preview of the latest reasoning instead of hiding content behind animated dots. When done, it collapses to an expandable disclosure showing the opening thought.
-- **`questions` field is raw JSON**: the `AskUserQuestion` event's `questions` payload is an untyped `Value` / `unknown` — the SDK owns its shape. The frontend is responsible for rendering it (likely iterating over an array of `{question: string, ...}` objects).
+- Init params are consumed exactly once on first query (Mutex<Option>); non-query stdin passes through without consuming the slot.
+- Empty text_delta and thinking_delta are dropped in `parse_sidecar_line` to avoid no-op frontend renders.
+- Unknown sidecar event types are debug-logged and skipped, never fatal — the SDK may evolve or print stray non-JSON.
+- `SessionMode::Resume` failure → `SessionResumeFailed` event; never silent downgrade to Fresh.
+- Permission mode strings must match one of 4 consts or are rejected at command time, not sidecar time.
+- The wire `mode` field is distinct from `permissionMode` — one controls SDK engagement (fresh/resume/continue), the other controls approval policy.

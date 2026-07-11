@@ -1,28 +1,25 @@
 # Hook Ingestion
 
-**Purpose**
+## Purpose
 
-Receives Claude Code hook payloads (PostToolUse, Stop, SessionStart) forwarded from `.codeforge/hooks/forward.sh`, converts them to timeline events, classifies edited file paths into feature slugs, appends the event to the timeline (which broadcasts to the frontend), and replays spooled payloads on daemon startup.
+Receives Claude Code hook payloads from `forward.sh` (either via live HTTP or replayed from disk spool), classifies edited files into features, appends timeline events, and queues unmatched paths for re-indexing.
 
-**How it works**
+## How it works
 
-- `forward.sh` sends hook JSON (session ID, event name, tool name/input) to the daemon HTTP server
-- `parse_hook_event` maps recognized events to `EventKind` (FileEdited, CommandRun, SessionStarted, SessionEnded) and extracts edited paths from Edit/Write/MultiEdit/NotebookEdit tool calls
-- Edited paths are relativized to the repo root and classified into feature slugs via the index
-- File edits that classify to nothing (new/renamed files, stale index) are marked `unclassified: true` and their paths are queued for reindex
-- On startup, `drain_spool` replays payloads from `.codeforge/runtime/spool/` in sorted order, deleting each after processing; invalid JSON is quarantined to `spool/rejected/`
-- Non-file events (Bash, Stop, SessionStart) skip classification and always have empty feature slugs
+- `parse_hook_event` maps raw JSON to timeline event kinds: `PostToolUse` → `FileEdited` (Edit/Write/MultiEdit/NotebookEdit) or `CommandRun` (Bash); `Stop` → `SessionEnded`; `SessionStart` → `SessionStarted`.
+- Edited file paths are relativized to the repo root and classified via the in-memory index; if classification returns empty slugs, the event is marked `unclassified: true` and each path is queued on `ReindexQueue` so a later reindex can resolve it.
+- `process_hook` appends the event to the timeline (which broadcasts to live subscribers) and enqueues unmatched paths, both operations offloaded to `spawn_blocking` since they hit rusqlite.
+- On daemon start, `drain_spool` replays payloads from `.codeforge/runtime/spool/` in sorted order, then deletes each; unparseable files are quarantined to `spool/rejected/` for inspection.
+- Non-file-scoped events (Bash, Stop, SessionStart) have empty `edited_paths` and skip classification — `feature_slugs` is correctly empty, not unclassified.
 
-**Key files**
+## Key files
 
-- `crates/forge-daemon/src/hooks.rs` — parses raw hook JSON into `ParsedHook` (event kind + edited paths)
-- `crates/forge-daemon/src/ingest.rs` — processes hooks (relativize, classify, append to timeline, enqueue for reindex), drains startup spool
+- **`crates/forge-daemon/src/hooks.rs`** — parses raw hook JSON into `ParsedHook` (event kind, payload, edited paths).
+- **`crates/forge-daemon/src/ingest.rs`** — `process_hook` (classify → append → enqueue) and `drain_spool` (replay spooled payloads on startup).
 
-**Invariants & gotchas**
+## Invariants & gotchas
 
-- Hook processing is spawn_blocking because timeline append and reindex enqueue both hit SQLite synchronously
-- Unclassified file edits MUST enqueue the path for reindex (otherwise new files never appear on the timeline under a feature)
-- Paths in hook payloads are absolute; the index stores repo-relative paths — `relativize` before classify
-- The three states (non-file, classified, unclassified) must remain distinct; collapsing "unclassified" into "empty slugs" breaks the reindex queue
-- Spool files are processed in sorted order so event ordering is preserved across daemon restarts
-- Unrecognized hooks (PreToolUse, Read tool) return `None` from `parse_hook_event` and are logged at debug but still ack'd with HTTP 200
+- **Three classification states must remain distinct**: no file edits (empty slugs is correct), classified to features (tagged normally), classified to nothing (marked `unclassified: true` and queued). Collapsing "classified to nothing" into "empty slugs" silently loses the reindex trigger.
+- **Paths are relativized once** before classification and enqueue; the index and reindex queue expect repo-relative paths, but hooks send absolute ones.
+- **Unparseable spooled payloads are quarantined, not deleted** — the rejected spool directory preserves lost data for inspection rather than reprocessing it forever or dropping it silently.
+- **Blocking I/O is offloaded** to `spawn_blocking` since both timeline append and reindex enqueue hit rusqlite; running them on the async runtime would block the executor.

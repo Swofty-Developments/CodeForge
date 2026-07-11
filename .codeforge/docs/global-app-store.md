@@ -1,38 +1,34 @@
+The changes are in backend Tauri commands and indexing logic (retry logic for headless Claude calls) — they don't affect the global app store's shape, slices, or event handling. The doc remains accurate.
+
 ---
 # Global App Store
 
 ## Purpose
 
-The single SolidJS `createRoot(createStore)` singleton holding ALL application state — multi-context repo data, sessions, timeline, diff, feature list, UI layout (palette/sidebar/session pane widths), and daemon state. The `repo` getter is a DERIVED property that resolves to the active context's `RepoState`, allowing the app to track multiple open worktrees while existing views read `store.repo` without modification.
+Singleton SolidJS store (`createRoot(createStore)`) that holds all global application state: open repo contexts (base + worktrees), UI layout (sidebar/session-pane/terminal-panel visibility and sizing), active view, feature list, toasts, and modals. Orchestrates four functional slices (context, data, session, terminal) and registers global event listeners (agent-event, timeline-event, index-progress) once per app run.
 
 ## How it works
 
-- **Shape is frozen contract** — the 30+ fields in `AppStore` define the global state surface; mutations flow through slice functions, never written inline.
-- **Four slices own actions** — `context-slice` (open/switch worktrees), `data-slice` (load features/timeline/diff for active context), `session-slice` (start/send/approve/interrupt/stop Claude sessions), `terminal-slice` (PTY tabs per worktree).
-- **Derived `repo` getter** — reads `contexts.find(activeContextPath)?.state`, so top-level data always reflects the active worktree; non-active contexts reload on switch.
-- **Event reducers** — global `initListeners` wires five Tauri IPC streams (`agent-event`, `timeline:event`, `index:progress`, `index:status`, `repo:changed`) to update the store as backend state mutates.
-- **Toast lifecycle** — `pushError` / `pushSuccess` append to `toasts[]`; each auto-dismisses after 5s; `lastError` shadows the latest error toast.
-- **Episode-keyed staleness** — `handleIndexStatus` ALWAYS updates `indexStatusByPath[repoPath]` (drives status-bar dot), but pops `staleModal` only ONCE per state episode (tracked in `shownStaleModals` set keyed as `${repoPath}:${status.state}`). A dismissed modal won't reappear while the backend poller re-emits the same `state` with a growing `changedFiles` list; when the state transitions to fresh/never the episode ends and the flag is cleared; when the user acts on the modal (`reindexStale`) the flag is also cleared so a future stale→fresh→stale cycle will re-prompt.
+- **Derived `repo` getter** — returns the active context's `RepoState`, so existing views keep working while the store tracks N open contexts keyed by path
+- **Slices** — context-slice (multi-context model, worktree switching), data-slice (per-context loads: features/timeline/diff/daemon), session-slice (Claude session lifecycle + agent-event reducer), terminal-slice (PTY tab bookkeeping)
+- **Event listeners** — `initListeners()` registers Tauri IPC listeners once; `handleTimelineEvent` appends live events only when they belong to the active context (prevents leaking events across worktrees); `handleRepoChanged` syncs external branch switches back into the store
+- **Index staleness (FZ-2)** — `handleIndexStatus` tracks per-repo index state in `indexStatusByPath` (drives status-bar dot) and triggers the re-index modal once per state episode (stale/outdated), respecting per-repo suppression in localStorage
+- **Toast surface** — `pushToast`/`pushError`/`pushSuccess` create auto-dismissing toasts with a 5s lifetime; sequence counter prevents ID collisions
+- **Navigation** — `setActiveView` switches the main view (welcome/timeline/graph/diff/feature-detail) and triggers corresponding data refreshes
 
 ## Key files
 
-- `crates/tauri-app/frontend/src/stores/app-store.ts` (core) — store shape, derived `repo`, slice assembly, event reducers, episode-keyed staleness logic, `createRoot` singleton export.
-- `crates/tauri-app/frontend/src/stores/context-slice.ts` — `openRepo`, `switchToContext`, `closeContext`, worktree picker state, git-init prompt.
-- `crates/tauri-app/frontend/src/stores/data-slice.ts` — `refreshFeatures`, `refreshTimeline`, `refreshDiff`, `refreshDaemon`, feature mutations (reindex, pin, color, edit).
-- `crates/tauri-app/frontend/src/stores/session-slice.ts` — `startSession`, `sendMessage`, `approveRequest`, **`interruptSession`** (abort in-flight turn, preserves transcript), `stopSession` (kill sidecar + clear session), `setSessionMode`, `renameSession`, `resumeSession`, `prefillComposer`, `handleAgentEvent` reducer.
-- `crates/tauri-app/frontend/src/stores/terminal-slice.ts` — `createTerminal`, `closeTerminal`, `setActiveTerminal`, worktree-scoped PTY tabs.
-- `crates/tauri-app/src/runtime/staleness.rs` — background poller task (`spawn_poller`), immediate first tick then every 10s, emits only when verdict changed, skips polls while reindexing, resets memo post-reindex.
-- `crates/tauri-app/src/commands/sessions.rs` — backend session commands including `interrupt_session`, which sends `{"type":"abort"}` to sidecar and awaits `turn_aborted` response.
+- `crates/tauri-app/frontend/src/stores/app-store.ts` — store shape (frozen contract), slice orchestration, event reducers, singleton export
+- `crates/tauri-app/frontend/src/stores/context-slice.ts` — multi-context model (base + worktrees), worktree switching, git-init prompt
+- `crates/tauri-app/frontend/src/stores/data-slice.ts` — per-context data loads (features/timeline/diff/daemon) and feature mutations (reindex/pin/edit/color)
+- `crates/tauri-app/frontend/src/stores/session-slice.ts` — Claude session start/send/approve/stop, permission-mode switching
+- `crates/tauri-app/frontend/src/stores/terminal-slice.ts` — PTY tab bookkeeping (open/close/activate), worktree-scoped terminal cwd
 
 ## Invariants & gotchas
 
-- **Never write `store.repo` directly** — it's a getter; mutate `contexts[i].state` instead (or use `context-slice.handleRepoChanged`).
-- **Live timeline events guard on `activeContextPath`** — `handleTimelineEvent` only appends if the event's repo matches the active context, else background worktrees leak events.
-- **Stale-response guard** — async loads (feature doc hot-reload, timeline refetch) must check `store.selectedFeature === slug` or `samePath(activeContextPath, ...)` before `setStore`, or a slow response overwrites a user's navigation.
-- **`initListeners` is idempotent** — called on every context open but registers IPC listeners only once (`listenersRegistered` flag), preventing duplicate handlers.
-- **Episode-keyed modal suppression** — `shownStaleModals` is a runtime-only Set; it prevents re-showing the stale modal when the backend poller re-emits the same `state` with updated `changedFiles`, but does NOT prevent re-showing after a state round-trip (stale→fresh→stale) — the flag is cleared on state exit. `isStaleSuppressed` is a PERSISTENT localStorage check ("don't ask again" per repo) that survives app restarts.
-- **Status consumption ≠ modal presentation** — `indexStatusByPath` is updated on EVERY `index:status` event (so the status bar dot tracks the latest `changedFiles` count); `staleModal` pops only once per state episode (episode = repoPath + status.state).
-- **Session context tagging** — sessions carry `contextPath` so the UI can filter by worktree; sessions outlive context switches and are NOT auto-closed when a worktree is closed.
-- **Poller lifecycle** — the `staleness_task` JoinHandle lives in `RepoRuntime` and is aborted on context close; the poller must not outlive its repo.
-- **Reindexing skips polls** — while `reindexing` is true the poller skips the hash check (manifest is being rewritten), then resets its `last` memo so the first post-reindex verdict is always re-emitted (normally back to `fresh`, clearing the status-bar dot).
-- **Interrupt vs Stop distinction** — `interruptSession(id)` sends `{"type":"abort"}` to the sidecar, aborting the in-flight turn only; the sidecar responds with `turn_aborted`, which finalizes the live message and resets `runState` to `ready` (transcript preserved). In contrast, `stopSession(id)` kills the sidecar and removes the session from `store.sessions` (transcript gone). SessionPane's composer stop button calls `interruptSession`; the tab strip's ✕ close button calls `stopSession` (destructive). This prevents "stop response" from wiping the chat — the abort pipeline existed but was never exposed as a UI action until now.
+- **Store shape is frozen** — adding new top-level state requires updating the `AppStore` interface. Actions live in slices, not the store object itself.
+- **`repo` is derived, never written** — it's computed from `activeContextPath` and `contexts`. Mutating it directly will fail.
+- **Live events are context-scoped** — `handleTimelineEvent` only appends events matching `activeContextPath`, preventing cross-worktree leaks. Background contexts reload their timeline on switch.
+- **Index status has two concerns** — (1) status tracking (always consume), (2) modal triggering (once per episode). The `shownStaleModals` set prevents duplicate prompts until the state transitions or the user acts.
+- **Toast auto-dismiss** — toasts vanish after 5s. If you need persistent errors, surface them in the UI separately (e.g., `lastError`).
+- **Living-doc hot reload** — when a `doc_updated` event lands for the open feature (`selectedFeature`), the store refetches the doc and updates `selectedFeatureDoc` in place, guarded against stale responses.

@@ -1,33 +1,33 @@
-The data-slice file was not modified in this turn — the changes were all in session-slice. The existing doc remains accurate. No update needed.
+All commands are still registered. The changes are orthogonal to the data-slice: retry logic is now in `headless.rs` (which `reindex` indirectly triggers), and the agent was just exploring command registration. The existing doc remains accurate.
 
 ---
 # Data Slice
 
 ## Purpose
 
-The data slice holds all actions for loading per-context data (features, timeline, diff, daemon status) and mutating feature state (pin, color, edit, select). Every action reads the store's derived `repo` getter, so it always operates on the active context—whether that's the base checkout or a worktree.
+Manages per-repo data fetching (features, timeline, diff, daemon status) and feature mutations (pin, color, edit). All operations read from the active context, and live timeline events trigger activity badges and frontend notifications for affected features.
 
 ## How it works
 
-- **Refresh functions** (`refreshFeatures`, `refreshTimeline`, `refreshDiff`, `refreshDaemon`) each call one IPC endpoint scoped to `store.repo.path` and update their corresponding store slice. They bail early when `store.repo` is null.
-- **Feature mutations** (`pinFeature`, `setFeatureColor`, `updateFeature`) apply optimistic UI updates first, then call the backend IPC. On error, they roll back the optimistic change and push a toast.
-- **`selectFeature(slug)`** clears the detail state (`selectedFeatureTimeline`, `selectedFeatureDoc`), then fans out three parallel IPC calls (`getFeature`, `getTimeline`, `getFeatureDoc`) and applies the results only if that feature is still selected (stale-response guard).
-- **`openFeatureDetail(slug)`** calls `selectFeature` and switches `activeView` to `"feature"` in one step—the sidebar's Open shortcut.
-- The slice is instantiated once per app run by `createAppStore`, wired to the global `store`/`setStore`, and its actions are re-exported at the top level of `appStore` so components can call them directly.
-- All errors are surfaced via the `pushError` callback, which appends to `store.toasts` and sets `store.lastError`.
+- **Load on demand** — `refreshFeatures`, `refreshTimeline`, `refreshDiff`, `refreshDaemon` fetch via IPC and write into the store; invoked on repo open, context switch, and after indexing completes.
+- **Live event stream** — `handleTimelineEvent` (in `app-store.ts`) consumes backend-pushed timeline events, appends them to `store.timeline` for the active context, and increments `featureActivity[slug]` counters for affected features.
+- **Activity badges** — `featureActivity` is a per-feature counter bumped by each live event; sidebar reads these to show unread-style badges.
+- **Optimistic mutations** — `pinFeature`, `setFeatureColor` apply changes locally before the IPC call, then rollback on failure; `updateFeature` waits for the backend response before committing.
+- **Feature selection** — `selectFeature(slug)` clears prior detail state, then fetches feature metadata, timeline slice (limit: 50), and living-doc markdown in parallel; `openFeatureDetail` wraps this and switches to the feature view.
+- **Living-doc hot reload** — when a `doc_updated` event arrives for the selected feature, the slice refetches `getFeatureDoc` so the open detail panel updates in place.
 
 ## Key files
 
-- **`crates/tauri-app/frontend/src/stores/data-slice.ts`** (core) — all refresh and mutation actions; the single slice that touches features/timeline/diff/daemon.
-- **`crates/tauri-app/frontend/src/stores/app-store.ts`** — defines `AppStore`, wires slices together, registers the `index:status` listener (`handleIndexStatus`), and exports the singleton `appStore`.
-- **`crates/tauri-app/frontend/src/types.ts`** — TypeScript mirrors of Rust IPC types (`Feature`, `FeaturePatch`, `TimelineEvent`, `DiffByFeature`, etc.).
-- **`crates/tauri-app/src/runtime/staleness.rs`** — spawns the per-repo background poller that emits `index:status` events every 10s when the verdict changes; lives in `RepoRuntime.staleness_task`.
+- `crates/tauri-app/frontend/src/stores/data-slice.ts` — all refresh / mutation actions (the exported slice).
+- `crates/tauri-app/frontend/src/stores/app-store.ts` — `handleTimelineEvent` reducer that bumps `featureActivity` and appends live events; session-pane layout state (`sessionPaneFullscreen`).
+- `crates/tauri-app/frontend/src/ipc.ts` — thin wrappers over Tauri `invoke` commands (`get_features`, `get_timeline`, `get_diff_by_feature`, `listenTimelineEvent`); added `checkClaudeCli` for session setup.
 
 ## Invariants & gotchas
 
-- **Never write to `store.repo` directly**—it's a getter that derives from `store.activeContextPath` and `store.contexts`. Write to those instead, or call context-slice actions.
-- **Stale-response guard in `selectFeature`**—only apply fetched data if `store.selectedFeature === slug` at arrival time, so slow responses from a previous selection don't clobber the new one.
-- **Optimistic updates must roll back on error**—`pinFeature` and `setFeatureColor` both capture the previous value before applying the change, then restore it in the catch block. Forgetting this leaves the UI out of sync with the backend.
-- **Living-doc hot reload** is handled by the global `handleTimelineEvent` reducer in app-store, not by this slice—when a `doc_updated` event arrives for the selected feature, the store refetches `getFeatureDoc` directly rather than delegating to `selectFeature`.
-- **No data slice actions run if `store.repo` is null**—every function guards early. The UI must ensure `activeContextPath` is set before calling these, or the calls silently no-op.
-- **Index staleness is now polled, not one-shot**—the backend runs a 10s ticker per open repo (`staleness::spawn_poller`) that re-hashes the manifest and emits `index:status` only when the verdict *changes*. The frontend's `handleIndexStatus` pops the stale modal only on a state transition (`prev.state !== status.state`), so a dismissed modal isn't re-shown every poll while the user keeps editing and changedFiles grows.
+- **Active-context only** — every data-slice method reads `store.repo` (the derived active-context getter); calling these when no repo is open is a no-op.
+- **Stale-response guard** — `selectFeature` and `handleTimelineEvent` check that `store.selectedFeature` still matches before applying fetched data, since async loads can land after the user has switched features.
+- **featureActivity is append-only** — counters are never cleared except on context switch (via `resetContextView` in `context-slice.ts`); the UI shows "new activity since you last looked" semantics.
+- **Timeline event filtering** — `handleTimelineEvent` ignores events from background contexts (only appends when `repoPath === activeContextPath`); background timelines are refreshed wholesale on `switchContext`.
+- **Living-doc refetch is conditional** — only `doc_updated` events with `outcome: "updated"` trigger a reload; failed refreshes stay visible on the timeline without updating the doc.
+- **approveSession now accepts answers** — the `answers` param (question → selected option) is passed through for multi-choice prompts; remains optional for simple approve/deny flows.
+- **Indexer retry is transparent** — `reindex` triggers backend indexing, which now retries transient failures (network, rate limits) up to 3 times with exponential backoff; the frontend sees only success or final failure.

@@ -1,4 +1,4 @@
-The changes in `app-store.ts` are entirely about index staleness detection (the `handleIndexStatus`, `staleModal`, `indexStatusByPath` fields and related functions). The `composerPrefill` field is unchanged at line 75, and none of the edits touch the Composer feature.
+The changes are entirely backend: adding retry logic to the headless Claude CLI indexer (`forge-index/headless.rs`) and updating the Tauri IPC command handler registration. None of these affect the Composer frontend component. The existing doc remains accurate.
 
 ---
 # Composer

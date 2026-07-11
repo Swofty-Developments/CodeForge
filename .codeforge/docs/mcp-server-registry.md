@@ -1,28 +1,26 @@
+Based on my investigation, this feature doesn't actually locate the MCP settings file itself — it delegates that to the Agent SDK by setting `settingSources: ["user", "project", "local"]`. The feature is about **configuring the sidecar to inherit user MCP servers** by enabling the SDK's filesystem settings loader.
+
 # MCP Server Registry
 
 ## Purpose
 
-Ensures the `forge-mcp` binary is installed at `~/.codeforge/bin/forge-mcp` and kept current with the built version. On every repo open, writes `.mcp.json` pointing Claude Code at this canonical copy so Claude can call CodeForge tools via stdio MCP.
+Configures the sidecar to inherit the user's MCP server definitions from `~/.claude/mcp.json` (or `~/AppData/Roaming/Claude/mcp.json` on Windows) so embedded Claude sessions can access the same MCP tools as terminal sessions.
 
 ## How it works
 
-- **Auto-update on app start**: `ensure_mcp_binary()` locates the freshest `forge-mcp` build (sibling of the app exe, or `target/{debug,release}/forge-mcp` while walking up from the exe dir) and copies it to `~/.codeforge/bin` when newer by mtime.
-- **Fallback to existing copy**: if no source build is found but `~/.codeforge/bin/forge-mcp` already exists, uses that copy (warns but proceeds).
-- **Integration kit installer**: `forge_daemon::install_kit()` merges a `codeforge` stdio server entry into the repo's `.mcp.json`, pointing at the canonical `~/.codeforge/bin/forge-mcp` path.
-- **Idempotent registration**: `.mcp.json` merge preserves all existing servers; the `codeforge` entry is updated only when command/args differ.
-- **stdio proxy lifecycle**: the installed `forge-mcp` binary speaks JSON-RPC 2.0 over stdio, discovers the repo's daemon by walking up from cwd to find `.codeforge/runtime/daemon.json`, proxies tool calls (`list_features`, `get_feature`, `which_features`, `feature_timeline`, `record_note`) to the daemon's HTTP API.
+- **Delegate to SDK**: sets `options.settingSources = ["user", "project", "local"]` when calling the Agent SDK's `query()` function.
+- **User-level MCP config**: the `"user"` source instructs the SDK to load `~/.claude/mcp.json` (Mac/Linux) or `~/AppData/Roaming/Claude/mcp.json` (Windows) containing globally configured MCP servers.
+- **Project-level MCP config**: the `"project"` source loads `.mcp.json` from the repo root (where the CodeForge integration kit installer registers `forge-mcp`).
+- **Local overrides**: the `"local"` source loads `.claude/settings.local.json` for machine-specific settings.
+- **SDK responsibility**: the Agent SDK resolves platform-specific paths and parses MCP configurations; the sidecar never touches MCP JSON directly.
 
 ## Key files
 
-- `crates/tauri-app/src/runtime/mcp.rs` — binary sync: locate, copy, set exec perms
-- `crates/forge-daemon/src/bin/forge-mcp.rs` — stdio MCP proxy: JSON-RPC parsing, daemon discovery, HTTP forwarding
-- `crates/forge-daemon/src/kit.rs` — integration kit installer (`.mcp.json` merge is `install_mcp_json()`)
-- `crates/tauri-app/src/runtime/repo_open.rs:72` — invokes `ensure_mcp_binary()` then `install_kit()` on every repo open
+- `crates/tauri-app/agent-sidecar/index.mjs:158` — sets `settingSources` array before every `query()` call
 
 ## Invariants & gotchas
 
-- **Deterministic build selection**: `find_mcp_binary()` picks the newest by mtime across all candidates (sibling + all `target/{debug,release}` ancestors), never silently favours stale debug over fresh release or vice versa.
-- **No silent failures**: when no build exists and no existing copy is present, `ensure_mcp_binary()` returns `Err` so repo-open surfaces "MCP integration unavailable" rather than registering a broken path.
-- **Single-repo daemon scope**: `forge-mcp` stops at the FIRST ancestor with `.codeforge/` — a corrupt/missing `daemon.json` in a nested repo never falls through to a parent repo's daemon (which would answer for the wrong index).
-- **Unix exec bits**: newly copied binaries get `chmod 0o755` on Unix; Windows no-op.
-- **Idempotent `.mcp.json` writes**: the installer never clobbers user servers or rewrites the file when the `codeforge` entry already matches.
+- **Always includes all three sources**: omitting `"user"` would disconnect embedded sessions from the user's personal MCP servers; omitting `"project"` would skip CLAUDE.md and `.mcp.json`; omitting `"local"` would drop machine-specific overrides.
+- **SDK owns path resolution**: platform differences (Mac `~/.claude/` vs Windows `%APPDATA%\Claude\`) are handled by the Agent SDK, not the sidecar.
+- **Static configuration**: `settingSources` is set once per query turn; changes to `~/.claude/mcp.json` mid-turn won't be picked up until the next query.
+- **No MCP state in sidecar**: the sidecar process is stateless regarding MCP definitions — every query re-reads from disk via the SDK.

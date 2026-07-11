@@ -1,30 +1,31 @@
+---
 # Diff Review View
 
 ## Purpose
 
-Feature-grouped diff viewer that organizes staged, unstaged, and untracked changes by the features they belong to, replacing the traditional file-by-file diff view with a feature-centric accordion UI.
+Displays the working tree's changes grouped by feature (not file). Each feature becomes a collapsible accordion with per-file hunks, syntax-highlighted diffs, and +/− counts; files that match no feature land in a muted "unmapped" bucket always rendered last.
 
 ## How it works
 
-- **Feature grouping**: backend groups changed files by their mapped features via `which_features(path)`. Files in multiple features appear under each group with a `shared:true` badge. Unmapped files land in a synthetic `unmapped:true` group, visually muted and sorted last.
-- **Three-level accordion**: feature groups expand to file rows, file rows expand to hunk views. Each level uses grid `0fr→1fr` transitions and latched mounting—unopened accordions never render their children, so large diffs don't block paint.
-- **Diff rendering**: hunks are flattened into header + line rows, syntax-highlighted per extension via `highlight.js`. Old/new line numbers, `+`/`−`/` ` prefixes, and tinted backgrounds surface in a two-column gutter.
-- **Backend truncation contract**: `FileDiff.truncated` is the single truncation flag; `FileDiff.binary` marks binaries. The frontend renders every line sent without re-capping or silent omissions.
-- **Sticky header with refresh**: total +/− counts across unique files (shared files counted once), manual refresh button that calls `appStore.refreshDiff()` to re-fetch from daemon.
-- **Default-open heuristic**: first feature group and its first 3 files open on load to show diffs at a glance without interaction.
+- `DiffReview` fetches `store.diff.groups` (from `diff_by_feature` backend), sorts via `orderedGroups` (mapped first, unmapped last), drops empty groups, and auto-opens the first.
+- Each `DiffFeatureGroup` accordion shows feature name, a `shared` badge (if multiple features claim it), aggregate +/− across files, and renders `FileDiffRow` children lazily (grid `0fr → 1fr`; never-opened groups never mount their diffs).
+- `FileDiffRow` has a status-letter chip (M/A/D/R/U), directory/basename split path, and per-file +/−; the hunk body mounts once expanded and delegates to `DiffHunks`.
+- `DiffHunks` flattens `file.hunks[]` into render rows (hunk headers + lines with old/new line numbers), applies highlight.js per extension, and marks binary files or backend-truncated diffs with explicit typed flags (`FileDiff.binary`, `FileDiff.truncated`).
+- Shared files (assigned to multiple features) appear under each feature group; `totalCounts` deduplicates by path when summing repository-wide +/−.
 
 ## Key files
 
-- **DiffReview.tsx** — view shell with sticky header, refresh control, and total counts. Maps feature groups to `<DiffFeatureGroup>` accordions.
-- **DiffFeatureGroup.tsx** — one feature accordion: name, shared badge, per-group +/− counts, file count. Grid `0fr→1fr` body transition with latched child mount.
-- **FileDiffRow.tsx** — one file inside a group: status chip (M/A/D/R/U), mono path with dir/base split, +/− counts, collapsible hunk body.
-- **DiffHunks.tsx** — renders a file's hunks with line numbers, syntax highlighting, and explicit binary/truncated markers. No client-side re-capping.
-- **diff-utils.ts** — pure helpers: group ordering (unmapped last), unique-file count logic, status→glyph/tint mapping, extension→hljs language, hunk→row flattening. Truncation is backend-only.
+- **DiffReview.tsx** — top-level view: sticky header with refresh and totals, ordered feature groups, empty state when tree is clean.
+- **DiffFeatureGroup.tsx** — one feature accordion: name, shared badge, aggregate counts, collapsible file list with mount-latching.
+- **FileDiffRow.tsx** — one file row: status chip, split path, +/− counts, collapsible hunk body.
+- **DiffHunks.tsx** — hunk renderer: muted headers, dual-gutter line numbers, +/− tinted rows, per-line highlight.js, binary/truncation markers.
+- **diff-utils.ts** — pure helpers: `orderedGroups`, `totalCounts` (deduped), `statusMeta`, `langForPath`, `buildRows` (never re-truncates), `injectDiffStyles`.
 
 ## Invariants & gotchas
 
-- **Shared files are duplicated, not linked**: a file in three features renders three times with independent accordion state. Total counts must dedupe via `Map<path, FileDiff>` to avoid triple-counting.
-- **Unmapped group is a boolean flag, not a slug sniff**: `isUnmapped(group)` checks `group.unmapped`, never string matching on `group.name`. The backend owns the unmapped classification (CONTRACT-4).
-- **No frontend line limits**: the backend caps at its server line limit and sets `truncated:true`. The frontend must render every line sent—adding a client cap would silently hide the truncation marker below the fold.
-- **Latched mounting prevents re-mount thrash**: `mounted()` latches true and never resets. Closing an accordion hides it via grid `1fr→0fr` but leaves the DOM intact so syntax-highlighting work isn't repeated.
-- **Status chips exhaustively map five backend states**: modified/added/deleted/renamed/untracked. An unknown status renders `?` with a neutral tint, never silently defaulting to "modified".
+- **Deduplication boundary**: shared files are replicated across groups in the data structure; `totalCounts` deduplicates by path, but per-group `groupCounts` sums every file it holds (no dedup within a group — paths are unique per group by backend contract).
+- **Unmapped detection**: `isUnmapped(group)` checks `group.unmapped` flag (backend contract), never sniffs the slug string; `orderedGroups` always places unmapped groups last.
+- **No frontend re-truncation**: `FileDiff.truncated` is the single backend decision; `buildRows` renders every line sent and never imposes a second cap — the backend already capped at its line limit.
+- **Lazy mount latching**: both `DiffFeatureGroup` and `FileDiffRow` use `mounted` signals that latch true once opened; collapsing then re-opening skips the re-mount to preserve scroll and avoid re-highlighting.
+- **Binary/unknown status fallback**: `FileDiff.binary` and unknown status strings resolve to explicit typed markers (`dh-binary`, `dfr-status--unknown`), never silently painted as modified or omitted.
+- **Style injection is one-time**: `injectDiffStyles()` checks `#diff-styles` and bails if present; rows render many times but styles inject once per session.

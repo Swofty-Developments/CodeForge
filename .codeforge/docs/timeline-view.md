@@ -1,39 +1,34 @@
-The changes this turn were about staleness detection for the **index**, not the timeline view itself. The notes describe a 10-second background poller for index staleness (`staleness::spawn_poller`) and modal suppression logic. The only timeline-view-adjacent change is that `handleIndexStatus` now checks for state transitions before re-popping the modal (lines 170-178 in app-store.ts).
-
-This does NOT affect the Timeline View feature's design or behavior. The timeline is still a virtualized event feed; nothing about event fetching, pagination, filtering, or rendering changed. The existing doc is accurate.
-
-I'll return the doc unchanged:
+The edits don't touch the Timeline View feature. The changes are to Welcome view (Claude CLI checks), session pane UI state, and repo command consolidation. The timeline feature remains unchanged.
 
 ---
 # Timeline View
 
-## Purpose
+**Purpose**
 
-Displays a virtualized, reverse-chronological feed of immutable repository events (file edits, commands, notes, index runs) filtered by feature, actor, or kind. Live updates stream in via `timeline:event` and preserve stable session-to-color mapping; pagination via `beforeId` cursor loads older events on demand.
+Displays a reverse-chronological, append-only feed of all repo activity (file edits, command runs, agent sessions, index events, notes, doc refreshes). Filters by feature, actor, or event kind, with live subscription and infinite scroll.
 
-## How it works
+**How it works**
 
-- **Merge & dedupe**: `use-timeline-events` merges the global `store.timeline` (live-updated via `timeline:event`) with paginated `extra` events, deduped by `id` and sorted newest-first (rowid is append-only, so id order ≡ timestamp order).
-- **Baseline animation**: on mount, the highest event `id` becomes the baseline; any event with `id > baseline` gets the `tlr--live` streaming-in animation.
-- **Client-side filter + refetch**: when the user narrows filters (feature/actor/kinds), the view refetches from the backend with `toIpcFilter(filters)` to discover older events that match; widening or clearing also refetches to re-settle exhaustion under the new scope.
-- **Exhaustion probe**: a short page (`< PAGE_SIZE`) definitively means no older events exist for the current filter; the "Load older" button only appears when `!exhausted()` or more client-side rows remain.
-- **Lazy rendering**: visible rows are capped at `renderLimit` (default 500); clicking "Load older" either pages in from the backend or just bumps `renderLimit` by `RENDER_STEP` if local rows exceed the limit.
-- **Expandable payloads**: each row toggles open to reveal the full JSON payload (`<pre>` lazy-rendered via a latch) and metadata (actor, kind label, full timestamp).
+- `useTimelineEvents` merges the live store's `timeline` slice (fed by `timeline:event` via IPC) with locally paged-in older events, deduplicated by append-only `id` (rowid).
+- On mount and when filters narrow, calls `getTimeline` IPC with the current filter and `limit: 200` to settle exhaustion early; a short page means no older events exist.
+- Infinite scroll via "Load older" button: either bumps the local render limit (`RENDER_STEP = 500`) or fetches the next page using `beforeId: oldest.id` cursor.
+- Client-side filter matching when filters are narrowed (`matchesFilters`); backend refetch on every filter change to re-settle exhaustion for the new scope.
+- Each row gets a stable session lane color (djb2 hash onto 5 accent vars), a mono kind glyph, kind-specific title (e.g. basename for `file_edited`, truncated command for `command_run`), feature chips, relative time, and expandable JSON payload (grid 0fr→1fr).
+- Events with `id > baseline` (the highest id at first load) are flagged `live` and animate in via `streaming-line-in`.
 
-## Key files
+**Key files**
 
-- `TimelineView.tsx` — top-level view: filter bar, event list, "Load older" pagination, empty/no-match states.
-- `TimelineEventRow.tsx` — immutable row: session lane dot, kind glyph, kind-specific title, feature chips, relative time, expandable JSON payload.
-- `TimelineFilterBar.tsx` — single-select feature/actor, multi-select kinds, clear button when narrowed.
-- `timeline-utils.ts` — pure helpers: `laneColor` (stable djb2 hash onto accent palette), `eventTitle` (kind-specific formatting), `relativeTime`, filter matching, IPC filter translation.
-- `use-timeline-events.ts` — merge/dedupe/pagination logic: maintains `extra` paged events, exposes `loadOlder` and `refetch`, tracks `exhausted`.
+- `views/TimelineView.tsx` — root view; composes filter bar + event rows, manages render limit, calls `useTimelineEvents` and `refetchScope()` on filter changes.
+- `components/timeline/use-timeline-events.ts` — merges live store timeline with locally paged extra events, deduped by id; provides `loadOlder(filter)` and `refetch(filter)`.
+- `components/timeline/TimelineEventRow.tsx` — immutable row: session lane dot, kind glyph, kind-specific title, feature chips, relative time, expandable JSON payload; no edit/delete affordances.
+- `components/timeline/TimelineFilterBar.tsx` — single-select feature/actor, multi-select kinds, "clear filters" button when narrowed.
+- `components/timeline/timeline-utils.ts` — pure helpers: `laneColor` (djb2 session-id hash), `KIND_GLYPH`/`KIND_LABEL`/`KIND_SHORT`, `eventTitle` (kind-specific payload extraction), `matchesFilters`, `toIpcFilter`, `relativeTime`.
 
-## Invariants & gotchas
+**Invariants & gotchas**
 
-- **Rowid = id**: event `id` is the SQLite `rowid`, append-only, so `id` order is timestamp order — never sort by parsed `ts` string.
-- **Baseline must not reset**: `setBaseline(null)` mid-session re-animates all rows; the baseline latch is set once on first non-empty `events()` and never cleared.
-- **Refetch on every filter change**: widening or clearing a filter can reveal older events the prior scoped fetch never saw; always call `refetch(toIpcFilter(...))` when filters change, not just when narrowing.
-- **Exhaustion is scoped to the active filter**: `exhausted()` applies to the last backend fetch under the current filter; changing the filter invalidates the flag, hence the `setExhausted(false)` at the top of `refetch()`.
-- **"Load older" guards both sources**: show the button when `filtered().length > visible().length` (local cap) OR `!exhausted()` (backend has more); clicking first tries to bump `renderLimit`, then calls `loadOlder` only if already at the local end.
-- **Session lane colors are stable**: `laneColor(sessionId)` must return the same CSS var for the same session across renders; the djb2 hash is deterministic, but changing `LANE_VARS` order breaks existing session colors.
-- **No edit affordances**: rows are immutable by design; the row click only toggles payload expansion, not inline editing or deletion.
+- **Exhaustion is scoped to the fetched filter**: widening or clearing filters must call `refetch()` to re-settle exhaustion for the new scope — never assume an exhausted narrow filter means the unfiltered feed is exhausted.
+- **Id order == ts order**: the backend rowid is strictly append-only, so sorting by `id` descending gives reverse-chron without parsing timestamps.
+- **Baseline is latched on first load**: `baseline` is set to the highest id in the initial `events()` array and never reset; anything with a larger id is flagged `live` and animated in.
+- **"Load older" only appears when older events exist**: the backend returns `limit: 200` pages, so a short page (`< 200`) definitively settles exhaustion — never show the button when `exhausted()` is true and the local render limit has caught up.
+- **Client-side match, backend refetch**: filtering is client-side for fast UX, but every filter change triggers a backend refetch to keep exhaustion accurate for the new scope.
+- **Payload keys are defensive**: `eventTitle` reads via `strField([...aliases])` because backend payloads are not strongly typed — never assume a single canonical key name.

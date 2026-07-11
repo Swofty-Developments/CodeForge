@@ -1,33 +1,31 @@
-The edited files (sessions.rs and frontend components) are unrelated to index staleness detection. The staleness.rs file itself was not changed this turn. The doc remains accurate.
+The changes to `headless.rs` added retry logic for transient failures during indexing, but this doesn't affect the staleness detection logic itself — `meta.rs` remains unchanged. The edited files are all frontend/session UI and the headless indexing runner. The staleness detection doc is still accurate.
 
 ---
 # Index Staleness Detection
 
 ## Purpose
 
-Polls every open repository's index status every 10 seconds and emits `index:status` events when the verdict changes, alerting the UI when the on-disk index becomes stale or outdated. The detection is pure (never re-indexes) so the UI can prompt a re-index without side effects.
+Compares the on-disk index version and a content-hash manifest (`.codeforge/index-meta.json`) against the current file tree to decide whether `features.json` is stale, outdated, or fresh — without running Claude or re-indexing.
 
 ## How it works
 
-- Each open repo spawns a background poller that computes index status off the async runtime via `tokio::task::spawn_blocking` (sha256 hashing is blocking IO).
-- The staleness verdict has four states: `never` (no index yet), `fresh` (hashes + version match), `stale` (manifest files changed or vanished since indexing), or `outdated` (stored version < current `INDEX_VERSION`).
-- A poller ticks every 10 seconds, skipping entirely while `reindexing` is set (mid-reindex the manifest is being rewritten) and resetting `last` so the first post-reindex verdict is always re-emitted.
-- Emits `index:status` `{ repoPath, status }` only when the verdict **changed** since the last emit—a steady state stays silent so the UI isn't re-prompted every tick.
-- The staleness check re-hashes every file in `.codeforge/index-meta.json` (a content-hash manifest + version written at index time) and compares against the stored sha256; mismatches or missing files → `stale`, version mismatch → `outdated`.
-- Probe failures are logged but do not fabricate a fallback verdict—`IndexStatus` has no error state—and the poller keeps running (the repo IS open).
+- **Write phase**: after indexing, `meta::write` hashes every file referenced by any feature (entry points ∪ files) and stores `{ version, files: { path → sha256 } }` in `index-meta.json`.
+- **Status phase**: `meta::status` reads both `features.json` and `index-meta.json`; if either is absent → `Never`.
+- Compares stored `version` to `INDEX_VERSION` (bumped when indexing technique changes) → if older → `Outdated`.
+- Re-hashes all manifest files and compares to stored hashes; any mismatch or missing file → `Stale` with the changed paths listed.
+- If all hashes match and version is current → `Fresh`.
+- Pure function — never executes `claude`, never triggers re-indexing — so the UI can safely check status and prompt the user.
 
 ## Key files
 
-- **crates/tauri-app/src/runtime/staleness.rs** — spawns the per-repo poller, emits `index:status` events when the verdict changes.
-- **crates/forge-index/src/meta.rs** — pure staleness/version computation (`status()`), reads `features.json` + `index-meta.json`, re-hashes manifest files, and writes the meta manifest at index time (`write()`).
-- **crates/forge-index/src/lib.rs** — defines `INDEX_VERSION` (bumped when indexing technique changes) and the `index_status` public API.
+- `crates/forge-index/src/meta.rs` — `write` stores the manifest after indexing; `status` computes the staleness verdict by re-hashing; defines `IndexMeta`, `IndexState`, `IndexStatus`.
+- `crates/forge-index/src/lib.rs` — exports `index_status` as the public entry point; defines `INDEX_VERSION` (bumped when indexing technique changes).
 
 ## Invariants & gotchas
 
-- **Never fabricate a verdict** — probe failures are logged, not mapped to "fresh"/"never" (no error state exists).
-- **Poller must not outlive its repo** — the returned `JoinHandle` is owned by `RepoRuntime` and aborted on context close.
-- **Emit-on-change only** — comparing `last` against the new verdict prevents flooding the UI with duplicate status events.
-- **Skip polling mid-reindex** — while `reindexing` is set, the manifest is being rewritten so a verdict against old meta is noise; `last` is reset so the post-reindex verdict is always re-emitted (typically back to `fresh`).
-- **Version mismatch takes precedence** — `outdated` is returned before checking hashes; bump `INDEX_VERSION` when the indexing technique changes.
-- **Manifest omits missing files** — a file referenced by a feature but absent at `write_meta()` time is omitted from the manifest (logged) and not tracked for staleness (documented rule, not a guess).
-- **Frontend filters by `repoPath`** — the `index:status` event includes `repoPath` so multi-repo UIs can route the prompt to the right worktree.
+- **Never silent fallback**: `IndexState` is a closed enum — `Never | Fresh | Stale | Outdated` — each with distinct UI behavior. No implicit "assume fresh."
+- **Missing file at write time**: a referenced path that doesn't exist when `write` runs is omitted from the manifest (logged) and therefore never tracked for staleness — deliberate rule, not a silent guess.
+- **Atomicity**: `write` uses tmp + rename so readers never see a partial file.
+- **Version precedence**: `Outdated` verdict (stored version < current) is checked before hash mismatches — even if all hashes match, an old version → `Outdated`.
+- **Platform-agnostic keys**: manifest paths are normalized to `/` separators for stable JSON serialization across Windows/Unix.
+- **Serialization contract (FZ-2)**: `IndexStatus` serializes as `{ state, changedFiles, indexVersion, currentVersion }` with `state` a lowercase string (`"never"`, `"fresh"`, `"stale"`, `"outdated"`) — frozen contract mirrored in `frontend/src/types.ts`.

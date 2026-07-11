@@ -3,36 +3,40 @@
 
 ## Purpose
 
-The root React component that orchestrates FeatureForge's layout: sidebar feature tree, main panel with view tabs, right session pane for embedded Claude Code sessions, command palette (Cmd+K), and global keyboard shortcuts.
+Top-level UI harness that assembles the entire desktop app layout: title bar, worktree tabs, sidebar (feature tree), main panel (tab bar + view switcher), session pane, terminal panel, status bar, modals, command palette, and toast stack. Manages global keyboard shortcuts and resize-handle dragging for sidebar and session pane widths. Shows the Welcome view as a fallback when no repo is open.
 
 ## How it works
 
-- **Global keyboard handlers** — Cmd+K toggles the command palette, Cmd+\ toggles the session pane, Cmd+J toggles the terminal panel, Cmd+1-4 switch main views, and Escape closes in priority order (palette → deny pending approval → session pane).
-- **Three-column layout** — sidebar (feature tree, resizable via drag handle), main panel (TabBar + view switcher showing FeatureDetail/GraphView/TimelineView/DiffReview), and session pane (resizable, collapsible, showing embedded Claude sessions).
-- **Conditional rendering** — when no repo is open, renders a centered Welcome view; otherwise renders the full feature-driven UI.
-- **Resize handles** — mousemove/mouseup event listeners manage sidebar and session pane widths, persisted in app-store.
-- **Modals and overlays** — CommandPalette, InitRepoModal, StaleModal, MergeResultPanel, and WorktreeTabs render as overlays when their store flags are true.
-- **Toast notifications** — bottom-right stack for errors and success messages, dismissible on click, auto-expire via store.
-- **Global event listener registration** — main.tsx calls appStore.initListeners() once at startup to wire index:status, agent:event, timeline:event, index:progress, and repo:changed listeners; reducers inside the store demux events to the correct context.
+- **Layout structure**: title bar → worktree tabs → three-column workspace (sidebar | main panel | session pane) → status bar, with modals and toasts stacked on top via z-index. When `store.repo` is null, the workspace shows `<Welcome />` instead of the three-column layout.
+- **Resize-handle dragging**: `onSidebarDragStart` / `onSessionDragStart` set flags + cursor, `onMouseMove` updates store widths, `onMouseUp` clears flags; session pane width is calculated as `window.innerWidth - e.clientX` since it hugs the right edge.
+- **Global shortcuts**: Cmd+K (toggle palette), Cmd+\ (toggle session pane), Cmd+J (toggle terminal), Cmd+1-4 (switch views), Esc (priority close: palette → deny pending approval → session pane).
+- **View switcher**: keyed `<Show when={store.activeContextPath}>` triggers cross-fade + slide animation when active repo context changes; `<Switch>` renders FeatureDetail / GraphView / TimelineView / DiffReview based on `store.activeView`.
+- **Conditional rendering**: sidebar, worktree tabs, main panel, and terminal only mount when `store.repo` is set; otherwise shows `<Welcome />`, which checks Claude CLI installation/authentication on mount and displays a warning banner if missing or unauthenticated.
+- **Session pane fullscreen mode**: `toggleSessionPaneFullscreen()` toggles `sessionPaneFullscreen` flag; when enabled, the pane is fixed-position covering the entire app below the title bar (z-index 1000), ignoring its configured width.
+- **Toast stack**: bottom-right fixed stack rendering `store.toasts` with semantic red/green tint, click-to-dismiss.
 
 ## Key files
 
-- **crates/tauri-app/frontend/src/App.tsx** — root shell component, layout, keyboard shortcuts, resize handlers, modal orchestration.
-- **crates/tauri-app/frontend/src/main.tsx** — entry point, font registration, initListeners call, renders App into #app.
-- **crates/tauri-app/frontend/src/stores/app-store.ts** — singleton SolidJS store holding all app state (contexts, sessions, features, timeline, UI flags); handleIndexStatus reducer with episode-based modal logic, initListeners setup.
-- **crates/tauri-app/frontend/src/components/CommandPalette.tsx** — Cmd+K fuzzy-search overlay for actions, views, and features.
-- **crates/tauri-app/frontend/src/components/SessionPane.tsx** — right pane showing Claude sessions, tab strip, new-session dropdown, composer.
-- **crates/tauri-app/frontend/src/components/Sidebar.tsx** — left pane showing feature tree, unseen badges, index progress footer.
+- **crates/tauri-app/frontend/src/App.tsx** — shell component assembling all UI panels, resize logic, keyboard shortcuts, view switcher, toast stack.
+- **crates/tauri-app/frontend/src/main.tsx** — entry point loading fonts, calling `appStore.initListeners()` once, mounting `<App />` into `#app`.
+- **crates/tauri-app/frontend/src/views/Welcome.tsx** — pre-repo landing screen with "Open repository" CTA, keyboard hints, and Claude CLI status check.
+- **crates/tauri-app/frontend/src/stores/app-store.ts** — global store; exports `toggleSessionPane()` and `toggleSessionPaneFullscreen()` for keyboard shortcuts and UI buttons.
+- **crates/tauri-app/frontend/src/components/SessionPane.tsx** — right pane rendering session tabs, message stream, composer, fullscreen + collapse buttons.
+- **crates/tauri-app/frontend/src/components/session/styles-chrome.ts** — session pane CSS module; `.session-pane--fullscreen` rule applies fixed positioning and width override.
+- **crates/tauri-app/frontend/src/ipc.ts** — typed wrapper for all Tauri IPC commands and event listeners, including `checkClaudeCli()`.
+- **crates/tauri-app/src/main.rs** — Tauri entry point; initializes AppState (db, repos, sessions, terminals), registers all IPC command handlers via `invoke_handler`, loads plugins.
+- **crates/tauri-app/src/commands/mod.rs** — IPC command module index; exports `repo`, `features`, `sessions`, `worktrees`, `terminals`, `timeline` submodules; every command returns `Result<T, String>`.
+- **crates/tauri-app/src/commands/repo.rs** — backend IPC commands for repo operations; includes `check_claude_cli` which probes PATH and tests authentication.
+- **crates/forge-index/src/headless.rs** — headless `claude -p --output-format json` invocation; retries up to 3 times on transient failures (timeout, network, rate-limit) with exponential backoff.
 
 ## Invariants & gotchas
 
-- **Escape priority order** must remain palette → deny pending approval → session pane; other orderings break user flow assumptions.
-- **Resize event listeners** are registered once on mount and never re-registered; attach them to window, not the component, to avoid double-listeners.
-- **View keys (Cmd+1-4)** are hard-coded in VIEW_KEYS; changing them requires updating both the map and any user-facing docs.
-- **store.repo is a derived getter** (active context's state) — never write to it directly; mutate contexts and activeContextPath instead.
-- **All keyboard shortcuts require mod** (Cmd/Ctrl), except Escape — adding non-mod shortcuts risks colliding with text input.
-- **Session pane width calculation** uses `window.innerWidth - e.clientX` because the handle hugs the right edge, not the left.
-- **Toast auto-dismiss** is handled in the store slice (TOAST_DISMISS_MS), not in the component — do not duplicate timers.
-- **handleIndexStatus uses episode-based modal tracking** (shownStaleModals set keyed by `${repoPath}:${status.state}`) so the backend's 10s polling loop can update indexStatusByPath without re-prompting the user for the same stale/outdated episode. The flag is cleared when the state transitions back to fresh/never or when the user acts on the modal (reindexStale), so a future stale→fresh→stale cycle will re-prompt.
-- **indexStatusByPath is per-repo** (keyed by repoPath) so multi-context scenarios (base + worktrees) track staleness independently; handleIndexStatus always consumes status updates, but pops the modal once per episode.
-- **handleTimelineEvent appends live events only to the active context** (checks `samePath(repoPath, store.activeContextPath)`) — background contexts reload their timeline on switch, so appending their events here would leak across worktrees.
+- **One global event listener registration**: `main.tsx` calls `appStore.initListeners()` once at boot; do not duplicate in `App` or child components — events demux internally via the store.
+- **Session pane width is right-anchored**: when dragging the session resize handle, width = `window.innerWidth - e.clientX`, not `e.clientX` directly; breaking this inverts the drag direction.
+- **Fullscreen mode overrides width**: when `sessionPaneFullscreen` is true, the pane ignores `sessionPaneWidth` and spans 100% of the window (fixed positioning). The width slider is hidden in this state; toggling fullscreen off restores the previous width.
+- **Esc key priority order**: palette → pending approval denial → session pane close; later handlers must early-return if an earlier case fires, or Esc will close multiple layers at once.
+- **View switcher must be keyed on `activeContextPath`**: without the `keyed` attribute, SolidJS won't trigger the cross-fade animation when switching repos/worktrees — the view content updates but the transition is lost.
+- **Resize handles must call `preventDefault()`**: otherwise text selection triggers during drag and breaks the cursor-tracking loop.
+- **All shortcuts require repo**: Cmd+J and Cmd+1-4 check `store.repo` before firing; adding new repo-dependent shortcuts must gate the same way or they'll throw when no repo is open.
+- **Claude CLI check is frontend-initiated**: Welcome calls `checkClaudeCli()` on mount (not pushed from the backend); the check is non-blocking so the UI stays responsive even if the probe times out.
+- **Headless indexing retries transient failures**: `run_headless_claude` in `forge-index/src/headless.rs` retries up to 3 times on timeouts, network errors, rate-limits, 503/504 responses; non-transient errors (auth, bad prompt, ENOENT) fail immediately. Each retry uses exponential backoff (1s, 2s, 4s).

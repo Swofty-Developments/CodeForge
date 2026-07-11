@@ -1,31 +1,33 @@
-The changes described in the agent's notes are about staleness detection and indexing — backend changes in `staleness.rs`, `repo_open.rs`, and `state.rs`, plus the frontend store handling `index:status` events. These have **no impact** on the Graph View feature, which visualizes features and their relationships through force-directed simulation. The Graph View is purely a visualization layer over `store.features` and doesn't interact with indexing/staleness logic.
-
-The existing doc remains accurate and complete.
+The edited files are unrelated to Graph View — they concern Tauri command registration, CLI retry logic, and headless indexing. The existing doc remains accurate.
 
 ---
 # Graph View
 
 ## Purpose
-Interactive force-directed graph visualizing features as nodes and their relationships as edges. Node size scales with file count; edges connect features via shared files or entry-point references. Users drag to reposition, click to select, and assign custom colors.
+
+Force-directed graph visualization of the feature set — nodes represent features (sized by file count), edges represent shared files or entry-point linkage. Click to select a feature (opens a side popover for color customization), drag to reposition, or reset the layout.
 
 ## How it works
-- **Simulation physics**: Hand-rolled force integration (no external libs) with repulsion between all node pairs, spring forces along edges (rest length inversely proportional to edge weight), and weak gravity toward the center. Alpha cools exponentially until kinetic energy drops below threshold.
-- **Topology caching**: Graph rebuilds only when features are added/removed or file membership changes — not on renames or recolors. Prior node positions are preserved across rebuilds via `posCache` keyed by slug.
-- **Reduced-motion**: If `prefers-reduced-motion` is set, the simulation settles synchronously (240 ticks in one pass) instead of animating via `requestAnimationFrame`.
-- **Drag interaction**: Pointer-down sets `fx`/`fy` to pin the node at cursor position; pointer-move updates the pin; pointer-up clears it. Drag distance under 4px is treated as a click (selects the node).
-- **Edge weight**: Edges are created for every shared file (weight += 1) and for entry-point linkage (if feature A's entry point is a file in feature B, an edge A↔B with weight += 1).
-- **Color palette**: Default node color is hashed from slug into the Zed One Dark accent set; user-assigned colors (via the popover picker) override.
+
+- `buildGraph` constructs the topology: nodes per feature (radius ~ `sqrt(fileCount)`), edges weighted by shared-file count and entry-point containment. Graph rebuilds only when features are added/removed or file membership changes — name/color updates don't reset layout.
+- `step` integrates one physics tick: repulsion (all node pairs), edge springs (rest length inversely proportional to weight), and center gravity, all multiplied by a cooling `alpha`. Returns kinetic energy so the loop can stop when settled.
+- `tick` runs the simulation via `requestAnimationFrame`, cooling `alpha *= 0.985` each frame and halting when `alpha < 0.02` and `energy < 0.01`.
+- Under `prefers-reduced-motion: reduce`, reheats settle synchronously in 240 ticks (no continuous animation). During a drag, `nudge()` only triggers a repaint without reheating.
+- Node drag sets `fx`/`fy` (pinned position) and reheats the sim. On release, clears `fx`/`fy` unless the pointer moved less than 4px (threshold for a click vs. drag).
+- `NodePopover` displays feature details (name, tags, file/entry counts) and a color swatch picker (`GRAPH_PALETTE` + an "Auto" clear button) that calls `appStore.setFeatureColor`.
 
 ## Key files
-- **crates/tauri-app/frontend/src/views/GraphView.tsx** — main component: drives the sim loop, handles drag/click, renders SVG nodes/edges, shows popover on selection.
-- **crates/tauri-app/frontend/src/components/graph/graph-sim.ts** — force-directed physics: `buildGraph` creates nodes/edges from features, `step` integrates repulsion/springs/gravity for one tick.
-- **crates/tauri-app/frontend/src/components/graph/NodePopover.tsx** — side panel for selected node: displays name/tags/stats, color swatch picker, "Open feature detail" hand-off.
-- **crates/tauri-app/frontend/src/components/graph/colors.ts** — deterministic hue assignment (`hueForSlug` via hash mod), Zed accent palette, `nodeColor` resolver (explicit color or fallback).
+
+- **GraphView.tsx** — main view, renders SVG nodes/edges, drives the physics loop, handles drag/select interaction.
+- **graph-sim.ts** — graph builder (`buildGraph` constructs nodes/edges from features) and physics integrator (`step` applies forces and updates positions).
+- **NodePopover.tsx** — side popover for the selected node (color picker, stats, hand-off to feature detail).
+- **colors.ts** — `GRAPH_PALETTE` (Zed One Dark accent swatches) and `hueForSlug` (deterministic hash so slugs get stable default colors).
 
 ## Invariants & gotchas
-- **Position cache keyed by slug**: renaming a feature (slug change) drops its cached position and triggers a full reset on next rebuild. The slug is the stable identity; changing it breaks continuity.
-- **`fx`/`fy` must be null when not dragging**: pinned nodes skip velocity integration. Forgetting to clear `fx`/`fy` on pointer-up freezes the node permanently.
-- **Alpha decay and reheat**: `reheat()` resets `alpha = 1` and restarts the loop. If you mutate the graph mid-animation without reheating, nodes drift without enough energy to settle.
-- **Reduced-motion synchronous settle**: the 240-tick loop in `reheat()` must complete before `setFrame` fires or positions are stale. Do not interleave async work during reduced-motion settling.
-- **Edge weight determines rest length**: `restLength = max(58, 150 - weight * 16)` — higher weight pulls nodes closer. If you cap edge weight or change the formula, node spacing will change.
-- **SVG coordinate transform**: `toSvg(e: PointerEvent)` must use `getScreenCTM().inverse()` or drag coordinates are wrong when the SVG is scaled/translated by CSS.
+
+- **Position cache survives graph rebuilds.** `posCache` is keyed by slug, so recolors/renames preserve node positions. Clearing the cache triggers a full layout reset.
+- **`fx`/`fy` pins during drag.** A node with `fx !== null` or `fy !== null` has zero velocity and position set exactly to `(fx, fy)` — clearing these is mandatory on drag release.
+- **Click-vs-drag threshold is 4px.** Pointer movement less than `hypot(Δx, Δy) < 4` between down and up is treated as a click (selects the feature), not a drag.
+- **Reduced motion settles synchronously.** The 240-tick settle happens in one frame — updating the sim mid-settle breaks convergence. During a drag under reduced motion, only repaint (`setFrame`), don't reheat.
+- **Edge weight drives rest length.** Higher weight → shorter spring rest length → tighter clusters. Don't invert the weight/distance relationship without also tuning `SPRING` constant.
+- **Graph rebuilds fire a reheat.** `createEffect(() => { graph(); reheat(); })` ensures topology changes (new/removed features) always restart the simulation from `alpha = 1`.

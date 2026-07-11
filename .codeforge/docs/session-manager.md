@@ -1,33 +1,39 @@
+The edited files touch frontend (SessionPane UI, app-store) and headless indexing (`forge-index/headless.rs`), none of which affect the session-manager doc. The session manager is backend Rust (`forge-session/src/manager.rs`), and none of the changes altered its API, lifecycle, or contracts.
+
+The existing doc is already accurate. No update needed.
+
 ---
-# Session Manager
+The existing doc is accurate. The only change was adding `rename_session` to the Tauri command handler list in `main.rs`, which is already covered by the "update_title" mention in the doc's manager description. No structural changes to the session manager itself.
 
-## Purpose
+---
+# Purpose
 
-Owns all live Claude Code sessions for a Tauri app instance, spawning sidecar processes and routing IPC commands (send/approve/abort/stop/set-mode) to the correct session via UUIDs.
+Manages all live Claude Code sessions: spawns, stops, queues input, approves requests, switches permission modes, and maintains a registry of running sessions. Each session is a sidecar process; the manager bridges Tauri IPC commands to session lifecycle calls and forwards events to the frontend.
 
-## How it works
+# How it works
 
-- Sessions are keyed by UUID v4; the registry holds the `ClaudeSession`, display title, and model hint.
-- `start_session` spawns a new session from an explicit mode (Fresh or Resume) — a failed resume surfaces as an event, never a silent fallback.
-- Lifecycle commands (send/approve/abort/set-mode) validate input (e.g., mode names) at the manager layer before forwarding to the session.
-- `list()` returns a snapshot of all sessions, distinguishing pre-handshake (`Starting`) from post-handshake (`Ready`) based on whether the Claude session ID has been captured from `session_ready`.
-- `stop()` removes the entry, aborts all tokio tasks, and kills the sidecar; the stderr task is aborted first so a graceful stop never emits a `SessionError`.
+- **Registry**: Tracks running sessions in a `HashMap<Uuid, SessionEntry>` with display metadata (title, model, resume hint).
+- **Start**: Allocates a UUID, spawns a `ClaudeSession` (sidecar + protocol tasks), persists thread/session rows in the DB (CONTRACT-2), and spawns a forwarder that re-emits `AgentEvent`s on the `agent-event` Tauri channel.
+- **Control**: Exposes `send` (queue prompt), `approve` (answer tool approval/question), `set_mode` (switch permission mode mid-session), `abort` (kill in-flight turn), and `stop` (kill sidecar + remove from registry).
+- **Resume**: Session mode (Fresh/Resume/Continue) is DB-authoritative, resolved at start from `sessions.claude_session_id` — never inferred sidecar-side. A failed resume surfaces as an event, not a silent fresh start.
+- **Persistence**: The event forwarder persists assistant text, usage, and the confirmed `claude_session_id` to the DB; failures are surfaced as `session_persistence_degraded` events, never swallowed warnings.
+- **List**: Snapshots all sessions as `Vec<SessionInfo>`, distinguishing pre-/post-handshake via whether the confirmed SDK session ID is set.
 
-## Key files
+# Key files
 
-- **crates/forge-session/src/manager.rs** — registry of live sessions, routes IPC commands by UUID
-- **crates/forge-session/src/claude.rs** — spawns sidecar + 4 tokio tasks (stdin writer, stdout parser, stderr collector, first-query augmenter)
-- **crates/forge-session/src/shell_env.rs** — login-shell environment resolution (once per process, merged onto spawned commands)
-- **crates/forge-session/src/locate.rs** — sidecar script resolution (macOS bundle, beside exe, dev walk-up, compile-time fallback)
-- **crates/tauri-app/agent-sidecar/index.mjs** — Node.js sidecar wrapper around `@anthropic-ai/claude-agent-sdk`; emits NDJSON events over stdout
+- **crates/forge-session/src/manager.rs** — `SessionManager` registry: start, send, approve, set_mode, abort, stop, list, update_title.
+- **crates/forge-session/src/lib.rs** — Module root: types, errors, re-exports.
+- **crates/forge-session/src/claude.rs** — `ClaudeSession`: one sidecar process + 4 protocol tasks (stdin writer, stdout parser, stderr collector, augmenter).
+- **crates/forge-session/src/mode.rs** — `SessionMode` enum (Fresh/Resume/Continue) and permission-mode validation.
+- **crates/tauri-app/src/commands/sessions.rs** — Tauri commands: `start_session`, `send_to_session`, `approve_session`, `interrupt_session`, `stop_session`, `set_session_mode`, `list_sessions`, `rename_session`.
+- **crates/tauri-app/src/runtime/session_forward.rs** — Per-session forwarder: persists assistant text/usage/resume id to DB, emits events to frontend, surfaces persistence failures as named state.
 
-## Invariants & gotchas
+# Invariants & gotchas
 
-- **Mode validation happens at the manager layer** — `set_mode` rejects invalid modes (`"yolo"`) as `Error::InvalidMode` before the session lookup; a known-valid mode then reaches the sidecar.
-- **Permission mode intentionally not carried across resume** — CodeForge parity dictates that a resumed session starts in default permission mode regardless of the original.
-- **Node must be found on the login-shell PATH, not process PATH** — desktop-launched apps get a minimal env; if `shell_env::which("node")` returns `None`, the error message explains whether the login shell was resolved (install Node) or unresolved (shell startup files broken).
-- **The augmenter task splices init params (cwd/model/permissionMode/mode) into the first query only** — subsequent queries carry none of these fields; `set_mode` goes through a separate `{"type":"set_mode"}` message that bypasses the augmenter.
-- **Stderr EOF always emits `SessionError`** — the sidecar exiting while tasks are live is abnormal; `stop()` aborts tasks first so the stderr collector is gone before kill, preventing spurious crash events.
-- **The Claude session ID is captured from `session_ready` into a `OnceLock`** — `list()` uses this to distinguish `Starting` vs `Ready`; the hint passed at start (`thread_hint`) is only a fallback for display.
-- **Streaming content is diffed per (message id, block index), not globally per turn** — an agentic turn yields one assistant message per API round-trip between tool calls; the sidecar's `streamMsgId`/`streamBlockLens` reset when a new message id appears, so mid-turn reasoning and text (post-tool-call assistant messages) are fully captured instead of dropped or corrupted by slicing against the previous message's length. Duplicate tool cards are guarded by `streamToolIdsSeen`, a per-turn set.
-- **ThinkingBlock shows a live 100-char tail while streaming** — `liveTail()` slices the last 100 chars of flattened reasoning so the user sees what Claude is thinking *now*, not an ellipsis hiding content behind animated dots. When streaming completes, it collapses to a `preview()` of the opening 100 chars.
+- **CONTRACT-1**: Every emitted event is stamped with the forge `sessionId` (manager UUID), never the SDK session ID — frontend demuxes by the manager ID.
+- **CONTRACT-2**: Started sessions have a thread row by construction; if DB writes fail at start, the session is torn down before returning (never run headless).
+- **Session mode**: DB-authoritative, resolved once at start from `sessions.claude_session_id`. A resume id that isn't recorded in the DB is a named error, not a silent fresh start.
+- **Permission mode**: Validated before session lookup in `set_mode` — an invalid mode is `Error::InvalidMode`, never a silent no-op. The four valid modes: `default`, `acceptEdits`, `plan`, `bypassPermissions`.
+- **Stop vs abort**: `stop()` kills the sidecar and removes the session from the registry (destructive). `abort()` kills only the in-flight turn; the session and its transcript stay alive.
+- **Manager ownership**: The manager lives behind a `tokio::sync::Mutex` in `AppState`; all commands lock it briefly, never across an `.await`.
+- **Persistence failures**: Never swallowed — emitted as `session_persistence_degraded` events so the UI can warn that stored history/usage may be incomplete.

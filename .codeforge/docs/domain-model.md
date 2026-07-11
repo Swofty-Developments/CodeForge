@@ -1,35 +1,33 @@
-The agent's work this turn didn't touch `forge-core` domain types at all — it refactored the Tauri runtime layer's staleness polling. The domain model (the schema crate) is unchanged.
-
----
 # Domain Model
 
 ## Purpose
-
-Pure, IO-free schema crate defining every domain type that crosses the Tauri IPC boundary between Rust backend and SolidJS frontend — features, timeline events, diffs, sessions, worktrees, and errors.
+Pure Rust data structures for every entity that crosses the Tauri IPC boundary (Rust backend ⇄ SolidJS frontend). Defines the serde contract for `Feature`, `TimelineEvent`, `DiffByFeature`, `SessionInfo`, and other core types. No IO or business logic—only shape and serialization.
 
 ## How it works
-
-- All structs serialize as `camelCase` JSON via `#[serde(rename_all = "camelCase")]` for TypeScript interop.
-- Enums (`FileRole`, `Actor`, `EventKind`, `SessionStatus`) serialize as `snake_case` strings to avoid magic numbers.
-- Every type is mirrored 1:1 in `frontend/src/types.ts` and validated by roundtrip serde tests.
-- Feature files live in a many-to-many relationship: one file can participate in N features.
-- Timeline events are immutable, append-only records with SQLite rowids as stable ids; `TimelineFilter` implements backward-paging via `before_id`.
-- Diff grouping is feature-centric: files appear under every feature they belong to (`shared: true`), with unmapped files isolated under a synthetic group (`unmapped: true`).
+- Every struct is `#[serde(rename_all = "camelCase")]` so Rust `snake_case` fields become `camelCase` in JSON for TypeScript consumption.
+- Enums (`FileRole`, `Actor`, `EventKind`, `SessionStatus`) serialize as `snake_case` strings (e.g. `"file_edited"`, not `"FileEdited"`).
+- Optional fields use `#[serde(default, skip_serializing_if = "Option::is_none")]` to omit them from JSON when unset, enabling partial payloads like `FeaturePatch` and `TimelineFilter`.
+- All shapes are mirrored 1:1 in `frontend/src/types.ts`; this crate is the single source of truth for the contract.
+- Test coverage ensures serialized field names match expectations (`"entryPoints"`, `"featureSlugs"`, etc.) and roundtrip correctness.
+- No domain logic lives here—validation, IO, and state management belong in consuming crates (`forge-index`, `forge-timeline`, `forge-git`).
 
 ## Key files
-
-- `lib.rs` — public re-exports and IPC serde contract documentation.
-- `feature.rs` — `Feature`, `FeatureFile`, `FileRole`, `FeaturePatch`; the primary unit CodeForge organises code by.
-- `timeline.rs` — `TimelineEvent`, `Actor`, `EventKind`, `TimelineFilter`; append-only event log schema.
-- `diff.rs` — `DiffByFeature`, `FeatureDiffGroup`, `FileDiff`, `DiffHunk`, `DiffLine`; multi-level diff view data.
-- `session.rs` — `RepoState`, `SessionInfo`, `SessionStatus`, `StartSessionOpts`, `IndexProgress`; session lifecycle types.
-- `worktree.rs` — `Worktree`, `MergeResult`; git worktree tracking and merge outcomes.
-- `error.rs` — `Error`, `Result`; shared error enum wrapping io/json/notfound/invalid/other.
+- `lib.rs` — re-exports all public types, documents the IPC serde contract
+- `feature.rs` — `Feature`, `FeatureFile`, `FileRole`, `FeaturePatch`
+- `timeline.rs` — `TimelineEvent`, `Actor`, `EventKind`, `TimelineFilter`
+- `session.rs` — `SessionInfo`, `SessionStatus`, `StartSessionOpts`, `RepoState`, `IndexProgress`
+- `diff.rs` — `DiffByFeature`, `FeatureDiffGroup`, `FileDiff`, `DiffHunk`, `DiffLine`
+- `worktree.rs` — `Worktree`, `MergeResult`
+- `error.rs` — `Error`, `Result` (thiserror-based, serialized as strings when crossing IPC)
 
 ## Invariants & gotchas
-
-- **Never break serde contract**: all field renames must be coordinated with `frontend/src/types.ts` and the IPC call sites — a silent mismatch causes runtime deserialization panics.
-- **Enums are stringly-typed**: `FileRole::Core` serializes to `"core"`, not `0`; the frontend expects exact string matches.
-- **Unmapped files must set `unmapped: true`**: the frontend distinguishes the synthetic unmapped group by that boolean field, NOT by string-sniffing `slug == "unmapped"`.
-- **Timeline ids are append-only rowids**: never mutate `TimelineEvent.id`; `before_id` paging depends on the rowid == insert-order invariant.
-- **Optional fields serialize null or are omitted**: `FeaturePatch`, `StartSessionOpts`, and `TimelineFilter` use `#[serde(skip_serializing_if = "Option::is_none")]` — receiving `{}` must parse as `Default::default()`.
+- **Never add IO or business logic** to this crate—it's pure data. If a type needs behavior, that lives in the crate that owns the domain (e.g. `forge-index` for feature derivation).
+- **Never change field casing conventions** (`camelCase` structs, `snake_case` enums)—the frontend TypeScript types depend on this exact shape.
+- **Optional fields must skip serialization when `None`**—commands like `update_feature` rely on absence meaning "don't change this field," not "set it to null."
+- **Enums must remain string-serialized**—the frontend pattern-matches on `"file_edited"`, not `{ "FileEdited": null }`.
+- **Frontend types are manually maintained**—changing a field name or adding a variant here requires a matching edit in `frontend/src/types.ts` or the UI breaks at runtime.
+- **`TimelineEvent.id` is append-only SQLite rowid**—never mutated, used for pagination cursors (`before_id`). Ordering by `id` is equivalent to ordering by `ts`.
+- **`Feature.files` is many-to-many**—a file can appear in multiple features; the `shared: true` flag in `FeatureDiffGroup` signals this.
+- **`FeaturePatch` default is empty, not all-`None`**—`serde(default)` on the struct means `{}` deserializes to `FeaturePatch::default()`, enabling minimal JSON payloads.
+- **`DiffLine.origin` is a single-char string** (`'+'`, `'-'`, `' '`)—serde serializes it as `"+"`, not as a character code.
+- **`Worktree.is_base` distinguishes the main checkout**—the base is also a worktree; every repo open in the UI has at least one (the base).

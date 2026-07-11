@@ -1,31 +1,31 @@
-The merge result panel feature was not touched this turn — the changes were to staleness detection. The existing doc remains accurate.
+The edited files this turn (app-store.ts additions, forge-index.rs, SessionPane.tsx, and session styles) are unrelated to the merge result panel. The component and its behavior remain unchanged. The existing doc is still accurate.
 
 ---
 # Merge Result Panel
 
 ## Purpose
 
-Displays the outcome of a git merge attempt honestly: clean merges auto-dismiss with a success toast, conflicted merges show a persistent overlay listing the files that conflict and offering a one-click hand-off to resolve them in a Claude session. The panel never fabricates success or hides conflicts.
+Displays the outcome of a worktree branch merge into the base branch: a clean success triggers a transient toast and auto-dismisses; conflicts/aborted merges render a modal overlay listing conflicted files with a one-click hand-off to resolve them in a Claude session.
 
 ## How it works
 
-- **Outcome detection** — React effect watches `store.mergeResult`. If `merged: true`, a success toast fires and the result clears automatically (lines 14–23).
-- **Conflict UI** — When `merged: false`, the panel renders: a warning icon, a summary explaining the merge was *aborted* and the target branch is still clean, the list of conflicted files (if any), and the raw git message (lines 39–77).
-- **"Resolve in a session" button** — Switches to the base context, pre-fills the composer with a prompt explaining which files conflict, then dismisses the panel (lines 25–36).
-- **State storage** — `mergeResult: MergeResult | null` in the global store (app-store.ts:50). Backend writes it after merge attempts; the panel reads and clears it. Structure: `{ merged, conflicts, aborted, message, sourceBranch, targetBranch }`.
-- **No automatic resolution** — The panel explicitly states the merge was aborted and the target branch is clean (line 54). User must re-run the merge and fix conflicts manually or via an agent; the app never silently applies a conflict resolution strategy.
+- **Clean merge (merged=true)**: `createEffect` fires a success toast via `pushSuccess` and immediately clears `mergeResult` from the store — no panel is shown.
+- **Conflict/abort (merged=false)**: renders a full-screen modal overlay with a warning icon, conflict message, list of conflicted files, raw git stderr, and two actions: Dismiss or "Resolve in a session."
+- **"Resolve in a session" flow**: switches to the base context, prefills the composer with a message explaining the abort + listing conflict files, and dismisses the panel — the user can then submit to Claude.
+- **Honest reporting**: the panel only shows what git actually did (clean success, conflicts, abort). Never fabricates success or hides failure.
+- **Dismissal**: clicking the overlay backdrop or Dismiss button clears `store.mergeResult` via `dismissMergeResult()`.
+- **State wiring**: `mergeResult` is set by `context-slice.ts:mergeWorktree()` after calling the IPC merge command; the panel observes this reactive store field.
 
 ## Key files
 
-- **MergeResultPanel.tsx** — The overlay component. Watches `store.mergeResult`, auto-dismisses clean merges, surfaces conflicts with a file list and session hand-off.
-- **app-store.ts** — Global store shape; `mergeResult: MergeResult | null` at line 50.
-- **context-slice.ts** — Provides `dismissMergeResult()` action (line 335).
-- **types.ts** — `MergeResult` interface (lines 201–208): `merged`, `conflicts`, `aborted`, `message`, `sourceBranch`, `targetBranch`.
+- `crates/tauri-app/frontend/src/components/MergeResultPanel.tsx` — the panel component, effect-driven clean-merge toast, and conflict UI
+- `crates/tauri-app/frontend/src/stores/context-slice.ts:mergeWorktree()` — calls IPC merge, sets `store.mergeResult`
+- `crates/tauri-app/frontend/src/types.ts:MergeResult` — outcome shape: `{merged, conflicts, aborted, message, sourceBranch, targetBranch}`
 
 ## Invariants & gotchas
 
-- **Never fabricate success** — Only the backend writes `merged: true`; the frontend must never infer or fake a successful merge state.
-- **Aborted = clean target** — If `merged: false`, git aborted the merge and the target branch is unchanged. The panel's copy must remain accurate: "aborted" and "left clean" (line 54).
-- **Auto-dismiss is for clean merges only** — The effect (lines 14–23) dismisses *only* when `merged: true`. Conflicted merges (`merged: false`) persist until the user clicks Dismiss or Resolve.
-- **Conflicts array may be empty** — If the backend can't parse the conflict list, `conflicts: []` is valid. The UI shows "the reported files" as a fallback (line 30).
-- **Hand-off switches context** — The "Resolve in a session" flow switches to the base context *first* (line 29), so the prefilled prompt runs against the correct worktree, not a detached worktree that might have been active.
+- **Never show panel on clean merge**: the `Show when={!merged}` guard ensures only failures render the panel; success toasts silently.
+- **Auto-dismiss timing**: clean merge dismissal happens in `queueMicrotask` to avoid React-like batching issues — don't move it to a setTimeout or the toast may appear after the result is cleared.
+- **Base branch is always clean after abort**: the message explicitly states the target branch was left untouched — the merge was aborted, not partially committed.
+- **Conflict file list can be empty**: git may report a merge failure without listing specific files (rare edge cases); the panel conditionally shows the file list only when `conflicts.length > 0`.
+- **Prefill composer, don't auto-submit**: the "Resolve in a session" button prefills the composer but does not auto-send — the user reviews the generated prompt before submitting to Claude.

@@ -1,30 +1,29 @@
-None of the edited files this turn touch the Terminal Panel feature. The changes are all about index staleness detection (polling, `index:status` events) — a completely different feature. The existing living doc is accurate and up-to-date for Terminal Panel.
-
----
 # Terminal Panel
 
 ## Purpose
-Bottom resizable panel (FZ-3) that hosts worktree-scoped xterm.js PTY tabs. Each terminal is bound to the active context path at open time; switching contexts affects only where *new* terminals open.
+
+Bottom-docked resizable panel hosting one or more xterm.js terminal instances, each bound to a spawned PTY. Tabs mirror the shell CWD at spawn time, routing terminals to worktree contexts. Opened with Cmd+J.
 
 ## How it works
-- `TerminalPanel` owns the tab strip, drag-to-resize handle, and the global `termMap` registry (`id → Terminal`) for routing `terminal:data` / `terminal:exit` events from Tauri.
-- `TerminalInstance` creates one `Terminal` with `FitAddon`, registers itself, and listens for `onData` → `write_terminal` IPC. A `ResizeObserver` fits and calls `resize_terminal` whenever the container changes.
-- All instances stack absolutely (`position: absolute; inset: 0`) and swap visibility via `term-host--active` so the active one stays correctly sized when hidden tabs return to foreground.
-- Base64 output from Tauri is decoded to `Uint8Array` (`b64ToBytes`) before `term.write()` so UTF-8 renders correctly; `terminal:exit` writes a styled gray "process exited" message.
-- Tab bar mirrors the worktree-tab chrome: green dot (gray when exited), close button (visible on hover/active), "+" to spawn a new terminal in the current context, collapse chevron to toggle `terminalPanelOpen`.
-- Backend (`commands/terminals.rs`) routes to `TerminalManager` in `AppState` which spawns the user's login shell (bash/zsh) and emits events over the Tauri event bus.
+
+- **TerminalPanel** mounts global `terminal:data` / `terminal:exit` listeners and routes output to the matching xterm instance via a `Map<id, Terminal>` maintained by `TerminalInstance` callbacks.
+- Each **TerminalInstance** owns one xterm.js `Terminal` + `FitAddon`, stacks absolutely via `.term-host`, and is hidden when inactive. The active instance calls `fit()` + `resizeTerminal()` on mount, ResizeObserver ticks, and when it becomes visible.
+- Tabs display `{cwd-basename}` + a green dot (gray when exited); the `+` button spawns a new PTY rooted at `activeContextPath`.
+- The top edge is draggable (3px hit zone) to resize panel height; clamped to `[120px, 80vh]`.
+- xterm writes user input to the PTY via `onData → writeTerminal(id, data)`. Base64-decoded output (`b64ToBytes`) preserves UTF-8 multibyte sequences.
+- Exited PTYs display a gray "exited" tag and remain in the tab strip so their scrollback is readable; the instance is kept alive until the tab is manually closed.
 
 ## Key files
-- `crates/tauri-app/frontend/src/components/terminal/TerminalPanel.tsx` — panel container, tab strip, drag-resize, event listeners, `termMap` registry.
-- `crates/tauri-app/frontend/src/components/terminal/TerminalInstance.tsx` — one xterm.js `Terminal` + `FitAddon`, `ResizeObserver`, `onData` → IPC.
-- `crates/tauri-app/frontend/src/stores/terminal-slice.ts` — state slice for `terminals[]`, `activeTerminalId`, `terminalPanelHeight`, `openTerminal()` / `closeTerminal()`.
-- `crates/tauri-app/src/commands/terminals.rs` — Tauri IPC commands: `open_terminal`, `write_terminal`, `resize_terminal`, `close_terminal`, `list_terminals`.
-- `crates/tauri-app/src/terminal/pty.rs` — PTY spawn/resize/write logic (assumed; not shown but implied by commands).
+
+- **TerminalPanel.tsx** — panel chrome, tab strip, resize drag logic, event listeners for `terminal:data` / `terminal:exit`, `id → Terminal` registry
+- **TerminalInstance.tsx** — one xterm.js instance + FitAddon per tab; theme, font, ResizeObserver auto-fit, onData → IPC write
+- **terminal-slice.ts** — bookkeeping for PTY tabs (`openTerminal`, `closeTerminal`, `markTerminalExited`), panel open/height state, CWD-to-title mapping
 
 ## Invariants & gotchas
-- **Base64 decoding is mandatory** — Tauri emits `terminal:data` as base64 because Tauri events don't support raw binary. Skipping `b64ToBytes` breaks UTF-8.
-- **Inactive instances must stay sized (`inset: 0`)** — if hidden tabs collapse to 0×0, the `FitAddon` returns wrong dimensions when they re-activate. All instances are sized but only the active one is `visibility: visible`.
-- **`fit()` after visibility toggle** — `createEffect(() => { if (props.active) fitAndResize(); term?.focus(); })` refits when a tab becomes active because xterm dimensions are stale if measured while hidden.
-- **`cwd` binds at open-time** — the terminal's working directory is captured from `store.activeContextPath` when the tab is created. Switching contexts later does not move existing terminals.
-- **ResizeObserver must debounce via the host div** — observing the xterm element directly can trigger resize loops. Watching the outer `term-host` container avoids this.
-- **Collapsed panel retains state** — toggling `terminalPanelOpen` hides the panel but does not kill PTYs. Tabs remain live and keep accumulating scrollback.
+
+- **Instance stacking**: all instances render simultaneously (stacked `position: absolute; inset: 0`); only the active one is `visibility: visible`. This keeps their DOM alive so fit dimensions are correct when they return to the foreground.
+- **Fit timing**: `fitAndResize()` MUST guard `host.clientWidth/Height === 0` or the addon throws. `createEffect(() => { if (active) queueMicrotask(fitAndResize) })` delays the call until the instance is visible.
+- **Base64 → bytes**: PTY output arrives as base64; write `b64ToBytes(data)` not `atob(data)` or multibyte UTF-8 glyphs will corrupt.
+- **CWD binding**: a terminal's `cwd` is frozen at spawn time to `store.activeContextPath`. Switching worktrees does NOT re-root existing terminals; only NEW terminals open in the new context.
+- **Exit semantics**: `terminal:exit` calls `markTerminalExited(id)` and writes a gray `[process exited — code N]` line; the tab stays in the strip (output readable) until manually closed with the `×`.
+- **Panel height clamp**: top-edge drag is clamped to `[120px, 80vh]` in `setTerminalPanelHeight` so the panel cannot consume the entire window or collapse below readable size.

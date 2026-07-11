@@ -1,31 +1,29 @@
-The edited files are about index staleness detection, not diff grouping. The feature "Diff by Feature Grouping" was not modified this turn — its living doc should remain unchanged.
+The core file hasn't changed. The edits this turn were to UI components (SessionPane, app-store) and indexing (headless.rs), none of which touch the grouping logic. The existing doc is still accurate.
 
 ---
-# Diff by Feature Grouping
+# Diff-by-Feature Grouping
 
 ## Purpose
 
-Groups file diffs by feature via index-based path classification. Files belonging to multiple features are duplicated across each group (marked `shared: true`); files that match no feature land in a synthetic "Unmapped" group at the end.
+Organizes a flat list of `FileDiff`s into feature-keyed buckets for UI presentation. Files that belong to multiple features are cloned into each relevant group and marked `shared: true`; unclassified files land in a synthetic "unmapped" group.
 
 ## How it works
 
-- `group_by_feature` takes a list of `FileDiff`s and two callbacks: `classify` (path → feature slugs) and `name_of` (slug → display name).
-- For each file, `classify` returns 0+ feature slugs. Empty = unmapped; 2+ = shared.
-- Files in multiple features are cloned into each bucket; `shared: bool` is set to true for any bucket containing at least one multi-feature file.
-- Groups are sorted by total changed lines (additions + deletions) descending, with the unmapped bucket always last (distinguished by the typed `unmapped: true` flag, not by string sniffing).
-- The display name falls back to the slug if `name_of` returns `None`.
-- `DiffByFeature { groups: Vec<FeatureDiffGroup> }` is the IPC contract returned to the frontend diff review view.
+- For each file, call `classify(path)` to get zero or more feature slugs.
+- If a file maps to multiple slugs, clone the `FileDiff` into each group and mark all those groups `shared: true`.
+- Files with no slugs go into the synthetic `unmapped` bucket (`slug: "unmapped"`, `name: "Unmapped"`).
+- Resolve each slug to a display name via `name_of(slug)`; fall back to the slug itself if no name exists.
+- Sort groups by: unmapped flag (unmapped last), total changed lines descending, slug ascending.
+- Return `DiffByFeature { groups }`.
 
 ## Key files
 
-- **crates/forge-git/src/group.rs** — `group_by_feature` pure function; receives classifier callbacks from caller.
-- **crates/forge-core/src/diff.rs** — domain types (`DiffByFeature`, `FeatureDiffGroup`, `FileDiff`, `DiffHunk`, `DiffLine`); `#[serde(rename_all = "camelCase")]` for Tauri IPC.
+- `crates/forge-git/src/group.rs` — the `group_by_feature` entry point, bucketing logic, and sort order.
 
 ## Invariants & gotchas
 
-- **Unmapped is always last** — the sort explicitly checks `unmapped: bool` before changed-line count; don't sniff `slug == "unmapped"`.
-- **Shared files are cloned, not moved** — a file in 3 features appears verbatim in 3 groups; the UI must handle duplicate rendering.
-- **`shared: true` iff any file in the bucket belongs to 2+ features** — it's a bucket-wide flag, not per-file.
-- **Display name fallback** — `name_of` returning `None` silently falls back to the slug; missing metadata won't crash grouping.
-- **Classify is caller-supplied** — `group.rs` is pure; the caller wires up the index lookup (see entry point `crates/forge-git/src/group.rs:13`).
----
+- **Shared files are cloned**, not moved — the same `FileDiff` struct appears in multiple groups. Changes to one clone don't affect others unless you mutate a shared reference.
+- **The unmapped bucket is always last**, even if it has more changed lines than every other group. The sort explicitly checks the `unmapped: bool` flag before comparing line counts.
+- **`shared: true` means ANY file in the group belongs to multiple features**, not that every file does. A group with one single-feature file and one multi-feature file is marked shared.
+- **Display name fallback**: if `name_of(slug)` returns `None`, the group's `name` field is the raw slug. The UI must handle kebab-case slugs gracefully.
+- **Empty input → empty output**: `group_by_feature(vec![], …)` produces `DiffByFeature { groups: vec![] }`, not a lone unmapped group.

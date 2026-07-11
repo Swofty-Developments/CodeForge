@@ -1,33 +1,33 @@
-The Command Palette was not modified this turn — the changes were to session stop/interrupt behavior in SessionPane and related backend code. The palette remains unchanged and the existing doc is still accurate.
+The changes this turn were to backend Rust code (Tauri commands, indexing retry logic) and don't affect the command palette frontend at all. The doc is still accurate.
 
 ---
 # Command Palette
 
 ## Purpose
 
-Cmd+K launcher (520px modal, 22vh from top, blur(8px) overlay) providing fuzzy search over features, views, and actions. Escape dismisses; arrow keys + Enter navigate and execute.
+A `Cmd+K` fuzzy-search modal that exposes all high-level actions (open repo, reindex, start session, toggle terminal), view switches, and feature navigation. Acts as the keyboard-first entry point for every core workflow.
 
 ## How it works
 
-- **Fuzzy subsequence matching**: greedy left-to-right character match (`fuzzyMatch`) with matched characters highlighted in primary color
-- **Three command categories**: `action` (open repo, reindex, new session, toggle session pane), `view` (switch to feature/timeline/diff), `feature` (one dynamic entry per indexed feature)
-- **Keyboard-driven navigation**: arrow keys cycle selection (modulo wrap), Enter runs the selected command, Escape handled globally by `App.tsx`
-- **Auto-scroll selected item**: `createEffect` on `selected()` uses `scrollIntoView({ block: "nearest" })` to keep the highlighted row visible
-- **Input resets selection**: typing resets `selected` to index 0 so the top match stays highlighted
-- **Click-to-dismiss overlay**: clicking the backdrop closes the palette; inner `.cmd-palette` stops propagation to prevent bubbling
+- **Greedy subsequence fuzzy match** — `fuzzyMatch(query, label)` walks the label left-to-right collecting matching character indices; empty query matches everything.
+- **Merged command registry** — combines static `baseCmds` (actions + view switches) with dynamically generated feature commands from `store.features`.
+- **Keyboard navigation** — arrow keys cycle through filtered results (modulo wrapping), `Enter` executes the selected command, `Escape` closes the palette (handled by App.tsx global listener).
+- **Auto-scroll** — a `createEffect` watches `selected()` and calls `scrollIntoView({ block: "nearest" })` on the highlighted row so it stays visible during keyboard navigation.
+- **Overlay dismissal** — clicking the backdrop closes the palette; the inner `.cmd-palette` div stops propagation so clicks on results stay captured.
+- **Three visual categories** — commands are tagged `action`/`view`/`feature` with color-coded badges (green/amber/primary) to help users scan context.
+- **Session pane toggle** — the "Toggle session pane" command calls `appStore.toggleSessionPane()` (app-store.ts:253), which flips `sessionPaneOpen` state. The pane itself reads `store.sessionPaneOpen` to conditionally mount (SessionPane.tsx:119 defaults to `true`).
 
 ## Key files
 
-- **crates/tauri-app/frontend/src/components/CommandPalette.tsx** — entire palette implementation (fuzzy match, command registry, rendering, navigation)
-- **crates/tauri-app/frontend/src/App.tsx:63-92** — global Cmd+K and Escape handlers that toggle `store.paletteOpen`
-- **crates/tauri-app/frontend/src/stores/app-store.ts:207-209** — `setPaletteOpen(bool)` state setter
-- **crates/tauri-app/frontend/src/stores/data-slice.ts:134-136** — `openFeatureDetail(slug)` switches to feature view and selects the slug
+- **CommandPalette.tsx** — the modal component: fuzzy filtering, keyboard nav, matched-char highlighting, and the 520px × 420px max centered modal with blur backdrop.
+- **app-store.ts** — `paletteOpen` boolean state and `setPaletteOpen(bool)` action (line 237); `toggleSessionPane()` action (line 253) that flips `sessionPaneOpen`.
+- **App.tsx** — global `Cmd+K` listener that toggles `paletteOpen`; global `Escape` handler that closes the palette if open (priority 1 before session approval or session pane).
 
 ## Invariants & gotchas
 
-- **App.tsx owns the shortcuts**: CommandPalette itself registers no global listeners; Cmd+K/Escape must live in `App.tsx:onKeyDown` to avoid lifecycle races
-- **Empty query matches all**: `fuzzyMatch("", text)` returns `[]` (not `null`), so the empty state shows every command
-- **Escape priority order**: palette → pending approval denial → session pane close (App.tsx lines 77-90); palette cannot own Escape or the cascade breaks
-- **Category-driven dynamic commands**: features come from `store.features`; adding a new category requires updating `baseCmds` and the CSS `.cat-*` classes
-- **520px fixed width, 22vh top offset**: design-system constraint (§5.4 per comment); changing these breaks the intended centering and backdrop-blur composition
-- **No session-switching commands yet**: despite the feature description mentioning "sessions (focus)", the current `baseCmds` array has no session-focus entries — only new/toggle-pane
+- **No global shortcuts registered by the palette itself** — `App.tsx` owns the `Cmd+K` and `Escape` listeners; the palette only handles arrow/enter navigation.
+- **Escape priority cascade** — `App.tsx` closes palette → denies pending approval → closes session pane in that order; the palette must not try to handle `Escape` itself.
+- **Auto-scroll depends on `.selected` class** — the effect queries `.cmd-palette-item.selected`; renaming or removing that class breaks keyboard-scroll sync.
+- **Feature commands are ephemeral** — rebuilt from `store.features` on every query change; the palette never holds stale feature references.
+- **Empty query matches all** — `fuzzyMatch("", text)` returns `[]` (not `null`), so the unfiltered list is the full registry.
+- **Session pane toggle is a boolean flip** — `toggleSessionPane()` does not check repo state; the composer itself disables when `!store.repo`. The session pane can be open with no repo (shows empty state).

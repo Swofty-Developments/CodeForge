@@ -1,36 +1,32 @@
-The changes are to the Tauri app's staleness detection system, not the daemon HTTP server. These files are part of a different feature. The daemon-http-server doc should remain unchanged since none of its key files or behavior was modified this turn.
+None of the edited files relate to the daemon HTTP server feature. The changes are to frontend components (SessionPane UI, app store) and the headless indexing runtime. The daemon HTTP server itself (`crates/forge-daemon/src/http.rs`, `lib.rs`) was not touched. The existing doc is still accurate — no changes needed.
 
 ---
 # Daemon HTTP Server
 
 ## Purpose
 
-Local Axum server bound to `127.0.0.1:0` serving a frozen route table for Claude Code hook ingestion (POST `/hooks/event`) and CodeForge query APIs (features, timeline, notes). Port written to `.codeforge/runtime/daemon.json` for discovery by MCP and hooks.
+Local per-repo HTTP server bound to `127.0.0.1:0` that receives Claude Code hook payloads and exposes a REST API for feature queries, timeline events, and file classification. Writes `daemon.json` with `{port, pid, started_at}` so clients can discover the ephemeral port.
 
 ## How it works
 
-- Binds to ephemeral port on daemon startup; writes `{port, pid, started_at}` manifest to `daemon.json`.
-- Hook endpoint returns 200 immediately; ingestion happens async (classify paths → append timeline row → queue unclassified edits for reindex).
-- Timeline/feature queries spawn blocking tasks (rusqlite behind a sync `Mutex`).
-- Drains spooled hook payloads from `.codeforge/runtime/spool/` on startup (replayed forward in time); quarantines unparseable files to `rejected/`.
-- Graceful shutdown removes `daemon.json` and aborts doc-refresh listener within 5s.
-- Permissive CORS layer to allow web UIs and MCP tools to reach it.
+- Axum router with CORS enabled: seven frozen routes (`POST /hooks/event`, `GET /api/features`, `GET /api/features/{slug}`, `GET /api/timeline`, `POST /api/notes`, `GET /api/classify`, `GET /api/health`).
+- `POST /hooks/event` ingests raw Claude Code hook JSON, classifies edited paths against the feature index, appends a timeline event, and enqueues unclassified edits for re-indexing — always replies 200 `{}` fast to never block Claude.
+- On startup drains spooled hook payloads from `.codeforge/runtime/spool/` (files written by `forward.sh` when daemon was down) and replays them in sorted order before serving live requests.
+- Relativizes absolute paths from hooks to repo-root-relative before classification so they match feature storage format.
+- Timeline mutations (`append`, `query`) run on `spawn_blocking` because `TimelineStore` wraps rusqlite in a sync `Mutex`.
+- Graceful shutdown removes `daemon.json`; 5s timeout before abort backstop.
 
 ## Key files
 
-- `crates/forge-daemon/src/http.rs` — route table (`POST /hooks/event`, `GET /api/features`, `GET /api/timeline`, etc.) and handlers.
-- `crates/forge-daemon/src/lib.rs` — `Daemon::start` entrypoint, bind/serve/shutdown lifecycle, `DaemonDeps` shared state.
-- `crates/forge-daemon/src/ingest.rs` — hook payload processing, classification, spool draining, reindex queueing.
-- `crates/forge-daemon/tests/daemon_http.rs` — end-to-end tests against real axum + timeline store.
+- **crates/forge-daemon/src/http.rs** — route table, handlers, JSON schemas for timeline/classify params and note bodies.
+- **crates/forge-daemon/src/lib.rs** — `Daemon::start` binds the listener, writes `daemon.json`, spawns the doc-refresh worker, drains spool, and returns `DaemonHandle` with shutdown channel.
+- **crates/forge-daemon/src/ingest.rs** — shared hook→timeline logic for live and spooled payloads; marks unclassified edits and enqueues them for reindex.
 
 ## Invariants & gotchas
 
-- Route table is a **frozen contract** for MCP tools and forward.sh hooks; adding/removing a route is a breaking change.
-- Hook endpoint must NEVER block Claude (200 `{}` returned before ingestion completes).
-- All timeline/index reads via `spawn_blocking` (no `.await` on the store's sync methods).
-- Unrecognized hook events logged at `debug`, not error — silence is intentional for forward compatibility.
-- Unclassified file edits get `feature_slugs: []` but `payload.unclassified: true` so the UI can distinguish "empty" from "stale index" and trigger reindex.
-- Spool drain happens BEFORE the router serves live requests (prevents out-of-order timeline).
-- Unparseable spool files quarantined, never silently dropped (data loss is worse than `.../rejected/` clutter).
-- Graceful shutdown has a 5s timeout backstop; aborts if axum doesn't drain.
----
+- Route table is the frozen contract: adding/removing/renaming routes breaks `forward.sh` and MCP clients. Treat them like a public API.
+- Hook handler must reply fast (no blocking I/O) to never delay Claude's turn; `process_hook` spawns `spawn_blocking` for DB writes.
+- Unclassified edits (file-scoped but `classify_paths` → empty) are distinct from non-file-scoped events (Stop/SessionStart) — the former are tagged `unclassified: true` in payload and paths enqueued; the latter naturally have empty slugs and are not requeued.
+- Spool replay is sorted so events land in temporal order; invalid JSON is quarantined to `spool/rejected/` not deleted so it is preserved for inspection.
+- `daemon.json` port is ephemeral (`127.0.0.1:0`) so clients must read the file; it is removed on graceful shutdown but may linger if killed hard.
+- Timeline/index methods run on `spawn_blocking` because rusqlite is sync; never await them on the async pool or axum worker threads stall.

@@ -1,4 +1,4 @@
-The changes affect the backend and indexing system, not the Welcome View itself. The Welcome View component remains identical to what the doc describes. The staleness detection work is completely orthogonal to the empty-state screen.
+The Welcome View file is unchanged. The work this turn was entirely about the session/approval system (AskUserQuestion flow) and did not touch the Welcome View component, its dependencies, or its behavior. The existing doc already correctly states this at the top.
 
 ---
 # Welcome View
@@ -24,3 +24,4 @@ Empty-state screen displayed when no repository is open. Provides branding, onbo
 - The welcome view is *never* shown if `store.repo` is truthy, even if zero features exist — the app shell switches to feature/timeline views instead.
 - Keyboard hints (`⌘K`, `⌘\`) are static and do not reflect custom keybindings.
 - The view has no recent-repos list yet (description mentions it, but the current implementation omits it).
+- Component unchanged this turn — session approval system work (AskUserQuestion fixes) did not touch the Welcome View.

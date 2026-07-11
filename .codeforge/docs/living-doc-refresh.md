@@ -2,29 +2,28 @@
 
 ## Purpose
 
-Auto-maintains `.codeforge/docs/<slug>.md` living docs by invoking headless `claude` after agent turns complete. When a Stop hook fires (`SessionEnded` event), refreshes the doc for every feature whose files were edited, folding in the turn's edits, commands, and agent-recorded notes.
+Auto-updates feature living docs when a Claude session ends. Spawns headless `claude` to fold edited files, commands, and recorded notes into the feature's `.codeforge/docs/<slug>.md` — no manual rewrites, no staleness drift.
 
 ## How it works
 
-- **Trigger**: daemon listens for `SessionEnded` timeline events (Stop hook fired).
-- **Turn slicing**: fetches recent timeline events (up to 1000), filters to the session, extracts file edits, commands, and notes before the end event.
-- **Refresh queue**: for each touched feature, queues a serialized doc refresh (semaphore of 1; slugs already queued are skipped to avoid duplicate work).
-- **Headless claude**: spawns `claude -p --output-format json` with a prompt containing the feature metadata, existing doc verbatim (or fresh-doc state if missing), and rendered turn events; reads the returned markdown.
-- **Write-back**: strips fences, clamps to 60 lines, writes atomically via tmp+rename to `.codeforge/docs/<slug>.md`.
-- **Pinned features skipped**: if `feature.pinned` is true, refresh is skipped — human edits survive.
+- `DocRefresher` listens to timeline `SessionEnded` events (Stop hooks firing).
+- Slices the ending turn's `FileEdited`, `CommandRun`, and `Note` events from the timeline (newest-first query, stops at the prior session boundary).
+- For each feature slug touched by file edits, queues a doc refresh (deduped, serialized via semaphore).
+- Spawns headless `claude -p --output-format json --allowedTools Read,Glob,Grep` in the repo root with a prompt containing: feature metadata, the existing doc (or "write first version" if missing), and the compact turn event summary.
+- Parses the JSON envelope, strips fences, clamps to 60 lines, writes atomically (tmp + rename).
+- Records the outcome (`updated` or `failed`) as a `DocUpdated` timeline event.
 
 ## Key files
 
-- **crates/forge-index/src/refresh.rs** — `refresh_feature_doc()` entry point, prompt builder, turn-event rendering logic.
-- **crates/forge-index/src/headless.rs** — spawns `claude` with read-only tools, pipes prompt on stdin, parses JSON envelope, enforces 6-minute timeout.
-- **crates/forge-daemon/src/doc_refresh.rs** — daemon worker listening for `SessionEnded` events, turn slicing, queue-deduping, outcome recording.
-- **crates/forge-index/src/prompt.rs** — defines `DOC_MAX_LINES` (60), `doc_prompt()` for cold-start docs, `role_label()` helper.
+- `crates/forge-daemon/src/doc_refresh.rs` — orchestration: timeline listener, turn slicing, queue/semaphore serialization.
+- `crates/forge-index/src/refresh.rs` — core refresh logic: prompt builder, headless claude invocation, doc write.
+- `crates/forge-index/src/headless.rs` — `claude` CLI wrapper with retries, timeouts, and JSON envelope parsing.
 
 ## Invariants & gotchas
 
-- **Pinned check is load-bearing**: `feature.pinned` must be checked BEFORE calling `refresh_feature_doc()` or human-written docs will be overwritten.
-- **Turn slice must be filtered by session**: using unfiltered recent events would blend multiple sessions' work into one doc update.
-- **Atomic write required**: tmp+rename is the only safe write pattern — a half-written doc mid-refresh is visible to readers without it.
-- **Timeout must kill child**: `cmd.kill_on_drop(true)` and the timeout-elapsed branch dropping the future together prevent zombie `claude` processes.
-- **Model is hardcoded**: `MODEL = "claude-sonnet-4-5"` in headless.rs; changing it requires a code edit, not config.
-- **Edit count deduping**: `render_events()` counts edits per file and dedupes commands so the prompt doesn't balloon on repeated actions.
+- Pinned features are skipped — `pinned: true` means the doc is human-owned, same rule as cold-start indexing.
+- The feature is snapshotted before the minutes-long `claude` call, never held under lock across await.
+- Turn slice is NEWEST-FIRST → filter → reverse (chronological). Misreading the order produces wrong-session slices.
+- `Note` events are session-less (`/api/notes` endpoint) but folded into any turn whose window covers them — this is intentional (recorded notes surface even when attached off-band).
+- Queue-dedupe prevents double-queuing a slug already waiting, but once refresh starts the slug is removed from the queue — a session ending DURING refresh re-queues it with newer events (flywheel semantics).
+- Success and failure both land on the timeline as `DocUpdated` — the UI shows both; silent failure is never correct.

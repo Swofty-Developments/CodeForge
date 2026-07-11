@@ -1,31 +1,30 @@
-The changes are about staleness detection and indexing, not the worktree switcher. The living doc is current and accurate. No update needed.
-
----
 # Worktree Switcher
 
 ## Purpose
-A fixed-positioned popover that lists all contexts, worktrees, and branches in four named sections (Open / Worktrees / Branches / Remote), allowing users to switch to existing worktrees, create new worktrees from branches, fetch remotes, and remove worktrees. Triggered from the tab strip "+" button or TitleBar "Worktrees…" menu.
+
+Unified branch/worktree picker shown from the tab-strip "+" or title-bar "Worktrees…". Provides fuzzy search over open tabs, on-disk worktrees, and local/remote branches, plus a flow to create new worktrees from novel branch names.
 
 ## How it works
-- Renders through a `Portal` with `position: fixed` to escape the tab strip's `overflow-x: auto` clip boundary
-- On mount, queries `listBranches()` and `refreshWorktrees()`, then filters all four sections by the user's query string
-- Four disjoint sections: **Open** shows active contexts (base first), **Worktrees** shows un-opened disk worktrees, **Branches** shows local branches not checked out, **Remote** shows remote-tracking branches with no local equivalent
-- Create row appears when query doesn't exactly match an existing branch — clicking it spawns a new worktree from the current branch
-- Branch rows call `appStore.addWorktreeForBranch()` which returns `null` on success or an error string (e.g. "already checked out at \<path>"); on error, the switcher shows it inline and reloads so the covering worktree row appears as the next affordance
-- Worktree rows have a trash icon that confirms before calling `appStore.removeWorktreeExplicit()`; dirty worktrees get a warning about permanent data loss
-- Footer has a "Fetch" button that runs `fetchRemotes()` and reloads branches/worktrees
+
+- Renders as a fixed-position portal (not inside the scrolling tab bar) to avoid clip bugs; anchor placement recomputes on mount and window resize.
+- Four named sections: **Open** (existing tabs, base first), **Worktrees** (on-disk checkouts not yet opened), **Branches** (local not checked out), **Remote** (remote-tracking whose short name has no local branch). Sections are disjoint — a branch checked out in a worktree never appears as a branch row.
+- Typing a novel name (not matching any branch, worktree, or open context) shows a **Create** row; Enter creates a worktree branching from the current branch.
+- Branch row click → `addWorktreeForBranch(name, remote)` → on success close, on named failure (already checked out) show inline error and reload so the covering worktree row appears.
+- Worktree trash button → confirm dialog (warns if `dirty`), then explicit remove via `removeWorktreeExplicit`.
+- Footer "Fetch" button → `fetchRemotes` + reload branches and worktrees.
 
 ## Key files
-- **WorktreeSwitcher.tsx** — popover container, filter input, section rendering, branch/worktree/fetch actions, error state
-- **SwitcherRows.tsx** — presentational row components: `CreateRow`, `ContextRow`, `WorktreeRow`, `BranchRow` (all actions passed in)
-- **switcher-data.ts** — pure derivation of four sections, `hasExactBranch()` suppression, fuzzy filtering
-- **switcher-css.ts** — Zed-styled popover CSS with hairline borders, instant hovers, mono branch names
+
+- **WorktreeSwitcher.tsx** — portal root, input, sections, error/loading states, row actions.
+- **SwitcherRows.tsx** — presentational CreateRow, ContextRow, WorktreeRow, BranchRow (icons, status, trash).
+- **switcher-data.ts** — pure `buildSections` (query filter + disjoint partitioning), `hasExactBranch` (create-row suppression).
+- **switcher-css.ts** — inline `<style>` block (Zed-styled elevated popover, mono branch names, instant hover).
 
 ## Invariants & gotchas
-- **Portal-based positioning**: switcher MUST render through `Portal` because the tab strip is `overflow-x: auto` and clips absolutely-positioned descendants
-- **Sections are disjoint by construction**: a branch with `checkedOutAt` set never re-appears as a branch row; an open context's worktree never re-appears under "Worktrees"
-- **Error-driven UX**: when `addWorktreeForBranch()` fails with "already checked out", the switcher shows the error and reloads — the now-visible worktree row IS the "open it" affordance
-- **Explicit remove confirmation**: dirty worktrees warn that uncommitted changes will be permanently lost; clean worktrees confirm but emphasize the branch is kept
-- **Create row suppression**: `hasExactBranch()` checks branches, worktrees, and contexts — a query matching any of them hides the create row to prevent duplicates
-- **Remote section filter**: only shows remote-tracking branches whose short name has no local branch (avoids redundant `origin/main` when `main` exists locally)
----
+
+- **Sections must remain disjoint.** A worktree row must never re-appear as a branch row; `checkedOutAt` in `BranchInfo` is the single source of truth. The `buildSections` filter chain enforces this: local/remote branches filtered by `checkedOutAt === null`, onDisk worktrees filtered by `!open.some(samePath)`.
+- **Fixed positioning required.** The tab bar is `overflow-x:auto`; absolute children clip. The portal's `.ws-pop` has `position: fixed` and `z-index: 100` above the `z-index: 99` backdrop.
+- **Safe-close warning on dirty worktrees.** The remove-worktree confirm checks `w.dirty` and shows a LOUD warning that uncommitted changes will be lost. `removeWorktreeExplicit` takes a `force` param that must match `w.dirty`.
+- **Create row only appears for novel names.** `hasExactBranch` checks branches array, worktrees array, and open contexts. False positive suppression (showing create when the name exists) breaks the UX; false negative (hiding create when it's novel) is rare but recoverable via CLI.
+- **Inline error shown after action failure.** On `addWorktreeForBranch` named error (e.g. "already checked out at X"), reload branches + worktrees so the user sees the worktree row that's blocking them — that row IS the affordance to open it.
+- **Remote-tracking names show `remote/name`** in the UI but pickBranch receives `(name, remote)` separately. BranchRow's `busy` keying is `${remote}:${name}` to disambiguate `origin/main` vs `upstream/main`.

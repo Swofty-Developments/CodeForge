@@ -1,31 +1,29 @@
-Perfect! I have all the information needed. Now I'll write the living doc for the Terminal PTY Manager feature.
+# Terminal PTY Manager
 
-# Purpose
+## Purpose
 
-Manages worktree-scoped PTY tabs (FZ-3). Spawns login shells (bash/zsh) in pseudo-terminals, relays stdin/stdout between the frontend's xterm instances and the PTY master, and emits output/exit events. Each terminal is a uuid-keyed `PtyProcess` owned by `TerminalManager`, which lives in `AppState`.
+Manages embedded pseudo-terminal instances via `portable_pty`. Spawns shell processes in isolated PTYs, streams their output to the Tauri frontend as base64-encoded chunks, and handles write, resize, kill, and exit lifecycle.
 
-# How it works
+## How it works
 
-**Spawning:** `open_terminal(cwd, shell)` resolves the shell (explicit arg → login-shell `$SHELL` → process `$SHELL` → OS default `/bin/zsh` on macOS), spawns a `portable_pty` pair in that cwd, enriches the env with `forge_session::shell_env` (so PATH/nvm shims resolve) + `TERM=xterm-256color`, and returns a uuid terminal id. The manager records a `Terminal{cwd, title, pty}` in its `Mutex<HashMap<id, Terminal>>`.
+- **Spawn**: `TerminalManager::open` allocates a PTY pair, spawns the requested shell (resolved from arg → login `$SHELL` → process `$SHELL` → OS default `/bin/zsh`), drops the slave handle so only the child owns it, then clones a reader and spins up a blocking reader thread.
+- **Reader thread**: blocking loop over the PTY master reader; each chunk is base64-encoded and emitted on `terminal:data`, EOF triggers `child.wait()` to reap the exit code, then `terminal:exit` fires once and the thread ends.
+- **Input**: frontend sends raw UTF-8 keystroke bytes to `write_terminal`; the manager writes them straight to the PTY master's writer handle.
+- **Resize**: frontend calls `resize_terminal` when the xterm view changes geometry; PTY master issues SIGWINCH to the child shell.
+- **Kill**: `close_terminal` removes the terminal from the map and calls `killer.kill()`; the reader thread hits EOF, reaps the exit code, emits `terminal:exit`, and ends.
+- **Teardown**: `TerminalManager::Drop` kills every remaining child (even through a poisoned lock) so closing the app leaves no orphan shells.
 
-**I/O:** A blocking reader thread owns the `Child` and streams PTY output to the frontend on the `terminal:data` event — **chunks are base64-encoded** so raw bytes survive JSON. The frontend decodes and feeds them to xterm. Input keystrokes arrive as **raw UTF-8** via `write_terminal` and are written straight to the PTY master's writer.
+## Key files
 
-**Exit:** When the child closes, the reader hits EOF, reaps the exit code, emits `terminal:exit{id, code}` once, and ends. `code` is `None` if the reap failed (a named "unknown", not a silent zero).
+- **`crates/tauri-app/src/terminal/mod.rs`** — module root, event constants, payload types, error enum.
+- **`crates/tauri-app/src/terminal/manager.rs`** — `TerminalManager` that owns the `HashMap<String, Terminal>` and bridges PTY output to Tauri events via `AppSink`. Explicit teardown on drop.
+- **`crates/tauri-app/src/terminal/pty.rs`** — `PtyProcess` wrapper around `portable_pty`. Spawns the shell, clones reader/writer/killer handles, base64-encodes output chunks in a blocking reader thread, and reaps the child exit code.
 
-**Teardown:** `close_terminal` kills the child (its reader then hits EOF and ends) and removes it from the map. `TerminalManager::Drop` kills every remaining child — even through a poisoned lock — so closing the app leaves no orphan shells.
+## Invariants & gotchas
 
-# Key files
-
-- **crates/tauri-app/src/terminal/mod.rs** — public API: `TerminalManager`, event names (`terminal:data`, `terminal:exit`), and payload types.
-- **crates/tauri-app/src/terminal/manager.rs** — owns the `Mutex<HashMap<id, Terminal>>`, resolves the shell, open/write/resize/close/list ops, and `AppSink` that bridges to Tauri events.
-- **crates/tauri-app/src/terminal/pty.rs** — `PtyProcess::spawn`: opens the PTY pair, enriches the env, spawns the child, and wires the blocking reader thread. Sink-generic so tests use a channel sink instead of Tauri events.
-- **crates/tauri-app/src/commands/terminals.rs** — Tauri command wrappers around `TerminalManager`.
-
-# Invariants & gotchas
-
-- **Base64 asymmetry:** PTY output → frontend is base64-encoded (raw bytes survive JSON); frontend → PTY is raw UTF-8 (xterm already has text).
-- **Teardown is explicit, never best-effort:** `close_terminal` kills the child, `TerminalManager::Drop` kills every remaining child even through a poisoned lock. No orphan shells.
-- **The slave must be dropped before reading:** the master reader never sees EOF if the slave is still open. `PtyProcess::spawn` drops `pair.slave` immediately after spawning the child.
-- **Lock errors are named, not swallowed:** a poisoned `Mutex<HashMap>` surfaces as `TerminalError::LockPoisoned`, never an empty `list()` or silent write failure.
-- **Reader thread owns the child:** it reaps the exit code after EOF so `terminal:exit` carries the real code, not `None` from a racy wait-before-close.
-- **Initial geometry is placeholder (80×24):** the frontend issues `resize_terminal` as soon as xterm mounts with its measured dimensions.
+- **Output is base64-encoded** at the Rust layer; the frontend xterm decoder expects it. Input keystrokes are raw UTF-8 and written directly to the PTY master.
+- **Slave handle must be dropped** after spawning the child — if the master side holds a copy, the reader never sees EOF when the child exits.
+- **Reader thread owns the `Child`** so it can reap the exit code after EOF. The manager holds only the killer handle.
+- **Exit code `None` is named "unknown"** (couldn't reap the child), NOT a silent zero.
+- **Drop kills every child** even through a poisoned lock to prevent orphan shells when the app closes.
+- **Initial geometry (80×24)** is a placeholder; the frontend issues a real resize once the xterm view mounts.

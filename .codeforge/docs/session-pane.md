@@ -1,37 +1,39 @@
-The changes this turn didn't touch the Session Pane feature at all — they modified the staleness detection system (backend poller + frontend modal suppression logic). The edited files were backend Rust (staleness.rs, repo_open.rs, state.rs) and frontend store logic (app-store.ts, ipc.ts) for handling `index:status` events, not the SessionPane component or its key files.
-
-The existing doc is still accurate. No update needed.
-
----
 # Session Pane
 
 ## Purpose
 
-Right-side collapsible pane hosting embedded Claude Code sessions for the active repository context. Sessions are displayed in tabs, with each showing a live message stream, session header (model/mode/run-state), and composer for sending prompts.
+Right-hand collapsible panel embedding live Claude Code sessions. Users view streamed messages, send prompts, switch permission modes, and manage multiple concurrent sessions per worktree context — all within the same window as the repo timeline and feature tree.
 
 ## How it works
 
-- **Context-filtered tabs**: Only sessions tagged with the active context path are shown; switching repos/worktrees filters the tab list (W1: context-tagged sessions).
-- **Multi-session UI**: Tab strip with status dots (ready/generating/starting/error), clickable tabs to switch active session, close buttons, and a model-picker dropdown for starting new sessions.
-- **Session header**: Slim read-only bar showing active session's model, permission mode, and run-state (generating/starting/error/ready) with a pulsing dot.
-- **Message stream**: Scroll-anchored list rendering `session.messages` — user bubbles, system pills, assistant content blocks (text/thinking/tool cards), typing indicator, approval cards, and usage footer.
-- **Composer**: Auto-resizing textarea (max ~8 lines) with slash-command popover, file-attachment picker (drag-drop + paperclip), permission-mode control, and send/stop buttons. Starts a session on first send if none active.
-- **Pane width**: Controlled by `store.sessionPaneWidth`; toggle collapse/expand via `appStore.toggleSessionPane()`.
+- **Tab strip** — one tab per live session in the active worktree context; displays status dot (ready/generating/starting/error), double-click to rename, close button to stop session
+- **Model picker** — "New session" dropdown offering presets (Default/Opus/Sonnet/Haiku/Fable) plus custom model input; creates a fresh session scoped to the active repo context
+- **Session header** — slim read-only bar showing active session's model, live permission mode, and current run state (generating/starting/error/ready); animated via `fade-slide-down` keyframe
+- **Message stream** (`MessageStream.tsx`) — scroll-anchored list rendering `session.messages` (the single source of truth): user bubbles, assistant text/thinking/tool blocks, approval cards, typing indicator, and usage footer
+- **Composer** (`Composer.tsx`) — autosize textarea, slash-command popover (opened by `/token`, arrow-nav + Enter to pick), file-attachment chips, mode switcher (`ModeControl`), and send/stop buttons
+- **Permission modes** — four SDK modes (Ask/Accept edits/Plan/Auto) settable for pending or active sessions; "Auto" (bypassPermissions) shows an amber warning icon since it runs every tool without prompts
+- **Past sessions** — when no active session, empty state lists resumable sessions fetched via `listPastSessions(repo.path)` and filtered against live session IDs
 
 ## Key files
 
-- **SessionPane.tsx** — pane shell, tab strip, new-session dropdown, layout orchestration; wires SessionHeader + MessageStream + Composer.
-- **SessionHeader.tsx** — slim read-only bar showing model/mode/run-state for the active session.
-- **styles-chrome.ts** — CSS for pane shell, tabs, model dropdown, session header, body, and empty state.
-- **MessageStream.tsx** — scroll-anchored renderer for `session.messages`; renders user/assistant/system messages, typing indicator, approval cards.
-- **Composer.tsx** — autosize textarea, slash-command popover, file-attachment chips, mode control, send/stop actions.
-- **local.ts** — thin helpers over `appStore` actions (`startSessionWithModel`, `selectSession`, `closeSession`) with no parallel state.
+- **`SessionPane.tsx`** — container orchestrating tabs, new-session menu, fullscreen toggle, and collapse; filters sessions to the active context
+- **`session/MessageStream.tsx`** — scroll-anchored message renderer with 150px away-threshold, 80ms debounce for auto-follow
+- **`session/Composer.tsx`** — textarea + slash menu + attachments + mode control; hands the finished prompt to `onSend`
+- **`session/SessionHeader.tsx`** — read-only strip showing model, permission mode label, and live run state with pulse animation
+- **`session/ModeControl.tsx`** — permission-mode dropdown; "Auto" (bypassPermissions) styled amber with warning triangle
+- **`session/blocks.tsx`** — `ContentBlock` renderers: text (Markdown), thinking (collapsible gray card), tool cards (name + input/output), approval card, typing indicator
+- **`session/styles-chrome.ts`** — chrome CSS covering pane shell, tab strip, new-session dropdown, session header, and empty states; injected once by `styles.ts`
+- **`session/local.ts`** — thin wrappers over `appStore` actions (`startSessionWithModel`, `selectSession`, `closeSession`); no parallel state
 
 ## Invariants & gotchas
 
-- **No parallel state**: All session data (`messages`, `runState`, `permissionMode`, `info`) lives in `appStore.sessions`; local.ts and components read/dispatch but never cache.
-- **Context-path filtering**: `visibleSessions()` filters `store.sessions` by `samePath(s.contextPath, store.activeContextPath)` — switching contexts hides unrelated sessions, not deletes.
-- **Pending mode**: Before a session starts, `pendingMode` holds the mode for the next session; once active, the live `session.permissionMode` overrides it.
-- **First-send auto-start**: `Composer.onSend` checks `!active()` and calls `appStore.startSession(undefined, pendingMode())` before sending — the user need not explicitly create a session.
-- **Active tab border**: `.sp-tab--active` uses `border-bottom: 1px solid var(--bg-surface)` to bleed into the pane body, hiding the visual seam.
-- **Status dots**: `dotClass()` maps `runState` → CSS class; "ready" = green, "generating" = blue, "starting" = amber, "error" = red.
+- **Single source of truth**: `session.messages` is authoritative; never duplicate message state — the stream reads it directly
+- **Context filtering**: only sessions tagged with `store.activeContextPath` appear (worktree-scoped tabs); `samePath` comparison prevents duplicate tabs when the same logical path differs by trailing slash
+- **Resume filtering**: `listPastSessions` result is filtered `!liveIds.has(s.id)` so resumed sessions don't appear twice (once as a tab, once in the past-sessions list)
+- **Slash-menu lifecycle**: opens only when `input` matches `^\/(\S*)$` (a single `/token` with no space); typing a space finalizes the command and closes the menu; `slashDismissed` prevents reopening until the input changes
+- **Scroll anchoring**: `scrolledAway` threshold is 150px from bottom, 80ms debounce to avoid layout thrash; switching sessions (`on(() => props.session.info.id)`) resets `scrolledAway` to false and snaps to bottom
+- **Mode switch scope**: `pendingMode` governs the *next* session started via the new-session menu; an active session's mode is `session.permissionMode` and switches via `appStore.setSessionMode(sessionId, mode)`
+- **Tab editing**: double-click enters rename mode (inline input); Enter commits, Escape cancels, blur commits; `ref={(el) => setTimeout(() => el.select(), 0)}` auto-selects the title text after the input mounts
+- **Stop vs. close**: clicking the session header's "stop" button (`onStop`) aborts the in-flight turn via `interruptSession`; clicking the tab's close `×` (`closeSession`) stops the entire session and removes the tab
+- **Layout state** — `sessionPaneOpen`, `sessionPaneWidth`, and `sessionPaneFullscreen` live in `appStore` and persist across app restarts; the pane toggle is bound to `⌘\` (kbd-hint in Welcome view); fullscreen z-index is 1000, overlaying the main layout
+- **Derived repo** — `store.repo` is a getter that resolves to the active context's `RepoState`, so the session pane reads repo state reactively without hard-coupling to the context model

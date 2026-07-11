@@ -1,34 +1,37 @@
+The changes this turn were to backend Tauri IPC command registration (`main.rs`), command module organization (`commands/mod.rs`), and the headless indexer's retry logic (`headless.rs`). None of these affect the Feature Detail View's frontend behavior, UI rendering, or interaction patterns. The doc remains accurate.
+
+---
 # Feature Detail View
 
 ## Purpose
 
-Single-pane view that shows a selected feature's metadata (name, description, tags), entry points (paths openable in editor), files grouped by role with shared-feature markers, a living doc (auto-generated Markdown rendered inline), recent activity timeline, and an "Ask Claude" shortcut that prefills the composer.
+Main panel showing a single feature's metadata, documentation, files, and timeline. Supports inline editing (name, description) with optimistic updates and autosave to the store.
 
 ## How it works
 
-- Double-click the title or click the description to enter inline edit mode; `Enter`/`Escape` commits/cancels name changes, `Escape` cancels description.
-- Entry points and file rows are clickable buttons invoking `openInEditor()` via Tauri's shell plugin to open the path in the OS default editor.
-- Files are grouped by `FileRole` (core → support → test → config → unknown) with tint-coded chips; shared files show "also in N" purple chip counting overlap with other features.
-- Living doc is rendered from `.codeforge/docs/<slug>.md` via `marked.parse()` — absence shows an honest empty state with a "Generate docs" button that triggers reindexing.
-- Recent activity displays the first 15 timeline events (newest first) with kind-specific SVG glyphs, relative timestamps, and fade-slide-down animation on entry.
-- **Living-doc hot reload**: when a `doc_updated` event lands for the **open** feature with `outcome: "updated"`, FeatureDetail pulls the fresh `.codeforge/docs/<slug>.md` and re-renders in place (stale-response guard blocks if the user switched features mid-fetch).
-- "Ask Claude" button prefills the composer with `Explain the <name> feature and its current state`.
+- Renders editable header (double-click name, click description) that commits via `appStore.updateFeature` on blur/Enter, Escape cancels.
+- Pin button toggles `appStore.pinFeature` to keep the feature in the sidebar's pinned section.
+- Groups files by `FileRole` (core/support/test/config/unknown) with role-tinted chips; shows "also in N" badge when a file appears in multiple features.
+- Entry points open via Tauri shell plugin (`plugin:shell|open`) to OS default editor.
+- Living doc section parses `store.selectedFeatureDoc` (the `.codeforge/docs/<slug>.md` content) as Markdown; absent doc shows "Generate docs" button that triggers reindex.
+- Recent activity feed shows last 15 timeline events, newest first, with kind-specific glyphs and relative timestamps updated every 10s.
+- "Ask Claude" button prefills composer with feature-specific prompt via `appStore.prefillComposer`.
 
 ## Key files
 
-- **FeatureDetail.tsx** — main view orchestrating header, collapsible sections, edit states, the Ask Claude hand-off, and doc hot-reload
-- **CollapsibleSection.tsx** — shared 0fr→1fr grid-rows collapse with rotating chevron and optional count/trailing content
-- **FilesSection.tsx** — role-grouped file rows with tint chips and shared-feature overlap detection
-- **RecentActivity.tsx** — timeline event list with kind glyphs, summaries, and relative timestamps
-- **open-path.ts** — Tauri shell plugin wrapper to open files in OS editor
+- `views/FeatureDetail.tsx` — main view orchestration, editable header, collapsible sections.
+- `components/feature/FilesSection.tsx` — role-grouped file list with cross-feature overlap badges.
+- `components/feature/RecentActivity.tsx` — timeline event list with kind glyphs and relative time.
+- `components/feature/CollapsibleSection.tsx` — shared 0fr→1fr grid-rows collapse with rotating chevron.
+- `components/feature/event-summary.ts` — per-kind accent, glyph path, one-line summary extraction.
+- `components/feature/open-path.ts` — Tauri shell plugin wrapper for opening paths in OS editor.
 
 ## Invariants & gotchas
 
-- **Living doc is never synthesized** — `store.selectedFeatureDoc` is the canonical `.codeforge/docs/<slug>.md` or `undefined`; never fall back to rendering the description as a doc.
-- **"unknown" role is distinct** — not a fallback category; explicitly rendered with its own tint and never collapsed into "support".
-- **File overlap counts exclude the current feature** — `alsoIn()` map only counts OTHER features; a file in 3 total features shows "also in 2".
-- **Edit commits on blur** — name/description inputs auto-focus/select on mount and save when focus is lost; `Enter` commits name changes but not description (multi-line).
-- **RECENT_LIMIT is a hard cap** — UI always shows ≤15 events; backend may send more but the view slices `[0, 15)` before rendering.
-- **Doc updates are additive to the timeline** — the `doc_updated` event stays visible (with the outcome) even as the doc re-renders; the live event is the audit trail.
-- **Stale-response guard** — `handleTimelineEvent` only updates `selectedFeatureDoc` if `store.selectedFeature === slug` at response time; prevents race when the user rapidly clicks between features.
-- **Tauri invoke expects `{path, with: null}`** — `openInEditor()` manually constructs the shell plugin payload; changing the signature breaks file opening.
+- **Living doc is authoritative**: `.codeforge/docs/<slug>.md` is the single source of truth; `description` field never substitutes for it. Absent doc shows empty state, not description fallback.
+- **Inline edits must trim**: `commitName`/`commitDesc` trim before comparing to prevent spurious whitespace-only updates.
+- **File roles are distinct**: `unknown` is a visible, tinted role (indexer didn't classify), never folded into `support`.
+- **Event payloads are kind-discriminated**: `summarize` reads exactly the fields each kind's backend emits; no key guessing or fallback parsing.
+- **Entry points open via shell plugin**: requires `shell:allow-open` capability in Tauri config; direct `invoke("plugin:shell|open")` avoids bundling the full JS wrapper.
+- **Optimistic UI with no rollback**: edits commit immediately to `appStore.updateFeature` on blur; Escape cancels editing but doesn't revert a committed change.
+- **Pin state persists**: pin toggle calls `appStore.pinFeature`, which writes to the feature index and keeps the feature at the top of the sidebar even when filtering.

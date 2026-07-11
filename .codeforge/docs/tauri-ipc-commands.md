@@ -1,44 +1,29 @@
----
 # Tauri IPC Commands
 
-**Purpose**
+## Purpose
+Rust command handlers that bridge the TypeScript frontend to Rust backend state (repos, features, sessions, worktrees, terminals). Every command returns `Result<T, String>` with anyhow errors formatted as `format!("{e:#}")` chains.
 
-Tauri command handlers bridge the Svelte frontend to the Rust backend, exposing repository, feature, session, worktree, and terminal operations over the IPC boundary. Every command returns `Result<T, String>`, with errors formatted via `format!("{e:#}")` to preserve anyhow's cause chains.
+## How it works
+- **Repo lifecycle** — `open_repo` validates a git directory, installs the integration kit, starts the daemon, and optionally triggers cold-start indexing; `init_repo` runs `git init` then opens through the same flow; `close_repo` tears down sessions, shuts down the daemon, and drops runtime state.
+- **Feature CRUD** — `get_features` / `get_feature` read from the open index; `pin_feature`, `update_feature`, and `set_feature_color` mutate the index, persist it, and append a timeline event (a failed timeline append surfaces as an error, not a silent swallow).
+- **Session management** — `start_session` resolves the `SessionMode` from the DB (fresh vs. resume), spawns the sidecar, persists a thread + session row (tearing down the session if persistence fails), and spawns an event forwarder; `send_session_input` queues a prompt and auto-generates a title on the first message; `stop_session` kills the sidecar and forgets the repo mapping.
+- **Worktree ops** — `create_worktree` and `add_worktree_for_branch` delegate to `forge_git`, inherit the base's feature model, and open the worktree as its own context (own daemon/index/timeline); `remove_worktree` closes the context first so no daemon/session runs against a vanishing path; `merge_worktree` merges into the base and appends a System note to the base's timeline.
+- **Terminals** — `open_terminal` spawns a PTY in `TerminalManager` and returns its id; `write_terminal` / `resize_terminal` / `close_terminal` forward to the manager; output streams on `terminal:data` (base64-encoded) and `terminal:exit` events.
+- **Timeline** — `get_timeline` runs sync rusqlite queries in `spawn_blocking`; `get_diff_by_feature` reads the pending diff grouped by feature for the diff review view.
 
-**How it works**
+## Key files
+- `crates/tauri-app/src/commands/mod.rs` — module root, documents the `Result<T, String>` convention
+- `crates/tauri-app/src/commands/repo.rs` — repo lifecycle (open, init, close, reindex, daemon_status, check_claude_cli)
+- `crates/tauri-app/src/commands/features.rs` — feature CRUD (get, pin, update, set_color) + index_status for staleness checks
+- `crates/tauri-app/src/commands/timeline.rs` — timeline queries and diff-by-feature view
+- `crates/tauri-app/src/commands/sessions.rs` — session lifecycle (start with resume-mode resolution, send with auto-title, approve, interrupt, stop, list, rename)
+- `crates/tauri-app/src/commands/worktrees.rs` — worktree ops (list, create, add_for_branch, remove, merge), all reusing `open_context` / `close_context` from repo.rs
+- `crates/tauri-app/src/commands/terminals.rs` — terminal PTY commands (open, write, resize, close, list)
 
-- Commands are organized by domain: `repo`, `features`, `sessions`, `timeline`, `worktrees`, `terminals`.
-- Each command takes `State<'_, AppState>` to access the global `repos` map (keyed by canonical path), `sessions`, `terminals`, and the app database.
-- Repo commands (`open_repo`, `close_repo`, `reindex_repo`) manage `RepoRuntime` instances: daemon handles, feature indexes, timeline stores, two background tasks (timeline forwarder + staleness poller), and a `reindexing` flag.
-- `RepoRuntime` owns the **staleness poller** (`spawn_poller`): first tick fires immediately on open, then every 10s. Emits `index:status` only when the verdict CHANGED (fresh ↔ stale/outdated), so the UI is re-prompted only on transitions. While `reindexing` is set the poll is skipped; `last` is reset so the first post-reindex verdict always emits (typically back to `fresh`). Aborted on context close.
-- Feature/timeline commands require the target repo to be OPEN — they fail with "repo is not open" if the canonical path has no entry in `state.repos`.
-- Session commands enforce CONTRACT-2: a session cannot start unless its repo is open (the repo row anchors persistence). Resume mode is DB-authoritative: a given `resume_session_id` must exist in `sessions.claude_session_id` or the command fails.
-- **Auto-title on first message**: `send_session_input` detects sessions titled "Session N" and auto-generates a title from the input text (via `generate_title_from_text`: first sentence ≤60 chars, strips code fences). The rename happens synchronously after the message is sent, via the internal `do_rename_impl` (DB + in-memory update).
-- **Session rename**: `rename_session` (Tauri command) and `do_rename_impl` (internal helper) find the session's `thread_id` from live sessions or DB, update `threads.title`, and sync the `SessionManager` if the session is running. The frontend supports double-click-to-rename (inline edit field).
-- **Past session listing**: `list_past_sessions` returns resumable sessions with `claude_session_id` for a repo; the frontend filters out live sessions by id comparison before showing the "Resume a session" list.
-- Worktree commands reuse the same `repo_open::open_context` core as `open_repo` (contract W1): each worktree becomes its own `RepoRuntime` with isolated daemon/index/timeline/staleness-poller.
-
-**Key files**
-
-- `main.rs` — Tauri app entry point, database setup, managed state, and command registration via `generate_handler![]`.
-- `commands/mod.rs` — Domain module registry and shared `Result<T, String>` convention.
-- `commands/repo.rs` — `open_repo`, `init_repo`, `close_repo`, `reindex_repo`, `daemon_status`.
-- `commands/features.rs` — `get_features`, `get_feature`, `pin_feature`, `update_feature`, `set_feature_color`, `index_status`.
-- `commands/sessions.rs` — `start_session`, `send_session_input`, `rename_session`, `list_past_sessions`, `approve_session`, `interrupt_session`, `stop_session`, `list_sessions`, `set_session_mode`. Internal helpers: `resolve_session_mode`, `create_thread_and_session`, `do_rename_impl`, `generate_title_from_text`.
-- `commands/timeline.rs` — `get_timeline` (with `TimelineFilter`), `get_diff_by_feature`.
-- `commands/worktrees.rs` — `list_worktrees`, `create_worktree`, `remove_worktree`, `merge_worktree`, `list_branches`, `add_worktree_for_branch`.
-- `commands/terminals.rs` — `open_terminal`, `write_terminal`, `resize_terminal`, `close_terminal`, `list_terminals`.
-- `state.rs` — `AppState` structure (repos map, session manager, terminals), `RepoRuntime` (added `staleness_task: JoinHandle`), helper methods (`index()`, `timeline()`, `index_and_timeline()`).
-- `runtime/staleness.rs` — `spawn_poller(app, root, reindexing)` returns the `JoinHandle` owned by `RepoRuntime.staleness_task`; `compute(root)` is the on-disk verdict helper.
-
-**Invariants & gotchas**
-
-- **Repo open precondition**: Feature, timeline, and session commands assume the target repo is open. Calling them on a closed repo returns "repo is not open", not a panic.
-- **Canonical paths only**: Every repo path crosses IPC as a string, is canonicalized via `repo_util::canonical()`, and becomes the HashMap key. Non-canonical paths will fail to match.
-- **Locking discipline**: `db` is a `std::sync::Mutex` — take it in a tight scope, never held across `.await`. Tokio mutexes (`repos`, `sessions`, `session_repos`) are fine across awaits.
-- **Session lifecycle**: A session cannot outlive its repo. `close_repo` tears down all sessions rooted at the closing repo; `start_session` fails if the repo is not open.
-- **Resume must be recorded**: A `resume_session_id` must exist in `sessions.claude_session_id` or `start_session` fails with "cannot resume" — it is never silently replaced by a fresh start.
-- **Auto-title fires once**: `send_session_input` only auto-renames on the first message (title starts with "Session "). Subsequent messages skip the rename path. A failed auto-rename is logged but not surfaced to the user.
-- **Timeline append failures surface**: Pin/edit/merge operations persist their state FIRST, then append a timeline event. If the append fails, the error is surfaced (not swallowed) with context like "edit persisted but timeline append failed".
-- **Staleness polling & reindex coordination**: The staleness poller resets its last-emitted state while `reindexing` is true, so the first post-reindex tick always re-emits (typically `fresh`, clearing the UI dot). The frontend pops the stale modal only on state TRANSITIONS (prev.state !== status.state), so a growing `changedFiles` list re-emitted by the 10s poller updates the status-bar dot without re-popping a dismissed modal.
-- **Blocking IO in spawn_blocking**: `get_timeline` runs the rusqlite query in `tokio::task::spawn_blocking` to keep synchronous DB access off the async runtime thread. Same for `staleness::compute`, which hashes the manifest.
+## Invariants & gotchas
+- **SESSION-REPO CONTRACT** — a session cannot start unless its repo is open; `start_session` checks this first and returns `"repo is not open"` if violated. A session whose thread/session rows can't be persisted is torn down immediately rather than running headless.
+- **Timeline appends are surfaced** — a feature pin/edit/color whose index save succeeds but timeline append fails is a REAL error surfaced to the caller, not reduced to a log line. The timeline is the durable audit log.
+- **Worktrees reuse repo open/close** — `create_worktree` and `add_worktree_for_branch` both call `repo_open::open_context` so the worktree gets its own daemon/index/timeline; `remove_worktree` calls `close_context` first so no state runs against a vanishing path. Contract W1.
+- **Resume mode is DB-authoritative** — `start_session` resolves the `SessionMode` from the DB via `resolve_session_mode`; a given `resume_session_id` that isn't a recorded `claude_session_id` is a named error, never a silent fresh start.
+- **IDs and paths cross IPC as strings** — UUIDs and PathBufs serialize to/from String; `repo_util::canonical` is called on every path parameter to resolve symlinks and normalize.
+- **Auto-title on first message** — `send_session_input` checks if the title is still `"Session N"` and generates a readable title from the first ~60 chars or first sentence of the user's input, stripping code fences and whitespace.

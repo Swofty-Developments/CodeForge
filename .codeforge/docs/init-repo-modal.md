@@ -1,30 +1,37 @@
+None of the edited files relate to the init-repo-modal feature. The changes touched:
+- `app-store.ts`: Added `toggleSessionPane` and `toggleSessionPaneFullscreen` functions (session pane UI controls)
+- `SessionPane.tsx`: Session pane UI improvements (editing tabs, past sessions, fullscreen toggle)
+- `forge-index/src/headless.rs`: Headless Claude CLI invocation logic (indexing)
+- `session/styles-chrome.ts`: Session pane styling
+
+The init-repo-modal feature remains unchanged. The existing doc is accurate.
+
+---
 # Init Repo Modal
 
 ## Purpose
 
-Intercepts `open_repo` failures when the user tries to open a non-git directory. Offers to run `git init -b main` instead of surfacing a dead-end error, then opens the newly initialized repo exactly like a normal repo-open success.
+Modal that offers to initialize a plain (non-git) folder as a git repository when the user tries to open it. Eliminates opening a non-git directory as a dead end by calling `git init -b main` and proceeding with the normal repo-open flow.
 
 ## How it works
 
-- `open_repo(path)` rejects with the machine-matchable prefix `"not_a_git_repo:"` when the target is a plain folder
-- The context slice catches this prefix, suppresses the toast, and sets `initRepoPrompt` signal to the path instead
-- `InitRepoModal` renders when the signal is non-null; displays path (dir-truncated), explains why git is required, offers Cancel / Initialize buttons
-- Confirm → `confirmInitRepo()` calls `init_repo(path)` IPC, which runs `git init -b main` via `forge_git::init_repo` then hands the path to the SAME `repo_open::open_context` flow that `open_repo` uses
-- Cancel → `dismissInitRepoPrompt()` clears the signal; the dialog closes with no side effects (path is NOT opened)
-- After successful init, the repo is adopted as a context (base if first, worktree-context otherwise) and all per-context datasets (features, timeline, diff, daemon) load automatically
+- `openRepo` attempts to open a path; if the backend rejects with the machine-matchable prefix `"not_a_git_repo:"`, the error is suppressed and the path is stored in `initRepoPrompt` signal.
+- `InitRepoModal` renders when `initRepoPrompt()` is non-null, showing the path and folder name with a two-button choice.
+- Clicking **Initialize repository** calls `confirmInitRepo()`, which invokes the Tauri `init_repo` command (`git init -b main` on the backend).
+- On success, the backend returns a `RepoState` via the same `repo_open::open_context` flow used for normal opens, and the modal is dismissed.
+- The newly-initialized repo is adopted as a context (features/timeline/daemon/worktrees refresh) exactly like a normal repo open.
+- Clicking **Cancel** dismisses the prompt without action.
 
 ## Key files
 
-- `crates/tauri-app/frontend/src/components/InitRepoModal.tsx` — modal UI; reads `initRepoPrompt` signal from context-slice, calls `confirmInitRepo` or `dismissInitRepoPrompt`
-- `crates/tauri-app/frontend/src/stores/context-slice.ts` — owns the `initRepoPrompt` signal, defines `confirmInitRepo` / `dismissInitRepoPrompt`, catches the `"not_a_git_repo:"` prefix in `openRepo`
-- `crates/tauri-app/src/commands/repo.rs` — `open_repo` command returns the prefixed error; `init_repo` command runs `git init -b main` then opens via `repo_open::open_context`
-- `crates/forge-git/src/lib.rs` — `init_repo(&Path)` spawns `git init -b main`
+- **crates/tauri-app/frontend/src/components/InitRepoModal.tsx** — modal UI reading `initRepoPrompt` signal, calling `confirmInitRepo` or `dismissInitRepoPrompt`.
+- **crates/tauri-app/frontend/src/stores/context-slice.ts** — `openRepo` catches `"not_a_git_repo:"` rejection and sets `initRepoPrompt`; `confirmInitRepo` invokes backend `init_repo` and adopts the result.
+- **crates/tauri-app/src/commands/repo.rs** — `init_repo` command runs `git init -b main` via `forge_git::init_repo`, then calls `repo_open::open_context`.
 
 ## Invariants & gotchas
 
-- **`"not_a_git_repo:"` is the only trigger** — the prefix must match EXACTLY in `open_repo` and `context-slice.ts`. Do not generalize the error or the modal will never appear.
-- **Busy state blocks double-init** — the Initialize button is disabled while `busy()` is true; prevents overlapping `git init` calls on slow filesystems.
-- **No partial state** — either the full flow (init → open context → load datasets) succeeds, or the prompt is dismissed and the store is unchanged. Do not leave `initRepoPrompt` dangling after a failed init.
-- **Path display uses RTL truncation** — `direction: rtl; text-align: left` shows the tail of long paths (most meaningful part), not the head.
-- **Already-initialized repos are named errors** — `init_repo` rejects with a human-readable message when `is_git_repo` is already true; this is an invariant violation (the frontend should never call `init_repo` on a git repo), but the command handles it gracefully.
-- **The modal is global** — mounted in `App.tsx`, shown via `.overlay` system (same layer as `StaleModal` / `MergeResultPanel`). Only one can be active at a time; `initRepoPrompt` being non-null renders it on top of everything except the command palette.
+- **Machine-matchable prefix**: the backend's `"not_a_git_repo: {path}"` error format is the contract between `open_repo` and the modal trigger; changing it breaks detection.
+- **Single-shot prompt**: `initRepoPrompt` is a slice-local signal (not part of `AppStore`), so it's wiped on context close or navigation away.
+- **Already-initialized rejection**: calling `init_repo` on an already-initialized repo is a named error — the frontend should call `openRepo` instead.
+- **Busy state**: the modal disables both buttons while `busy()` is true, preventing double-submission during the init + open sequence.
+---

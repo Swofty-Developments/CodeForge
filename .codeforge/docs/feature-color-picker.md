@@ -1,31 +1,29 @@
-Confirmed: the changes are about session management (rename/resume/auto-title), not the color picker. The feature color picker code is unchanged.
+The feature description might be slightly misleading. Based on my reading, this is primarily about the **backend validation and persistence** of user-set colors, plus the frontend **deterministic hash-based color assignment**. I don't see evidence of group-level inheritance. Let me write the doc based on what the code actually does:
 
----
 # Feature Color Picker
 
 ## Purpose
 
-Provides a user-settable graph node color for features. Users can override the default palette by assigning a semantic hex color (#RGB or #RRGGBB) to any feature, which persists across re-indexes and is reflected in the sidebar, graph, and timeline lanes.
+Validates, persists, and assigns stable colors to features for graph nodes and UI elements. User-set colors override the default hash-based palette.
 
 ## How it works
 
-- Each `Feature` has an optional `color: Option<String>` field — `None` uses the default palette, `Some("#hex")` overrides it with a user-picked color.
-- The `set_color` mutation validates the hex string (#RGB or #RRGGBB format), rejects invalid colors with a named error, and prevents phantom features (unknown slugs fail loudly; no silent upserts).
-- Setting a color implies a pin (`pinned: true`) — user-edited colors survive re-indexing verbatim.
-- The mutation persists the index to disk and appends a `FeatureEdited` timeline event with the color payload.
-- The Tauri command `set_feature_color` wraps the mutation, acquires the index write lock, and ensures timeline durability (a failed append is a caller error, not a swallowed log line).
-- `None` clears the color, reverting to the default palette; the pin remains.
+- **Backend validation** — `set_color` accepts `#RGB` or `#RRGGBB` hex strings (or `None` to clear). Invalid colors fail loudly; unknown slugs are rejected (no phantom feature creation).
+- **Pin on edit** — setting a color implies `pinned: true`, ensuring user choices survive re-indexing. Clearing a color removes the override but keeps the pin.
+- **Persistence** — mutations save to disk and append a `FeatureEdited` timeline event. Failed timeline appends surface as caller errors (not silent log lines).
+- **Frontend fallback** — `nodeColor(feature)` uses `feature.color` if set; otherwise `hueForSlug` hashes the slug modulo 8 to pick from the Zed accent palette (`GRAPH_PALETTE`), ensuring stable colors across sessions.
+- **Usage** — graph view nodes, worktree project badges, and diff review groups all resolve colors via `nodeColor` or `hueForSlug`.
 
 ## Key files
 
-- **`crates/tauri-app/src/runtime/feature_color.rs`** — core mutation logic (`set_color`), validation, unit tests against a real `FeatureIndex`.
-- **`crates/tauri-app/src/commands/features.rs`** — Tauri command wrapper (`set_feature_color`) that acquires locks, invokes the mutation, and appends the timeline event.
-- **`crates/forge-core/src/feature.rs`** — defines `Feature.color` field (hex string or `None`).
+- **crates/tauri-app/src/runtime/feature_color.rs** — core mutation (`set_color`), hex validation, unit tests against a real `FeatureIndex`.
+- **crates/tauri-app/src/commands/features.rs** — Tauri command wrapper (`set_feature_color`) that acquires locks and appends timeline events.
+- **crates/tauri-app/frontend/src/components/graph/colors.ts** — deterministic hue assignment (`hueForSlug` via hash mod 8), `GRAPH_PALETTE` (Zed accents), `nodeColor` resolver.
 
 ## Invariants & gotchas
 
-- **Validation is strict** — only `#RGB` or `#RRGGBB` hex strings (case-insensitive ASCII hexdigits) or `None` are allowed; bad colors fail the mutation, not silently stored.
-- **No phantom features** — setting a color on an unknown slug is a named error; the mutation never creates a feature by side-effect.
-- **Pin on edit** — setting or clearing a color always sets `pinned: true`; the user's color choice is treated as a human override that must survive re-index.
-- **Timeline append is transactional** — a failed timeline append (after persisting the color) surfaces to the caller as an error, not a silent skip; the color is on disk but the audit log is incomplete.
-- **Clearing a color** — `set_color(…, None)` removes the override but leaves the feature pinned; unpinning requires a separate `pin_feature(…, false)` call.
+- **Strict validation** — only `#RGB`/`#RRGGBB` hex or `None` allowed. Bad colors fail mutation; never stored silently.
+- **No phantom features** — setting color on unknown slug errors; no side-effect feature creation.
+- **Pin is sticky** — both setting and clearing a color keep `pinned: true`. Unpinning requires separate `pin_feature(…, false)`.
+- **Timeline transactional** — failed append after persist is surfaced as error, signaling incomplete audit log.
+- **Hash collision possible** — 8 palette colors mod over all slugs; unrelated features may share colors. User-set colors break collisions.

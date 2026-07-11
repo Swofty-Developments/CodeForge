@@ -1,27 +1,34 @@
-## MCP Stdio Server
+None of the changed files relate to the MCP stdio server (`forge-mcp.rs`). The edits are:
+- `app-store.ts`: Tauri frontend store (session pane state)
+- `headless.rs`: Claude CLI indexing invocation (unrelated to the MCP server)
+- `SessionPane.tsx`: Frontend session UI component
+- `styles-chrome.ts`: New frontend styles file
 
-**Purpose**
+The living doc remains accurate and requires no updates.
 
-The `forge-mcp` binary is a hand-rolled JSON-RPC 2.0 server running over stdio that exposes CodeForge's feature index to MCP clients (e.g., Claude). It discovers the daemon by walking up from `cwd` to find `.codeforge/runtime/daemon.json`, then proxies all tool calls to the daemon's HTTP API.
+---
+# MCP Stdio Server
 
-**How it works**
+## Purpose
 
-- Reads line-delimited JSON-RPC 2.0 requests from stdin, writes responses to stdout.
-- Implements three core methods: `initialize` (MCP handshake), `tools/list` (advertises five tools), and `tools/call` (proxies to daemon).
-- Discovery: walks ancestors from `cwd` until the first `.codeforge/` is found, then reads `daemon.json` for the port.
-- Proxies each tool call to the daemon's HTTP API on a throwaway current-thread tokio runtime with a 10s timeout.
-- Returns tool-level errors (`isError: true`) for unreachable/stale daemons (readable by the model), JSON-RPC errors for bad params/unknown methods.
+Standalone stdio MCP server binary (`forge-mcp`) that exposes CodeForge's five tools (`list_features`, `get_feature`, `which_features`, `feature_timeline`, `record_note`) to any MCP client. Discovers the per-repo daemon by walking up from cwd and proxies all tool calls to the daemon's HTTP API.
 
-**Key files**
+## How it works
 
-- **crates/forge-daemon/src/bin/forge-mcp.rs** — entire server implementation (289 lines): JSON-RPC dispatch, daemon discovery, HTTP proxy.
-- **crates/forge-daemon/tests/mcp_handshake.rs** — integration test spawning the real binary, verifying handshake + tool surface + error states.
+- Hand-rolled JSON-RPC 2.0 server over stdin/stdout (no dependencies on the MCP SDK).
+- On each `tools/call`, walks up from `cwd` looking for the **first** `.codeforge/` ancestor, then reads `.codeforge/runtime/daemon.json` to extract the daemon's advertised HTTP `port`.
+- Spawns a throwaway current-thread tokio runtime to proxy the tool call to `http://127.0.0.1:{port}/api/{endpoint}` (10s timeout), then formats the JSON response and returns it as MCP text content.
+- Returns a user-facing error when the repo isn't tracked (no manifest) or the manifest is corrupt/portless (stale from an unclean exit) — never silently answers for a parent repo.
+- Tool schema frozen as a stable contract: changing signatures breaks MCP clients that hard-code these tools.
 
-**Invariants & gotchas**
+## Key files
 
-- **Frozen tool surface**: the five tools (`list_features`, `get_feature`, `which_features`, `feature_timeline`, `record_note`) and their argument names are a contract — renaming breaks deployed MCP clients.
-- **Daemon discovery stops at the first `.codeforge/`**: never walks past a corrupt manifest into a parent repo's daemon (which would answer for the wrong repo).
-- **Notifications (id-less requests) never get a reply**: the server silently skips them (e.g., `notifications/initialized`) per JSON-RPC spec.
-- **Unreachable daemon is a tool-level error, not a crash**: returned as `isError: true` so the model sees the user-facing message ("open it in CodeForge" or "reopen the repo"), not an internal error.
-- **HTTP responses are pretty-printed if JSON**: improves model readability; non-JSON bodies pass through verbatim.
-- **Throwaway tokio runtime per call**: no persistent runtime — each `tools/call` spawns a fresh current-thread runtime to avoid static lifecycle issues.
+- **`crates/forge-daemon/src/bin/forge-mcp.rs`** — complete stdio server (parsing, dispatch, discovery, proxy).
+
+## Invariants & gotchas
+
+- **Discovery stops at the FIRST `.codeforge/` ancestor** — never walks past a corrupt manifest into a parent repo's daemon, which would silently answer for the wrong repo.
+- **Tool signatures (name, argument names, types) are a frozen contract** — changing them breaks MCP clients that hard-code these tools; only add new tools or optional arguments.
+- **Requests without an `id` are notifications** — never reply, per JSON-RPC spec.
+- **Throwaway runtime per call** — no persistent HTTP pool; simple but not optimized for high-frequency calls.
+- **Pretty-prints JSON responses** for model readability; passes through non-JSON verbatim.
