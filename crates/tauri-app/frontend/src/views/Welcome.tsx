@@ -5,7 +5,7 @@ import { Show, Switch, Match, createSignal, onMount } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appStore } from "../stores/app-store";
 import { claudeCliStatus } from "../ipc";
-import type { ClaudeCliStatus } from "../types";
+import type { ClaudeAuthStatus, ClaudeCliStatus } from "../types";
 
 export function Welcome() {
   const { store } = appStore;
@@ -60,7 +60,32 @@ export function Welcome() {
           <Match when={cli()?.state === "ok" && cli()}>
             {(ok) => {
               const s = ok() as Extract<ClaudeCliStatus, { state: "ok" }>;
-              return <div class="welcome-cli-ok">{s.version} · {s.path}</div>;
+              return (
+                <>
+                  <div class="welcome-cli-ok">
+                    {s.version} · {s.path}
+                    <Show when={s.auth.state === "loggedIn" && s.auth}>
+                      {(auth) => {
+                        const a = auth() as Extract<ClaudeAuthStatus, { state: "loggedIn" }>;
+                        return <> · {a.email ?? a.method ?? "logged in"}{a.subscription ? ` (${a.subscription})` : ""}</>;
+                      }}
+                    </Show>
+                  </div>
+                  <Show when={s.auth.state === "loggedOut"}>
+                    <div class="welcome-cli-warn">
+                      <div class="welcome-cli-warn-title">Claude Code is not logged in</div>
+                      <div>Sessions and indexing will fail until you sign in:</div>
+                      <code>claude auth login</code>
+                    </div>
+                  </Show>
+                  <Show when={s.auth.state === "unknown" && s.auth}>
+                    {(auth) => {
+                      const a = auth() as Extract<ClaudeAuthStatus, { state: "unknown" }>;
+                      return <div class="welcome-cli-ok">auth status unavailable: {a.detail}</div>;
+                    }}
+                  </Show>
+                </>
+              );
             }}
           </Match>
           <Match when={cli()?.state === "notFound" && cli()}>

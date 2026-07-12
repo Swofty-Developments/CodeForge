@@ -90,9 +90,15 @@ export interface DocUpdatedPayload {
 
 /** Claude CLI health verdict from `claude_cli_status` (tagged, no conflation). */
 export type ClaudeCliStatus =
-  | { state: "ok"; path: string; version: string; shellEnvResolved: boolean }
+  | { state: "ok"; path: string; version: string; auth: ClaudeAuthStatus; shellEnvResolved: boolean }
   | { state: "broken"; path: string; detail: string; shellEnvResolved: boolean }
   | { state: "notFound"; shellEnvResolved: boolean };
+
+/** Auth verdict from `claude auth status --json`; unknown is its own state. */
+export type ClaudeAuthStatus =
+  | { state: "loggedIn"; method: string | null; email: string | null; subscription: string | null }
+  | { state: "loggedOut" }
+  | { state: "unknown"; detail: string };
 
 interface TimelineEventBase {
   id: number;
