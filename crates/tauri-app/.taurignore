@@ -1,0 +1,5 @@
+# Keep `tauri dev`'s rebuild watcher off the frontend — vite hot-reloads it,
+# and a Rust-side restart would kill live sessions (fatal when CodeForge is
+# editing its own repo).
+frontend/
+agent-sidecar/node_modules/
