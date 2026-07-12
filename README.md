@@ -18,23 +18,23 @@ An IDE built off of Claude Code — open a repository and see features, not file
 cd crates/tauri-app/frontend && npm install && cd -
 cd crates/tauri-app/agent-sidecar && npm install && cd -
 
-npm run tauri:dev
+scripts/dev.sh
 ```
 
-`npm run tauri:dev` starts the Vite dev server (:5173) and `cargo tauri dev` together.
-Prefer two terminals? Run `npm run dev` inside `crates/tauri-app/frontend`, then
-`cargo tauri dev` from the repo root (`beforeDevCommand` is intentionally empty).
-
-If port 5173 is taken, change `server.port` in `crates/tauri-app/frontend/vite.config.ts`
-and `build.devUrl` in `crates/tauri-app/tauri.conf.json` to match.
+`scripts/dev.sh` starts the Vite dev server on **:5183** (override with
+`CODEFORGE_DEV_PORT`; :5183 avoids anything already on :5173) plus `tauri dev`
+with hot reload. Re-running it replaces the previous instance; `scripts/stop.sh`
+stops everything.
 
 ## Build a standalone app
 
 ```bash
-cd crates/tauri-app
-frontend/node_modules/.bin/tauri build --bundles app
-open target/release/bundle/macos/CodeForge.app
+scripts/app.sh
 ```
+
+Builds the release bundle and opens `CodeForge.app` — self-contained, no dev
+server. (Manual equivalent: `cd crates/tauri-app && frontend/node_modules/.bin/tauri
+build --bundles app`.)
 
 The Tauri CLI ships with the frontend dev dependencies, so no global install is needed.
 
